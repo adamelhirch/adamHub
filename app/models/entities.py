@@ -1,0 +1,324 @@
+from datetime import date, datetime, timezone
+from enum import Enum
+
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class TaskStatus(str, Enum):
+    TODO = "todo"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    BLOCKED = "blocked"
+
+
+class TaskPriority(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class TransactionKind(str, Enum):
+    EXPENSE = "expense"
+    INCOME = "income"
+
+
+class HabitFrequency(str, Enum):
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
+class GoalStatus(str, Enum):
+    PLANNED = "planned"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
+
+
+class EventType(str, Enum):
+    PERSONAL = "personal"
+    WORK = "work"
+    HEALTH = "health"
+    FINANCE = "finance"
+    SOCIAL = "social"
+
+
+class SubscriptionInterval(str, Enum):
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    YEARLY = "yearly"
+
+
+class NoteKind(str, Enum):
+    NOTE = "note"
+    JOURNAL = "journal"
+    IDEA = "idea"
+
+
+class MealSlot(str, Enum):
+    BREAKFAST = "breakfast"
+    LUNCH = "lunch"
+    DINNER = "dinner"
+
+
+class CalendarCategory(str, Enum):
+    GENERAL = "general"
+    TASK = "task"
+    EVENT = "event"
+    SUBSCRIPTION = "subscription"
+    MEAL = "meal"
+
+
+class CalendarSource(str, Enum):
+    MANUAL = "manual"
+    TASK = "task"
+    EVENT = "event"
+    SUBSCRIPTION = "subscription"
+    MEAL_PLAN = "meal_plan"
+
+
+class Task(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    description: str | None = None
+    status: TaskStatus = Field(default=TaskStatus.TODO)
+    priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
+    due_at: datetime | None = None
+    estimated_minutes: int | None = None
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FinanceTransaction(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    kind: TransactionKind
+    amount: float
+    currency: str = Field(default="EUR", max_length=8)
+    category: str
+    note: str | None = None
+    occurred_at: datetime = Field(default_factory=utcnow)
+    is_recurring: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Budget(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    month: str
+    category: str
+    monthly_limit: float
+    currency: str = Field(default="EUR", max_length=8)
+    alert_threshold: float = 0.8
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class GroceryItem(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    quantity: float = 1
+    unit: str = "item"
+    category: str | None = None
+    checked: bool = False
+    priority: int = 3
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GroceryPantrySync(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    grocery_item_id: int = Field(foreign_key="groceryitem.id", index=True)
+    pantry_item_id: int = Field(foreign_key="pantryitem.id", index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Recipe(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    description: str | None = None
+    instructions: str
+    prep_minutes: int = 0
+    cook_minutes: int = 0
+    servings: int = 1
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class RecipeIngredient(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    recipe_id: int = Field(foreign_key="recipe.id", index=True)
+    name: str
+    quantity: float = 1
+    unit: str = "item"
+    note: str | None = None
+
+
+class MealPlan(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    planned_for: date
+    slot: MealSlot
+    recipe_id: int = Field(foreign_key="recipe.id", index=True)
+    servings_override: int | None = None
+    note: str | None = None
+    auto_add_missing_ingredients: bool = True
+    synced_grocery_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MealPlanCookConfirmation(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    meal_plan_id: int = Field(foreign_key="mealplan.id", index=True, unique=True)
+    confirmed_at: datetime = Field(default_factory=utcnow)
+    note: str | None = None
+    pantry_consumption: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Habit(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    description: str | None = None
+    frequency: HabitFrequency = HabitFrequency.DAILY
+    target_per_period: int = 1
+    streak: int = 0
+    active: bool = True
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class HabitLog(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    habit_id: int = Field(foreign_key="habit.id", index=True)
+    logged_at: datetime = Field(default_factory=utcnow)
+    value: int = 1
+    note: str | None = None
+
+
+class Goal(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    description: str | None = None
+    status: GoalStatus = GoalStatus.PLANNED
+    progress_percent: int = Field(default=0, ge=0, le=100)
+    target_date: date | None = None
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GoalMilestone(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    goal_id: int = Field(foreign_key="goal.id", index=True)
+    title: str
+    due_at: datetime | None = None
+    completed: bool = False
+    completed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class CalendarEvent(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    description: str | None = None
+    start_at: datetime
+    end_at: datetime
+    location: str | None = None
+    type: EventType = EventType.PERSONAL
+    all_day: bool = False
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class Subscription(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    category: str = "general"
+    amount: float
+    currency: str = Field(default="EUR", max_length=8)
+    interval: SubscriptionInterval = SubscriptionInterval.MONTHLY
+    next_due_date: date
+    autopay: bool = False
+    active: bool = True
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class PantryItem(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    quantity: float = 0
+    unit: str = "item"
+    category: str | None = None
+    min_quantity: float = 0
+    expires_at: date | None = None
+    location: str | None = None
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class Note(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    content: str
+    kind: NoteKind = NoteKind.NOTE
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    pinned: bool = False
+    mood: int | None = Field(default=None, ge=1, le=10)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class CalendarItem(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    description: str | None = None
+    start_at: datetime
+    end_at: datetime
+    all_day: bool = False
+    category: CalendarCategory = CalendarCategory.GENERAL
+    source: CalendarSource = CalendarSource.MANUAL
+    source_ref_id: int | None = Field(default=None, index=True)
+    generated: bool = False
+    completed: bool = False
+    notification_enabled: bool = True
+    reminder_offsets_min: list[int] = Field(default_factory=lambda: [60], sa_column=Column(JSON))
+    extra_data: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    last_notified_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class LinearProjectCache(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    linear_id: str = Field(index=True)
+    name: str
+    key: str | None = None
+    state: str | None = None
+    description: str | None = None
+    url: str | None = None
+    synced_at: datetime = Field(default_factory=utcnow)
+
+
+class LinearIssueCache(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    linear_id: str = Field(index=True)
+    identifier: str | None = Field(default=None, index=True)
+    title: str
+    state: str | None = None
+    priority: int | None = None
+    due_date: date | None = None
+    assignee_name: str | None = None
+    project_linear_id: str | None = Field(default=None, index=True)
+    url: str | None = None
+    synced_at: datetime = Field(default_factory=utcnow)
