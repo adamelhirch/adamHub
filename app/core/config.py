@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     db_connect_retry_delay: float = 1.5
     public_base_url: str = "http://localhost:8000"
     allow_origins: str = "*"
+
+    # Notifications (NTFY)
+    ntfy_topic: str | None = None
+    ntfy_server: str = "https://ntfy.sh"
+
     linear_api_token: str | None = None
     linear_team_id: str | None = None
 
