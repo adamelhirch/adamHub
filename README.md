@@ -31,14 +31,23 @@ cp .env.example .env
 docker compose up -d postgres
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
 If PostgreSQL is running on another host, set `ADAMHUB_DB_URL` accordingly in `.env`.
 
+Start the official frontend (`/web`) in dev:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
 Open:
-- Frontend: `http://localhost:8000/`
+- Frontend (official React/Vite): `http://localhost:5173/`
+- Frontend legacy (FastAPI static): `http://localhost:8000/`
 - App docs: `http://localhost:8000/docs`
 - Health: `http://localhost:8000/health`
 - Skill manifest: `http://localhost:8000/api/v1/skill/manifest`
@@ -66,10 +75,34 @@ Use header on all protected requests:
 - `skill`: discovery + action execution endpoint for OpenClaw
 
 Current scope:
-- 35+ REST endpoints under `/api/v1`
 - 45+ REST endpoints under `/api/v1`
 - 70+ AI actions available through `/api/v1/skill/execute`
 - one API key-secured interface for app clients and OpenClaw
+
+## Testing
+
+Backend unit/integration suite:
+
+```bash
+.venv/bin/python -m pytest
+```
+
+Optional PostgreSQL smoke test (FK-sensitive paths):
+
+```bash
+export ADAMHUB_POSTGRES_SMOKE_URL='postgresql+psycopg://adamhub:adamhub@localhost:5432/adamhub'
+.venv/bin/python -m pytest -m postgres
+```
+
+Frontend lint + unit tests:
+
+```bash
+cd web
+npm run lint
+npm run test
+```
+
+Playwright E2E checks are run against `http://localhost:5173` (frontend) and `http://localhost:8000` (API).
 
 ## Skill integration for OpenClaw
 
