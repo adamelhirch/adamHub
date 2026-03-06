@@ -6,7 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="ADAMHUB_", extra="ignore")
 
-    api_key: str = "change-me"
+    api_keys: str = "change-me"
+    
+    @property
+    def api_keys_list(self) -> list[str]:
+        return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
     db_url: str = "postgresql+psycopg://adamhub:adamhub@localhost:5432/adamhub"
     db_connect_retries: int = 20
     db_connect_retry_delay: float = 1.5
