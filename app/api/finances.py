@@ -84,3 +84,13 @@ def month_summary(
     month: int = Query(ge=1, le=12),
 ) -> FinanceMonthSummary:
     return build_month_summary(session, year, month)
+
+
+@router.get("/analytics", response_model=FinanceMonthSummary)
+def month_analytics_compat(
+    session: SessionDep,
+    year: int = Query(ge=2000, le=2100),
+    month: int = Query(ge=1, le=12),
+) -> FinanceMonthSummary:
+    """Compatibility alias for older frontend clients."""
+    return build_month_summary(session, year, month)

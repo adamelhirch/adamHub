@@ -8,8 +8,6 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import get_settings
-from app.api.router import api_router
-from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.scheduler import setup_scheduler, shutdown_scheduler
 

@@ -10,6 +10,8 @@ dependencies = [
   "psycopg[binary]>=3.2.3",
   "sqlmodel>=0.0.22",
   "uvicorn[standard]>=0.30.6",
+  "apscheduler>=3.10.4",
+  "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +23,10 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 addopts = "-q"
+testpaths = ["tests"]
+markers = [
+  "postgres: optional smoke tests against a real PostgreSQL database",
+]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
