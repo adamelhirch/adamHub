@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlmodel import Session, func, select
 
 from app.models import (
+    Budget,
     CalendarEvent,
     EventType,
     FinanceTransaction,
@@ -49,6 +50,29 @@ def build_month_summary(session: Session, year: int, month: int) -> FinanceMonth
             continue
         by_category[tx.category] = by_category.get(tx.category, 0.0) + tx.amount
 
+    month_str = f"{year}-{month:02d}"
+    budgets = session.exec(select(Budget).where(Budget.month == month_str)).all()
+    budget_analytics = []
+    
+    for b in budgets:
+        spent = by_category.get(b.category, 0.0)
+        percentage = min((spent / b.monthly_limit) * 100, 999.9) if b.monthly_limit > 0 else 0
+        
+        status = "ok"
+        if spent > b.monthly_limit:
+            status = "exceeded"
+        elif spent >= b.monthly_limit * b.alert_threshold:
+            status = "warning"
+            
+        budget_analytics.append({
+            "category": b.category,
+            "spent": round(spent, 2),
+            "limit": round(b.monthly_limit, 2),
+            "remaining": round(max(b.monthly_limit - spent, 0), 2),
+            "percentage_used": round(percentage, 1),
+            "status": status,
+        })
+
     return FinanceMonthSummary(
         year=year,
         month=month,
@@ -56,6 +80,7 @@ def build_month_summary(session: Session, year: int, month: int) -> FinanceMonth
         expense=round(expense, 2),
         net=round(income - expense, 2),
         expense_by_category={k: round(v, 2) for k, v in sorted(by_category.items())},
+        budgets=budget_analytics,
     )
 
 

@@ -89,6 +89,15 @@ class BudgetRead(BaseModel):
     created_at: datetime
 
 
+class CategoryBudgetAnalytics(BaseModel):
+    category: str
+    spent: float
+    limit: float
+    remaining: float
+    percentage_used: float
+    status: str
+
+
 class FinanceMonthSummary(BaseModel):
     year: int
     month: int
@@ -96,6 +105,7 @@ class FinanceMonthSummary(BaseModel):
     expense: float
     net: float
     expense_by_category: dict[str, float]
+    budgets: list[CategoryBudgetAnalytics]
 
 
 class GroceryItemCreate(BaseModel):
