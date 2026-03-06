@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #f5f5f7;
+  --color-foreground: #1d1d1f;
+  --color-card: #ffffff;
+  --color-border: #d2d2d7;
+  --color-primary: #0071e3;
+  --color-primary-hover: #0077ed;
+  
+  /* Dark mode variables */
+  --color-dark-background: #000000;
+  --color-dark-foreground: #f5f5f7;
+  --color-dark-card: #1c1c1e;
+  --color-dark-border: #38383a;
+  --color-dark-primary: #2997ff;
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+  
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    min-height: 100vh;
+  }
+
+  /* Automatically switch on dark mode preference */
+  @media (prefers-color-scheme: dark) {
+    body {
+      background-color: var(--color-dark-background);
+      color: var(--color-dark-foreground);
+    }
+  }
+}
+
+/* Custom Glassmorphism utility */
+@layer utilities {
+  .glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    .glass {
+      background: rgba(28, 28, 30, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+  }
+}
