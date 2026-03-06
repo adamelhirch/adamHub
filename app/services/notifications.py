@@ -1,8 +1,9 @@
 import logging
 import httpx
-from app.core.config import settings
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 async def send_push_notification(title: str, message: str, priority: int = 3, tags: list[str] | None = None) -> bool:
     """
@@ -10,29 +11,30 @@ async def send_push_notification(title: str, message: str, priority: int = 3, ta
     priority: 1 (min) to 5 (max/urgent)
     tags: short strings that ntfy translates into emojis (ex: 'warning', 'tada', 'loudspeaker')
     """
-    if not settings.ADAMHUB_NTFY_TOPIC:
+    if not settings.ntfy_topic:
         logger.warning("Notification skipped: ADAMHUB_NTFY_TOPIC is not configured.")
         return False
 
-    url = f"{settings.ADAMHUB_NTFY_SERVER.rstrip('/')}/{settings.ADAMHUB_NTFY_TOPIC}"
+    url = settings.ntfy_server.rstrip('/')
     
-    headers = {
-        "Title": title.encode("utf-8").decode("latin-1"),  # ntfy expects utf-8 disguised in headers
-        "Priority": str(priority),
+    payload = {
+        "topic": settings.ntfy_topic,
+        "message": message,
+        "title": title,
+        "priority": priority,
     }
 
     if tags:
-        headers["Tags"] = ",".join(tags)
+        payload["tags"] = tags
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 url,
-                data=message.encode("utf-8"),
-                headers=headers
+                json=payload
             )
             response.raise_for_status()
-            logger.info(f"Push notification sent successfully to topic {settings.ADAMHUB_NTFY_TOPIC}: {title}")
+            logger.info(f"Push notification sent successfully to topic {settings.ntfy_topic}: {title}")
             return True
             
     except Exception as e:
