@@ -90,3 +90,62 @@ def test_meal_confirm_unconfirm_and_calendar_completion(client, auth_headers):
         if row["source"] == "meal_plan" and row["source_ref_id"] == meal_plan_id
     )
     assert meal_item_after["completed"] is False
+
+
+def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers):
+    recipe = client.post(
+        "/api/v1/recipes",
+        headers=auth_headers,
+        json={
+            "name": "Poulet sauce soja",
+            "instructions": "Cook the chicken",
+            "servings": 2,
+            "ingredients": [
+                {
+                    "name": "Aiguillettes de poulet",
+                    "quantity": 1,
+                    "unit": "item",
+                    "store": "intermarche",
+                    "store_label": "Intermarché",
+                    "external_id": "chicken-001",
+                    "category": "Volaille",
+                    "packaging": "la barquette de 500 g",
+                    "price_text": "4,89 €",
+                    "product_url": "https://shop.test/chicken-001",
+                    "image_url": "https://img.test/chicken-001.png",
+                }
+            ],
+        },
+    )
+    assert recipe.status_code == 200
+    recipe_id = recipe.json()["id"]
+    ingredient = recipe.json()["ingredients"][0]
+    assert ingredient["store"] == "intermarche"
+    assert ingredient["store_label"] == "Intermarché"
+    assert ingredient["price_text"] == "4,89 €"
+
+    meal_plan = client.post(
+        "/api/v1/meal-plans",
+        headers=auth_headers,
+        json={
+            "planned_for": date.today().isoformat(),
+            "slot": "dinner",
+            "recipe_id": recipe_id,
+            "auto_add_missing_ingredients": False,
+        },
+    )
+    assert meal_plan.status_code == 200
+    meal_plan_id = meal_plan.json()["id"]
+
+    sync = client.post(f"/api/v1/meal-plans/{meal_plan_id}/sync-groceries", headers=auth_headers)
+    assert sync.status_code == 200
+    assert sync.json()["created_grocery_items"] == 1
+
+    groceries = client.get("/api/v1/groceries", headers=auth_headers, params={"checked": False})
+    assert groceries.status_code == 200
+    grocery = next(item for item in groceries.json() if item["name"] == "Aiguillettes de poulet")
+    assert grocery["store_label"] == "Intermarché"
+    assert grocery["external_id"] == "chicken-001"
+    assert grocery["packaging"] == "la barquette de 500 g"
+    assert grocery["price_text"] == "4,89 €"
+    assert grocery["product_url"] == "https://shop.test/chicken-001"

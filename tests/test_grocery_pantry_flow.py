@@ -8,11 +8,17 @@ def test_checking_grocery_item_updates_pantry(client, auth_headers):
             "unit": "L",
             "category": "dairy",
             "image_url": "https://img.test/milk.png",
+            "store_label": "Intermarché",
+            "external_id": "milk-123",
+            "packaging": "la bouteille de 2 L",
+            "price_text": "2,49 €",
+            "product_url": "https://shop.test/milk-123",
         },
     )
     assert created.status_code == 200
     item_id = created.json()["id"]
     assert created.json()["image_url"] == "https://img.test/milk.png"
+    assert created.json()["price_text"] == "2,49 €"
 
     checked = client.patch(f"/api/v1/groceries/{item_id}", headers=auth_headers, json={"checked": True})
     assert checked.status_code == 200
@@ -26,6 +32,11 @@ def test_checking_grocery_item_updates_pantry(client, auth_headers):
     assert pantry[0]["quantity"] == 2.0
     assert pantry[0]["unit"] == "L"
     assert pantry[0]["image_url"] == "https://img.test/milk.png"
+    assert pantry[0]["store_label"] == "Intermarché"
+    assert pantry[0]["external_id"] == "milk-123"
+    assert pantry[0]["packaging"] == "la bouteille de 2 L"
+    assert pantry[0]["price_text"] == "2,49 €"
+    assert pantry[0]["product_url"] == "https://shop.test/milk-123"
 
     # Checking again should not duplicate pantry sync.
     checked_again = client.patch(f"/api/v1/groceries/{item_id}", headers=auth_headers, json={"checked": True})
@@ -60,6 +71,55 @@ def test_create_and_update_pantry_item_image_url(client, auth_headers):
     )
     assert updated.status_code == 200
     assert updated.json()["image_url"] == "https://img.test/yaourt-new.png"
+
+
+def test_grocery_and_pantry_support_store_metadata_fields(client, auth_headers):
+    grocery = client.post(
+        "/api/v1/groceries",
+        headers=auth_headers,
+        json={
+            "name": "Sauce soja",
+            "quantity": 1,
+            "unit": "item",
+            "store_label": "Intermarché",
+            "external_id": "3533630097654",
+            "packaging": "la bouteille de 125 ml",
+            "price_text": "1,89 €",
+            "product_url": "https://shop.test/soy",
+        },
+    )
+    assert grocery.status_code == 200
+    assert grocery.json()["store_label"] == "Intermarché"
+    assert grocery.json()["packaging"] == "la bouteille de 125 ml"
+
+    pantry = client.post(
+        "/api/v1/pantry/items",
+        headers=auth_headers,
+        json={
+            "name": "Sauce soja",
+            "quantity": 1,
+            "unit": "item",
+            "store_label": "Intermarché",
+            "external_id": "3533630097654",
+            "packaging": "la bouteille de 125 ml",
+            "price_text": "1,89 €",
+            "product_url": "https://shop.test/soy",
+        },
+    )
+    assert pantry.status_code == 200
+    pantry_id = pantry.json()["id"]
+
+    updated = client.patch(
+        f"/api/v1/pantry/items/{pantry_id}",
+        headers=auth_headers,
+        json={
+            "price_text": "1,79 €",
+            "packaging": "la bouteille de 150 ml",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["price_text"] == "1,79 €"
+    assert updated.json()["packaging"] == "la bouteille de 150 ml"
 
 
 def test_grocery_and_pantry_items_allow_editing_name_fields(client, auth_headers):

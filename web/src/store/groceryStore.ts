@@ -13,6 +13,11 @@ export interface GroceryItem {
   unit: string;
   category: string | null;
   image_url: string | null;
+  store_label: string | null;
+  external_id: string | null;
+  packaging: string | null;
+  price_text: string | null;
+  product_url: string | null;
   checked: boolean;
   priority: number;
   note: string | null;
@@ -27,6 +32,11 @@ export interface PantryItem {
   unit: string;
   category: string | null;
   image_url: string | null;
+  store_label: string | null;
+  external_id: string | null;
+  packaging: string | null;
+  price_text: string | null;
+  product_url: string | null;
   min_quantity: float;
   expires_at: string | null;
   location: string | null;
@@ -95,10 +105,15 @@ interface GroceryStore {
     unit?: string;
     category?: string;
     image_url?: string;
+    store_label?: string;
+    external_id?: string;
+    packaging?: string;
+    price_text?: string;
+    product_url?: string;
     priority?: number;
     note?: string;
   }) => Promise<void>;
-  updateItem: (id: number, data: Partial<Pick<GroceryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'priority' | 'note' | 'checked'>>) => Promise<void>;
+  updateItem: (id: number, data: Partial<Pick<GroceryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url' | 'priority' | 'note' | 'checked'>>) => Promise<void>;
   toggleCheck: (id: number, checked: boolean) => Promise<void>;
   deleteItem: (id: number) => Promise<void>;
   clearChecked: () => Promise<void>;
@@ -116,12 +131,17 @@ interface GroceryStore {
     unit?: string;
     category?: string;
     image_url?: string;
+    store_label?: string;
+    external_id?: string;
+    packaging?: string;
+    price_text?: string;
+    product_url?: string;
     min_quantity?: number;
     expires_at?: string;
     location?: string;
     note?: string;
   }) => Promise<PantryItem>;
-  updatePantryItem: (id: number, data: Partial<Pick<PantryItem, 'quantity' | 'min_quantity' | 'expires_at' | 'location' | 'note' | 'unit' | 'category' | 'image_url'>>) => Promise<void>;
+  updatePantryItem: (id: number, data: Partial<Pick<PantryItem, 'name' | 'quantity' | 'min_quantity' | 'expires_at' | 'location' | 'note' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url'>>) => Promise<void>;
   deletePantryItem: (id: number) => Promise<void>;
   consumePantryItem: (id: number, amount: number) => Promise<void>;
 
@@ -173,6 +193,9 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
     try {
       const res = await api.patch(`/groceries/${id}`, { checked });
       set((s) => ({ items: s.items.map((i) => (i.id === id ? res.data : i)) }));
+      if (checked) {
+        await Promise.all([get().fetchPantry(), get().fetchPantryOverview()]);
+      }
     } catch {
       // Revert on error
       set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, checked: !checked } : i)) }));

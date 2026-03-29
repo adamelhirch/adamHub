@@ -50,6 +50,25 @@ class HabitFrequency(str, Enum):
     WEEKLY = "weekly"
 
 
+class FitnessSessionType(str, Enum):
+    STRENGTH = "strength"
+    CARDIO = "cardio"
+    MOBILITY = "mobility"
+    RECOVERY = "recovery"
+    MIXED = "mixed"
+
+
+class FitnessSessionStatus(str, Enum):
+    PLANNED = "planned"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+
+
+class FitnessExerciseMode(str, Enum):
+    REPS = "reps"
+    DURATION = "duration"
+
+
 class GoalStatus(str, Enum):
     PLANNED = "planned"
     ACTIVE = "active"
@@ -98,6 +117,7 @@ class CalendarSource(str, Enum):
     EVENT = "event"
     SUBSCRIPTION = "subscription"
     MEAL_PLAN = "meal_plan"
+    FITNESS_SESSION = "fitness_session"
 
 
 class Task(SQLModel, table=True):
@@ -142,6 +162,11 @@ class GroceryItem(SQLModel, table=True):
     unit: str = "item"
     category: str | None = None
     image_url: str | None = None
+    store_label: str | None = None
+    external_id: str | None = Field(default=None, index=True)
+    packaging: str | None = None
+    price_text: str | None = None
+    product_url: str | None = None
     checked: bool = False
     priority: int = 3
     note: str | None = None
@@ -161,10 +186,17 @@ class Recipe(SQLModel, table=True):
     name: str
     description: str | None = None
     instructions: str
+    steps: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    utensils: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     prep_minutes: int = 0
     cook_minutes: int = 0
     servings: int = 1
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    source_url: str | None = None
+    source_platform: str | None = None
+    source_title: str | None = None
+    source_description: str | None = None
+    source_transcript: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -176,6 +208,14 @@ class RecipeIngredient(SQLModel, table=True):
     quantity: float = 1
     unit: str = "item"
     note: str | None = None
+    store: SupermarketStore | None = None
+    store_label: str | None = None
+    external_id: str | None = Field(default=None, index=True)
+    category: str | None = None
+    packaging: str | None = None
+    price_text: str | None = None
+    product_url: str | None = None
+    image_url: str | None = None
 
 
 class MealPlan(SQLModel, table=True):
@@ -220,6 +260,36 @@ class HabitLog(SQLModel, table=True):
     logged_at: datetime = Field(default_factory=utcnow)
     value: int = 1
     note: str | None = None
+
+
+class FitnessSession(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    session_type: FitnessSessionType = FitnessSessionType.MIXED
+    planned_at: datetime = Field(default_factory=utcnow, index=True)
+    duration_minutes: int = 45
+    exercises: list[dict | str] = Field(default_factory=list, sa_column=Column(JSON))
+    note: str | None = None
+    status: FitnessSessionStatus = FitnessSessionStatus.PLANNED
+    completed_at: datetime | None = None
+    actual_duration_minutes: int | None = None
+    effort_rating: int | None = Field(default=None, ge=1, le=10)
+    calories_burned: float | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FitnessMeasurement(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    recorded_at: datetime = Field(default_factory=utcnow, index=True)
+    body_weight_kg: float | None = None
+    body_fat_pct: float | None = None
+    resting_hr: int | None = None
+    sleep_hours: float | None = None
+    steps: int | None = None
+    note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Goal(SQLModel, table=True):
@@ -280,6 +350,11 @@ class PantryItem(SQLModel, table=True):
     unit: str = "item"
     category: str | None = None
     image_url: str | None = None
+    store_label: str | None = None
+    external_id: str | None = Field(default=None, index=True)
+    packaging: str | None = None
+    price_text: str | None = None
+    product_url: str | None = None
     min_quantity: float = 0
     expires_at: date | None = None
     location: str | None = None

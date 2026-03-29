@@ -31,12 +31,14 @@ const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
 const ACCOUNT_TYPE_COLORS: Record<AccountType, string> = {
   checking: '#6366f1', savings: '#10b981', investment: '#f59e0b', crypto: '#8b5cf6', other: '#94a3b8',
 };
+const SURFACE = 'rounded-[28px] border border-white/70 bg-white/82 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl';
+const SURFACE_SOFT = 'rounded-[24px] border border-white/70 bg-white/76 shadow-[0_14px_42px_rgba(15,23,42,0.06)] backdrop-blur-xl';
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 function SummaryCard({ label, value, sub, icon, green }: { label: string; value: string; sub?: string; icon: React.ReactNode; green?: boolean }) {
   return (
-    <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-5 flex items-center gap-4">
-      <div className={`p-3 rounded-xl ${green ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
+    <div className={`${SURFACE} p-5 flex items-center gap-4`}>
+      <div className={`p-3 rounded-2xl ${green ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
         {icon}
       </div>
       <div>
@@ -180,12 +182,13 @@ export default function FinancesPage() {
   const intervalLabel: Record<string, string> = { weekly: '/sem', monthly: '/mois', yearly: '/an' };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-apple-gray-50 overflow-hidden">
+    <div className="relative flex-1 flex flex-col h-full bg-transparent overflow-hidden">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-apple-gray-200 bg-white shadow-sm z-10 flex items-center justify-between gap-4 flex-wrap">
+      <div className="sticky top-0 z-20 flex items-center justify-between gap-4 flex-wrap border-b border-white/70 bg-white/76 px-4 py-4 shadow-[0_10px_40px_rgba(15,23,42,0.06)] backdrop-blur-2xl md:px-8 md:py-5">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-black">Finances</h1>
-          <p className="text-apple-gray-500 mt-0.5 text-sm">Suivez vos dépenses et revenus</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-apple-gray-500">Finances</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-black">Vue d’ensemble</h1>
+          <p className="text-apple-gray-500 mt-1 text-sm">Suivez vos dépenses, revenus et patrimoine dans une surface plus lisible.</p>
         </div>
         {/* Month picker */}
         <div className="flex items-center gap-2">
@@ -202,16 +205,16 @@ export default function FinancesPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-apple-gray-200 bg-white px-8">
-        <div className="flex gap-1">
+      <div className="border-b border-white/60 bg-white/60 px-4 backdrop-blur-xl md:px-8">
+        <div className="flex gap-1 overflow-x-auto py-2">
           {TAB_LIST.map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${
+              className={`rounded-full px-4 py-2.5 text-sm font-semibold transition-all ${
                 activeTab === tab
-                  ? 'border-apple-blue text-apple-blue'
-                  : 'border-transparent text-apple-gray-500 hover:text-black'
+                  ? 'bg-white text-black shadow-[0_8px_24px_rgba(15,23,42,0.06)] ring-1 ring-black/5'
+                  : 'text-apple-gray-500 hover:bg-white/70 hover:text-black'
               }`}
             >
               {tab}
@@ -221,7 +224,7 @@ export default function FinancesPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.75rem)]">
         <div className="max-w-3xl mx-auto space-y-6">
 
           {/* ── OVERVIEW TAB ─────────────────────────────────────── */}
@@ -250,7 +253,7 @@ export default function FinancesPage() {
               </div>
 
               {/* Budgets */}
-              <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-6">
+              <div className={SURFACE_SOFT + ' p-6'}>
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="text-base font-semibold text-black">Budgets — {monthStr}</h2>
                   <button
@@ -297,7 +300,7 @@ export default function FinancesPage() {
 
               {/* Expenses by category */}
               {summary?.expense_by_category && Object.keys(summary.expense_by_category).length > 0 && (
-                <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-6">
+                <div className={SURFACE_SOFT + ' p-6'}>
                   <h2 className="text-base font-semibold text-black mb-4">Dépenses par catégorie</h2>
                   <div className="space-y-3">
                     {Object.entries(summary.expense_by_category)
@@ -337,7 +340,7 @@ export default function FinancesPage() {
 
               {/* Add transaction form */}
               {showTxForm && (
-                <form onSubmit={handleAddTransaction} className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-5 space-y-4">
+                <form onSubmit={handleAddTransaction} className={SURFACE + ' p-5 space-y-4'}>
                   <h3 className="text-sm font-semibold text-black">Ajouter une transaction</h3>
                   {/* Kind toggle */}
                   <div className="flex rounded-xl overflow-hidden border border-apple-gray-200 w-fit">
@@ -391,7 +394,7 @@ export default function FinancesPage() {
               )}
 
               {/* Transactions list */}
-              <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm overflow-hidden divide-y divide-apple-gray-100">
+              <div className={SURFACE + ' overflow-hidden divide-y divide-apple-gray-100'}>
                 {transactions.length === 0 ? (
                   <p className="text-center text-apple-gray-400 py-12 text-sm">Aucune transaction pour ce mois.</p>
                 ) : (
@@ -430,11 +433,11 @@ export default function FinancesPage() {
               {/* Projection summary */}
               {projection && (
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-5">
+                  <div className={SURFACE_SOFT + ' p-5'}>
                     <p className="text-xs font-semibold text-apple-gray-500 uppercase tracking-wider">Total mensuel</p>
                     <p className="text-2xl font-bold text-black mt-1">{fmtEur(projection.monthly_total)}</p>
                   </div>
-                  <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-5">
+                  <div className={SURFACE_SOFT + ' p-5'}>
                     <p className="text-xs font-semibold text-apple-gray-500 uppercase tracking-wider">Total annuel</p>
                     <p className="text-2xl font-bold text-black mt-1">{fmtEur(projection.yearly_total)}</p>
                   </div>
@@ -442,7 +445,7 @@ export default function FinancesPage() {
               )}
 
               {/* Subscriptions list */}
-              <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm overflow-hidden divide-y divide-apple-gray-100">
+              <div className={SURFACE + ' overflow-hidden divide-y divide-apple-gray-100'}>
                 {subscriptions.length === 0 ? (
                   <p className="text-center text-apple-gray-400 py-12 text-sm">Aucun abonnement enregistré.</p>
                 ) : (
@@ -495,7 +498,7 @@ export default function FinancesPage() {
               </div>
 
               {/* Accounts */}
-              <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-6">
+              <div className={SURFACE_SOFT + ' p-6'}>
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="text-base font-semibold text-black flex items-center gap-2"><Landmark className="w-4 h-4" />Comptes</h2>
                   <button onClick={() => setShowAccForm(!showAccForm)} className="flex items-center gap-1.5 text-sm font-medium text-apple-blue hover:text-blue-700">
@@ -568,7 +571,7 @@ export default function FinancesPage() {
               </div>
 
               {/* Savings Goals */}
-              <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-6">
+              <div className={SURFACE_SOFT + ' p-6'}>
                 <div className="flex items-center justify-between mb-5">
                   <h2 className="text-base font-semibold text-black flex items-center gap-2"><Target className="w-4 h-4" />Objectifs d'épargne</h2>
                   <button onClick={() => setShowGoalForm(!showGoalForm)} className="flex items-center gap-1.5 text-sm font-medium text-apple-blue hover:text-blue-700">

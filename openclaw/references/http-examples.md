@@ -18,37 +18,12 @@ curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/skill/manifest"
 ```
 
-## Auth check (frontend/iOS bootstrap)
-
-```bash
-curl -s -H "X-API-Key: $API_KEY" \
-  "$BASE_URL/api/v1/auth/check"
-```
-
 ## Create task
 
 ```bash
 curl -s -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"action":"task.create","input":{"title":"Pay rent","priority":"urgent"}}' \
-  "$BASE_URL/api/v1/skill/execute"
-```
-
-## Update task
-
-```bash
-curl -s -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"task.update","input":{"task_id":12,"priority":"high"}}' \
-  "$BASE_URL/api/v1/skill/execute"
-```
-
-## Add expense
-
-```bash
-curl -s -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"finance.add_transaction","input":{"kind":"expense","amount":39.9,"currency":"EUR","category":"food"}}' \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
@@ -61,6 +36,54 @@ curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
+## Patrimony overview
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"patrimony.overview","input":{}}' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
+## Add patrimony account
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"patrimony.add_account","input":{"name":"Livret A","account_type":"savings","balance":1200}}' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
+## Fitness overview
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"fitness.overview","input":{}}' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
+## Create fitness session
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action":"fitness.create_session",
+    "input":{
+      "title":"Push session",
+      "session_type":"strength",
+      "planned_at":"2026-03-31T18:00:00Z",
+      "duration_minutes":50,
+      "exercises":[
+        {"name":"Push-ups","mode":"reps","reps":20},
+        {"name":"Plank","mode":"duration","duration_minutes":3}
+      ]
+    }
+  }' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
 ## Add grocery item
 
 ```bash
@@ -70,44 +93,90 @@ curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
-## Create habit and log
+## Search a supermarket product
 
 ```bash
 curl -s -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"action":"habit.create","input":{"name":"Workout","frequency":"daily"}}' \
-  "$BASE_URL/api/v1/skill/execute"
-
-curl -s -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"habit.log","input":{"habit_id":3,"value":1,"note":"30 min"}}' \
+  -d '{"action":"supermarket.search","input":{"store":"intermarche","queries":["poulet"],"max_results":10}}' \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
-## Create goal
+## Add a store-backed grocery item
 
 ```bash
 curl -s -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"action":"goal.create","input":{"title":"Run 10k","status":"active","progress_percent":10}}' \
+  -d '{
+    "action":"grocery.add_item",
+    "input":{
+      "name":"Aiguillettes de poulet",
+      "quantity":1,
+      "unit":"item",
+      "category":"viande",
+      "store_label":"Intermarche",
+      "external_id":"123456",
+      "packaging":"barquette de 270 g",
+      "price_text":"3,89 EUR",
+      "product_url":"https://www.intermarche.com/...",
+      "image_url":"https://...",
+      "note":"selected from supermarket search"
+    }
+  }' \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
-## Create event
+## Fetch a video source
 
 ```bash
 curl -s -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"action":"event.create","input":{"title":"Doctor","start_at":"2026-03-10T10:00:00Z","end_at":"2026-03-10T10:30:00Z","type":"health"}}' \
+  -d '{"action":"video.fetch","input":{"url":"https://www.youtube.com/watch?v=example"}}' \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
-## Subscription projection
+## Add recipe manually
 
 ```bash
 curl -s -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"action":"subscription.projection","input":{"currency":"EUR"}}' \
+  -d '{
+    "action":"recipe.add",
+    "input":{
+      "name":"Pasta al limone",
+      "description":"Simple citrus pasta",
+      "instructions":"Cook pasta. Mix sauce. Combine.",
+      "steps":["Boil the pasta","Prepare the sauce","Combine and serve"],
+      "utensils":["pot","pan","spatula"],
+      "prep_minutes":10,
+      "cook_minutes":15,
+      "servings":2,
+      "tags":["pasta","quick"],
+      "ingredients":[
+        {"name":"pasta","quantity":200,"unit":"g"},
+        {"name":"lemon","quantity":1,"unit":"item","store":"intermarche","store_label":"Intermarche","external_id":"lemon-001","category":"Fruits","packaging":"1 piece","price_text":"0,45 EUR"},
+        {"name":"parmesan","quantity":40,"unit":"g"}
+      ]
+    }
+  }' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
+## Plan meal + auto groceries
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"meal_plan.add","input":{"planned_at":"2026-03-31T19:30:00Z","recipe_id":7,"auto_add_missing_ingredients":true}}' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
+## Confirm cooked meal
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"meal_plan.confirm_cooked","input":{"meal_plan_id":42}}' \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
@@ -120,33 +189,6 @@ curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
-## Plan meal + auto groceries
-
-```bash
-curl -s -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"meal_plan.add","input":{"planned_for":"2026-03-06","slot":"dinner","recipe_id":7,"auto_add_missing_ingredients":true}}' \
-  "$BASE_URL/api/v1/skill/execute"
-```
-
-## Confirm cooked meal (consume pantry now)
-
-```bash
-curl -s -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"meal_plan.confirm_cooked","input":{"meal_plan_id":42}}' \
-  "$BASE_URL/api/v1/skill/execute"
-```
-
-## Undo cooked confirmation (restore pantry)
-
-```bash
-curl -s -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"meal_plan.unconfirm_cooked","input":{"meal_plan_id":42}}' \
-  "$BASE_URL/api/v1/skill/execute"
-```
-
 ## Sync unified calendar
 
 ```bash
@@ -156,9 +198,10 @@ curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
-## Export ICS for iPhone/Google/Notion Calendar
+## Export ICS
 
 ```bash
 curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/calendar/export.ics" > adamhub-calendar.ics
 ```
+

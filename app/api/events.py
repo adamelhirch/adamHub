@@ -5,8 +5,9 @@ from sqlmodel import select
 
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
-from app.models import CalendarEvent, EventType
+from app.models import CalendarEvent, CalendarSource, EventType
 from app.schemas import EventCreate, EventRead, EventUpdate
+from app.services.calendar_hub import validate_calendar_slot_free
 
 router = APIRouter(prefix="/events", tags=["events"], dependencies=[Depends(require_api_key)])
 
@@ -15,6 +16,15 @@ router = APIRouter(prefix="/events", tags=["events"], dependencies=[Depends(requ
 def create_event(payload: EventCreate, session: SessionDep) -> EventRead:
     if payload.end_at <= payload.start_at:
         raise HTTPException(status_code=400, detail="end_at must be after start_at")
+    try:
+        validate_calendar_slot_free(
+            session,
+            payload.start_at,
+            payload.end_at,
+            source=CalendarSource.EVENT,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     event = CalendarEvent(**payload.model_dump())
     session.add(event)
@@ -83,6 +93,16 @@ def update_event(event_id: int, payload: EventUpdate, session: SessionDep) -> Ev
 
     if event.end_at <= event.start_at:
         raise HTTPException(status_code=400, detail="end_at must be after start_at")
+    try:
+        validate_calendar_slot_free(
+            session,
+            event.start_at,
+            event.end_at,
+            source=CalendarSource.EVENT,
+            source_ref_id=event.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     event.updated_at = datetime.now(timezone.utc)
     session.add(event)

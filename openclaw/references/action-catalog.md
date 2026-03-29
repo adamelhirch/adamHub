@@ -30,21 +30,43 @@ Request shape:
 - `finance.list_budgets`
 - `finance.month_summary`
 
-## Groceries
+## Fitness
 
+- `fitness.overview`
+- `fitness.list_sessions`
+- `fitness.create_session`
+- `fitness.update_session`
+- `fitness.complete_session`
+- `fitness.delete_session`
+- `fitness.list_measurements`
+- `fitness.add_measurement`
+- `fitness.update_measurement`
+- `fitness.delete_measurement`
+
+## Groceries and supermarket
+
+- `supermarket.list_stores`
+- `supermarket.search`
 - `grocery.add_item`
 - `grocery.list_items`
 - `grocery.update_item`
 - `grocery.check_item`
 - `grocery.delete_item`
 
+## Video intake
+
+- `video.fetch`
+
 ## Recipes
 
 - `recipe.add`
 - `recipe.list`
 - `recipe.get`
+- `recipe.update`
+- `recipe.confirm_cooked`
+- `recipe.delete`
 
-## Meal Plans
+## Meal plans
 
 - `meal_plan.add`
 - `meal_plan.list`
@@ -102,6 +124,18 @@ Request shape:
 - `subscription.upcoming`
 - `subscription.projection`
 
+## Patrimony
+
+- `patrimony.overview`
+- `patrimony.list_accounts`
+- `patrimony.add_account`
+- `patrimony.update_account`
+- `patrimony.delete_account`
+- `patrimony.list_goals`
+- `patrimony.add_goal`
+- `patrimony.update_goal`
+- `patrimony.delete_goal`
+
 ## Pantry
 
 - `pantry.add_item`
@@ -129,8 +163,17 @@ Request shape:
 
 ## Field highlights
 
-- money dates: `occurred_at` in ISO datetime
+- money datetimes: ISO 8601
 - budget month: `YYYY-MM`
 - date fields: `YYYY-MM-DD`
 - enums are strict and case-sensitive
-- update actions require id + at least one field to patch
+- update actions require an id plus at least one field to patch
+- `supermarket.search` must be the source for store-backed grocery and pantry metadata
+- `recipe.add` and `recipe.update` accept `steps`, `utensils`, source metadata, and store-backed ingredient fields
+- `recipe.confirm_cooked` consumes pantry directly from a recipe
+- `meal_plan.confirm_cooked` consumes pantry from a planned recipe
+- `meal_plan.unconfirm_cooked` restores pantry stock
+- `fitness.create_session` and `fitness.update_session` are subject to calendar overlap validation
+- `patrimony.overview` returns net worth, active accounts, and savings goals
+- `video.fetch` returns normalized metadata, transcript, and transcript segments; when captions are unavailable it can fall back to local Whisper
+

@@ -13,13 +13,35 @@
   --font-sans: "SF Pro Rounded", "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
+html {
+  background: #eef2f8;
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background-color: #ffffff;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 12% 16%, rgba(10, 132, 255, 0.14), transparent 28%),
+    radial-gradient(circle at 88% 12%, rgba(99, 102, 241, 0.09), transparent 24%),
+    radial-gradient(circle at 82% 84%, rgba(48, 209, 88, 0.05), transparent 26%),
+    linear-gradient(180deg, #fcfcfb 0%, #eef2f8 100%);
   color: #000000;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(10, 132, 255, 0.18);
+  color: #001b3a;
 }
 
 /* Hide scrollbar for smooth iOS feel */
@@ -29,4 +51,45 @@ body {
 * {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@keyframes drift {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(18px, -14px, 0) scale(1.04);
+  }
+}
+
+@keyframes driftReverse {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-14px, 16px, 0) scale(1.06);
+  }
+}
+
+.orb-drift {
+  animation: drift 18s ease-in-out infinite;
+}
+
+.orb-drift-reverse {
+  animation: driftReverse 22s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-drift,
+  .orb-drift-reverse {
+    animation: none;
+  }
 }

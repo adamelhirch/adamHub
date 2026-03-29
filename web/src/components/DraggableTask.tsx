@@ -8,19 +8,20 @@ interface Props {
   task: Task;
   isOverlay?: boolean;
   isScheduled?: boolean;
+  compactMobile?: boolean;
 }
 
-export default function DraggableTask({ task, isOverlay, isScheduled }: Props) {
+export default function DraggableTask({ task, isOverlay, isScheduled, compactMobile }: Props) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
-    data: task,
+    data: { kind: 'task' as const, task },
   });
 
   const style = {
     transform: CSS.Translate.toString(transform),
   };
 
-  const baseClasses = "flex flex-col rounded-lg border shadow-xs cursor-grab active:cursor-grabbing transition-all ring-1 ring-black/5 hover:shadow-md group relative overflow-hidden backdrop-blur-md";
+  const baseClasses = "flex flex-col rounded-lg border shadow-xs cursor-grab active:cursor-grabbing transition-all ring-1 ring-black/5 hover:shadow-md group relative overflow-hidden backdrop-blur-md touch-none";
   const draggingClasses = isDragging ? "opacity-40 scale-95" : "opacity-100";
   const overlayClasses = isOverlay ? "rotate-2 shadow-2xl cursor-grabbing z-50 opacity-95 scale-105" : "";
   const scheduledClasses = isScheduled ? "h-full w-full absolute" : "w-full mb-2";
@@ -30,14 +31,14 @@ export default function DraggableTask({ task, isOverlay, isScheduled }: Props) {
   const startTime = startTimeMatch ? startTimeMatch[1] : null;
 
   // Responsive styling based on duration
-  const isTiny = isScheduled && task.duration <= 15;
-  const isSmall = isScheduled && task.duration > 15 && task.duration <= 30;
+  const isTiny = isScheduled && task.duration <= 15 && !compactMobile;
+  const isSmall = isScheduled && task.duration > 15 && task.duration <= 30 && !compactMobile;
 
   // Dynamic padding and text sizing
-  const paddingClass = isTiny ? "p-0.5 px-1 sm:p-1" : isSmall ? "p-1.5" : "p-2";
-  const titleTextClass = isTiny ? "text-[9px] leading-none" : isSmall ? "text-[10px] leading-tight" : "text-xs leading-tight";
+  const paddingClass = compactMobile && isScheduled ? "p-2" : isTiny ? "p-0.5 px-1 sm:p-1" : isSmall ? "p-1.5" : "p-2";
+  const titleTextClass = compactMobile && isScheduled ? "text-sm leading-tight" : isTiny ? "text-[9px] leading-none" : isSmall ? "text-[10px] leading-tight" : "text-xs leading-tight";
 
-  const showDurationInline = isScheduled && task.duration <= 45;
+  const showDurationInline = isScheduled && (compactMobile || task.duration <= 45);
 
   return (
     <div

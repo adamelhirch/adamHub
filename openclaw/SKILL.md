@@ -1,308 +1,257 @@
 # AdamHUB Master Skill for OpenClaw
 
-Use this as the primary skill when OpenClaw must manage a full personal-life system through AdamHUB API.
+Use this as the primary skill when OpenClaw must manage AdamHUB as one coherent personal-life system.
 
-This file is intentionally complete and production-oriented.
+The source of truth is always the live manifest returned by:
+
+- `GET /api/v1/skill/manifest`
+
+As of `2026-03-29`, the skill surface exposes `99` actions.
 
 ## 1) Runtime contract
 
 - API base URL: `http://adamhub-api:8000`
 - Auth header on every protected request: `X-API-Key: <ADAMHUB_API_KEY>`
+- Health endpoint: `GET /health`
 - Manifest endpoint: `GET /api/v1/skill/manifest`
 - Unified action endpoint: `POST /api/v1/skill/execute`
-- Health endpoint: `GET /health`
+- Supermarket store registry: `supermarket.list_stores`
+- Video transcript intake: `video.fetch`
 
 ## 2) Core objective
 
-Convert natural language goals into deterministic API actions while preserving:
+Turn natural language requests into deterministic AdamHUB actions while preserving:
 
-- correctness (no fabricated ids or values)
-- safety (confirm risky writes)
-- traceability (echo what changed)
-- compact user communication (short, clear, actionable)
+- correctness
+- safety
+- traceability
+- compact user communication
 
-## 3) Startup routine (mandatory)
+## 3) Startup routine
 
 At session start:
 
-1. Call `GET /health` once.
-2. Call `GET /api/v1/skill/manifest` once.
-3. Cache `actions` and `input_schema` for the session.
-4. If manifest fetch fails, report blocker and stop mutations.
+1. Call `GET /health`.
+2. Call `GET /api/v1/skill/manifest`.
+3. Cache the `actions` list and each `input_schema`.
+4. If the manifest fails, stop all write attempts.
 
 ## 4) Universal execution loop
 
-For each user request:
+For each request:
 
-1. Intent classify: `read`, `write`, `multi-step`, `unclear`.
-2. If `unclear`, ask one minimal clarifying question.
-3. Choose action(s) from manifest only.
-4. Build payload with strict field mapping.
-5. Validate required fields before request.
-6. For risky writes, request confirmation.
-7. Execute API call.
-8. If error, recover (see section 10).
-9. Return concise result with ids and key values.
-10. For multi-step goals, suggest next step.
+1. Classify intent as `read`, `write`, `multi-step`, or `unclear`.
+2. Ask one short clarifying question only if a required field is missing or the target is ambiguous.
+3. Resolve ids from live data, never by guessing.
+4. Select only actions that exist in the current manifest.
+5. Validate the payload against the manifest schema and domain rules.
+6. Ask for confirmation before risky writes.
+7. Execute.
+8. On failure, inspect `detail`, recover once, and retry once.
+9. Return a concise result with ids and key fields.
 
 ## 5) Risk policy
 
-Treat these as risky writes requiring explicit user confirmation:
+Require explicit confirmation before:
 
-- finance transaction amount > 200 (or currency equivalent)
-- habit deactivation (`habit.set_active` with `active=false`)
-- bulk-like operations requested by user language ("close all", "check all")
-- edits where target id is ambiguous
+- high-value finance writes
+- destructive deletes (`recipe.delete`, `grocery.delete_item`, `pantry.delete_item`, `fitness.delete_session`, `patrimony.delete_account`, `patrimony.delete_goal`, etc.)
+- habit deactivation
+- any bulk-like request
+- any ambiguous target resolution
 
-Never execute risky writes on implicit intent.
+Never perform destructive writes on implicit intent.
 
 ## 6) Action routing map
 
-Use this map for intent-to-action selection.
+- global status -> `dashboard.overview`
+- tasks -> `task.create|task.list|task.update|task.complete`
+- finances -> `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
+- patrimony -> `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
+- groceries -> `supermarket.list_stores|supermarket.search|grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
+- pantry -> `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
+- recipes -> `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.delete`
+- meal planning -> `meal_plan.add|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked|meal_plan.log_cooked`
+- calendar -> `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder`
+- fitness -> `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
+- habits -> `habit.create|habit.list|habit.set_active|habit.log|habit.list_logs`
+- goals -> `goal.create|goal.list|goal.get|goal.update|goal.add_milestone|goal.list_milestones|goal.update_milestone`
+- events -> `event.create|event.list|event.upcoming|event.get|event.update|event.delete`
+- subscriptions -> `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
+- notes -> `note.create|note.list|note.get|note.update|note.delete|note.journal`
+- linear -> `linear.projects|linear.issues|linear.issue_create|linear.sync`
+- video ingestion -> `video.fetch`
 
-- planning/global status -> `dashboard.overview`
-- add/list/update/complete task -> `task.create|list|update|complete`
-- log/list expenses or income -> `finance.add_transaction|list_transactions`
-- budget setup/review -> `finance.create_budget|list_budgets`
-- monthly money synthesis -> `finance.month_summary`
-- shopping list operations -> `grocery.add_item|list_items|update_item|check_item|delete_item` (checked items auto-sync pantry)
-- recipe knowledge base -> `recipe.add|list|get`
-- meal planning + auto grocery from pantry gaps -> `meal_plan.add|list|update|delete|sync_groceries|confirm_cooked|unconfirm_cooked|log_cooked` (plan with `planned_at` datetime; planning does not consume pantry; `confirm_cooked` consumes pantry; `unconfirm_cooked` rolls it back; `log_cooked` records an unplanned cooked recipe)
-- unified agenda + reminders -> `calendar.sync|list_items|agenda|due_reminders|ack_reminder|add_item|update_item|delete_item`
-- habits setup/tracking -> `habit.create|list|set_active|log|list_logs`
-- goals and milestones -> `goal.create|list|get|update|add_milestone|list_milestones|update_milestone`
-- events and agenda -> `event.create|list|upcoming|get|update|delete`
-- recurring bills -> `subscription.create|list|get|update|upcoming|projection`
-- pantry inventory -> `pantry.add_item|list_items|update_item|consume_item|delete_item|overview`
-- notes and journal -> `note.create|list|get|update|delete|journal`
-- linear project management -> `linear.projects|issues|issue_create|sync`
+## 7) Domain rules you must respect
 
-Full details are in:
-- `references/action-catalog.md`
+### Grocery and supermarket rules
 
-## 7) Field and value normalization
+- Do not fabricate store metadata.
+- If the user wants a store-backed grocery or pantry item, run `supermarket.search` first.
+- If no usable result exists, create a generic item instead of forcing a fake store match.
 
-Normalize user input before calls:
+### Recipe and pantry rules
 
-- boolean strings to bool (`"yes" -> true`, `"no" -> false`)
-- integer-like ids to int
-- amount to float with dot decimal
-- month summary params:
-  - `year`: 4 digits
-  - `month`: 1..12
-- budget month format: `YYYY-MM`
-- datetime format: ISO 8601 UTC when possible (`YYYY-MM-DDTHH:MM:SSZ`)
+- `recipe.add` and `recipe.update` can store custom ingredients and store-backed ingredients.
+- Planning a meal does not consume pantry.
+- `meal_plan.confirm_cooked` and `recipe.confirm_cooked` do consume pantry.
+- `meal_plan.unconfirm_cooked` restores previously consumed pantry stock.
 
-If a required value is missing, ask for it instead of guessing.
+### Calendar rules
 
-## 8) ID resolution strategy
+- AdamHUB enforces non-overlap across tasks, meals, events, subscriptions, manual items, and fitness sessions.
+- When a create/update fails with an overlap error, propose a new free slot rather than insisting on the same one.
+
+### Fitness rules
+
+- Sessions can contain exercises tracked by reps or by duration.
+- Fitness sessions also participate in calendar conflict validation.
+
+### Video rules
+
+- `video.fetch` returns transcript + metadata only.
+- OpenClaw is responsible for recipe extraction from the transcript.
+
+## 8) Field normalization
+
+Normalize before calling the API:
+
+- booleans from user language to `true/false`
+- ids to integers when the schema expects integers
+- floats with dot decimal
+- `YYYY-MM` for budgets
+- `YYYY-MM-DD` for date-only values
+- ISO 8601 UTC for datetimes whenever possible
+
+If a required field is missing, ask instead of guessing.
+
+## 9) ID resolution strategy
+
+When the user does not provide an id:
+
+- task id -> `task.list`
+- grocery item id -> `grocery.list_items`
+- pantry item id -> `pantry.list_items`
+- recipe id -> `recipe.list`
+- meal plan id -> `meal_plan.list`
+- calendar item id -> `calendar.list_items` or `calendar.agenda`
+- fitness session id -> `fitness.list_sessions`
+- fitness measurement id -> `fitness.list_measurements`
+- patrimony account id -> `patrimony.list_accounts`
+- patrimony goal id -> `patrimony.list_goals`
+- habit id -> `habit.list`
+- goal id -> `goal.list`
+- event id -> `event.list`
+- subscription id -> `subscription.list`
+- note id -> `note.list`
+- linear project id -> `linear.projects`
 
 Never invent ids.
 
-When id is missing:
+## 10) Playbook shortcuts
 
-- task id -> call `task.list`
-- grocery item id -> call `grocery.list_items`
-- recipe id -> call `recipe.list`
-- habit id -> call `habit.list`
-- goal id -> call `goal.list`
-- event id -> call `event.list`
-- subscription id -> call `subscription.list`
-- pantry item id -> call `pantry.list_items`
-- note id -> call `note.list`
-- meal plan id -> call `meal_plan.list`
-- linear project id -> call `linear.projects`
-- calendar item id -> call `calendar.list_items` or `calendar.agenda`
+### Meal + shopping
 
-Then present best candidate ids and ask user to pick.
+1. `recipe.list`
+2. `recipe.get` for the chosen recipe
+3. `meal_plan.add` with `auto_add_missing_ingredients=true` if the user wants it scheduled
+4. Inspect missing ingredients
+5. `supermarket.search`
+6. Add groceries only from selected results or fall back to generic items
 
-## 9) Multi-domain playbooks
+### Video to recipe
 
-Use small deterministic chains for common requests:
+1. `video.fetch`
+2. Infer recipe structure from transcript and description
+3. `recipe.add` or `recipe.update`
+4. If planning is requested, `meal_plan.add`
+5. If shopping is requested, search the supermarket first
 
-- "organize my day"
-  1. `dashboard.overview`
-  2. `task.list` with `only_open=true`
-  3. optional `task.create` or `task.update`
+### Fitness week setup
 
-- "check this month money"
-  1. `finance.month_summary`
-  2. optional `finance.list_transactions`
-  3. optional `finance.create_budget`
+1. `fitness.overview`
+2. `fitness.list_sessions`
+3. `calendar.list_items` or `calendar.agenda` if slot validation is needed
+4. `fitness.create_session` for approved slots
+5. `fitness.complete_session` only after the workout is actually done
 
-- "meal + shopping"
-  1. `recipe.list`
-  2. `meal_plan.add` with `auto_add_missing_ingredients=true`
-  3. `meal_plan.sync_groceries` (if needed)
-  4. `grocery.list_items`
+### Patrimony review
 
-- "linear weekly check"
-  1. `linear.sync`
-  2. `linear.projects`
-  3. `linear.issues`
-  4. optional `linear.issue_create`
+1. `patrimony.overview`
+2. `patrimony.list_accounts`
+3. `patrimony.list_goals`
+4. Optional updates with `patrimony.update_account` or `patrimony.update_goal`
 
-- "daily executive agenda"
-  1. `calendar.sync`
-  2. `calendar.agenda`
-  3. `calendar.due_reminders`
-  4. optional `calendar.ack_reminder`
+### Daily agenda
 
-More variants are in:
-- `references/playbooks.md`
+1. `calendar.sync`
+2. `calendar.agenda`
+3. `calendar.due_reminders`
+4. `task.list` with `only_open=true` if the user wants execution planning
 
-## 10) Error handling and recovery
+More detail lives in `references/playbooks.md`.
 
-If API returns non-2xx:
+## 11) Error handling
+
+If the API returns non-2xx:
 
 1. Read `detail` exactly.
-2. Detect class:
-   - auth error -> check API key and header name
-   - validation error -> fix payload types/fields
-   - not found -> refresh list and resolve id
-   - unknown action -> refetch manifest and retry action selection
-3. Retry once after correction.
-4. If still failing, report blocker with last payload.
+2. Classify the failure:
+   - auth error
+   - validation error
+   - missing id / target not found
+   - overlap / business rule conflict
+   - unknown action
+3. Refresh the relevant list or manifest if needed.
+4. Retry once with a corrected payload.
+5. If it still fails, surface the blocker and stop.
 
-Detailed matrix:
+Detailed recovery notes:
+
 - `references/error-recovery.md`
 
-## 11) User response format
+## 12) Response style
 
-After each successful mutation:
+After a successful write:
 
-- include action name
-- include primary id
-- include 2-4 key fields
-- include one optional next step
+- mention the action
+- mention the primary id
+- mention 2 to 4 meaningful fields
+- optionally suggest one next step
 
-Example style:
+After a read:
 
-- "Created task #12: Pay rent (priority: high, due: 2026-03-05). Want me to split it into subtasks?"
+- summarize the main signal first
+- then list the most relevant items
+- avoid raw JSON unless explicitly requested
 
-For read operations:
-
-- summarize top signal first
-- then short bullet list of items
-- avoid dumping raw JSON unless user asks
-
-## 12) Privacy and security constraints
+## 13) Privacy and safety constraints
 
 - Never expose `ADAMHUB_API_KEY`.
-- Never include secrets in chat output.
-- Do not fabricate financial values.
-- Do not infer recurring finance behavior unless explicitly requested.
-- Do not execute destructive intent on ambiguous wording.
+- Never print secrets.
+- Never fabricate finance amounts.
+- Never fabricate supermarket product metadata.
+- Never silently consume pantry stock.
+- Never bypass conflict rules by pretending a slot is free.
 
-## 13) Full action list (quick index)
+## 14) Quick action index
 
 - `dashboard.overview`
-- `task.create`
-- `task.list`
-- `task.update`
-- `task.complete`
-- `finance.add_transaction`
-- `finance.list_transactions`
-- `finance.create_budget`
-- `finance.list_budgets`
-- `finance.month_summary`
-- `grocery.add_item`
-- `grocery.list_items`
-- `grocery.update_item`
-- `grocery.check_item`
-- `grocery.delete_item`
-- `recipe.add`
-- `recipe.list`
-- `recipe.get`
-- `meal_plan.add`
-- `meal_plan.list`
-- `meal_plan.update`
-- `meal_plan.delete`
-- `meal_plan.sync_groceries`
-- `meal_plan.confirm_cooked`
-- `meal_plan.unconfirm_cooked`
-- `calendar.add_item`
-- `calendar.list_items`
-- `calendar.update_item`
-- `calendar.delete_item`
-- `calendar.agenda`
-- `calendar.sync`
-- `calendar.due_reminders`
-- `calendar.ack_reminder`
-- `habit.create`
-- `habit.list`
-- `habit.set_active`
-- `habit.log`
-- `habit.list_logs`
-- `goal.create`
-- `goal.list`
-- `goal.get`
-- `goal.update`
-- `goal.add_milestone`
-- `goal.list_milestones`
-- `goal.update_milestone`
-- `event.create`
-- `event.list`
-- `event.upcoming`
-- `event.get`
-- `event.update`
-- `event.delete`
-- `subscription.create`
-- `subscription.list`
-- `subscription.get`
-- `subscription.update`
-- `subscription.upcoming`
-- `subscription.projection`
-- `pantry.add_item`
-- `pantry.list_items`
-- `pantry.update_item`
-- `pantry.consume_item`
-- `pantry.delete_item`
-- `pantry.overview`
-- `note.create`
-- `note.list`
-- `note.get`
-- `note.update`
-- `note.delete`
-- `note.journal`
-- `linear.projects`
-- `linear.issues`
-- `linear.issue_create`
-- `linear.sync`
+- `task.create|task.list|task.update|task.complete`
+- `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
+- `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
+- `supermarket.list_stores|supermarket.search`
+- `grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
+- `video.fetch`
+- `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.delete`
+- `meal_plan.add|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked|meal_plan.log_cooked`
+- `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder`
+- `habit.create|habit.list|habit.set_active|habit.log|habit.list_logs`
+- `goal.create|goal.list|goal.get|goal.update|goal.add_milestone|goal.list_milestones|goal.update_milestone`
+- `event.create|event.list|event.upcoming|event.get|event.update|event.delete`
+- `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
+- `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
+- `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
+- `note.create|note.list|note.get|note.update|note.delete|note.journal`
+- `linear.projects|linear.issues|linear.issue_create|linear.sync`
 
-## 14) Domain skills
-
-Use these local references for domain-specific behavior:
-
-- action catalog: `references/action-catalog.md`
-- playbooks: `references/playbooks.md`
-- error recovery: `references/error-recovery.md`
-- HTTP examples: `references/http-examples.md`
-
-## 15) HTTP templates
-
-Manifest:
-
-```http
-GET /api/v1/skill/manifest
-X-API-Key: <ADAMHUB_API_KEY>
-```
-
-Execute:
-
-```http
-POST /api/v1/skill/execute
-X-API-Key: <ADAMHUB_API_KEY>
-Content-Type: application/json
-
-{
-  "action": "task.create",
-  "input": {
-    "title": "Pay rent",
-    "priority": "urgent"
-  }
-}
-```
-
-More examples:
-- `references/http-examples.md`

@@ -1,30 +1,80 @@
 # AdamHUB
 
-AdamHUB is a modular API-first app to manage daily life in one place:
-- tasks and priorities
-- personal finances and monthly summary
-- grocery list
-- recipes
-- meal planning (breakfast/lunch/dinner) with pantry-gap auto grocery sync
-- unified calendar hub (tasks, events, subscriptions, meals, manual entries)
-- habits
-- goals and milestones
-- calendar events
-- subscriptions / recurring bills
-- pantry inventory
-- notes and journal entries
-- Linear projects/issues sync + issue creation
+AdamHUB is a personal operations hub with:
 
-It also exposes a skill interface (`/api/v1/skill`) so an external AI agent like OpenClaw can interact with your data safely.
+- one FastAPI backend (`app/`)
+- one React/Vite frontend (`web/`)
+- one OpenClaw-compatible skill surface (`/api/v1/skill/*` + `openclaw/`)
 
-## Why this shape
+It is designed to keep daily planning, groceries, pantry, recipes, fitness, money, and AI orchestration in the same system.
 
-- One backend to avoid app sprawl
-- PostgreSQL-first setup for reliability and growth
-- API key auth so both your app and AI agent can use the same API
-- Skill execution endpoint for AI action orchestration
+## Snapshot
 
-## Quick start
+State audited on `2026-03-29`:
+
+- `110` REST routes under `/api/v1`
+- `99` skill actions exposed through `/api/v1/skill/execute`
+- `6` shipped frontend pages in `web/src/pages`
+- PostgreSQL-first persistence with SQLModel + Alembic
+
+## Current product surface
+
+Frontend pages already shipped:
+
+- `Calendar`: unified timeline, drag and drop scheduling, overlap prevention, meals, fitness sessions, tasks, events, subscriptions, manual items
+- `Tasks`: task capture, filtering, scheduling, completion
+- `Finances`: month summary, budgets, transactions, subscriptions, patrimony overview
+- `Groceries`: grocery list + pantry, store-backed items, Intermarche search/mapping, pantry restock from checked groceries
+- `Recipes`: manual recipe authoring, ingredient-by-ingredient editing, meal planning, supermarket-backed ingredients, cooked confirmation
+- `Fitness`: session planning, measurements, stats, calendar-aware scheduling
+
+REST modules available even when the UI is partial or missing:
+
+- `auth`
+- `tasks`
+- `finances`
+- `groceries`
+- `pantry`
+- `recipes`
+- `meal-plans`
+- `calendar`
+- `fitness`
+- `patrimony`
+- `habits`
+- `goals`
+- `events`
+- `subscriptions`
+- `notes`
+- `linear`
+- `supermarket`
+- `video`
+- `skill`
+
+## Core cross-domain flows
+
+- Grocery items can be generic or store-backed. Store-backed items should come from `supermarket.search`, not from fabricated metadata.
+- Checking a grocery item can restock pantry through `app/services/grocery_pantry.py`.
+- Recipes can contain custom ingredients and store-backed ingredients.
+- Meal plans and direct `recipe.confirm_cooked` consume pantry only when the meal/recipe is actually confirmed as cooked.
+- Calendar is the shared planning layer. Tasks, meals, subscriptions, events, fitness sessions, and manual items are validated against overlap rules.
+- Video ingestion returns transcript + source metadata only. Recipe extraction logic is intentionally delegated to OpenClaw.
+
+## Repo map
+
+- `app/api/`: FastAPI routers per domain
+- `app/services/`: business rules and cross-domain orchestration
+- `app/models/entities.py`: SQLModel tables and enums
+- `app/schemas/dto.py`: public API and skill contracts
+- `app/skill/actions.py`: skill manifest + execution backend
+- `web/src/pages/`: main app screens
+- `web/src/store/`: frontend domain stores
+- `openclaw/`: OpenClaw master skill, references, and specialized skills
+- `tests/`: backend tests for domain flows and invariants
+- `docs/`: project-level documentation for future modifications
+
+## Local development
+
+Backend:
 
 ```bash
 cp .env.example .env
@@ -35,9 +85,7 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-If PostgreSQL is running on another host, set `ADAMHUB_DB_URL` accordingly in `.env`.
-
-Start the official frontend (`/web`) in dev:
+Frontend:
 
 ```bash
 cd web
@@ -45,119 +93,59 @@ npm install
 npm run dev
 ```
 
-Open:
-- Frontend (official React/Vite): `http://localhost:5173/`
-- Frontend production (after `npm run build`, served by FastAPI): `http://localhost:8000/`
-- App docs: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/health`
-- Skill manifest: `http://localhost:8000/api/v1/skill/manifest`
+Default URLs:
 
-Use header on all protected requests:
+- frontend dev: `http://localhost:5173/`
+- backend docs: `http://localhost:8000/docs`
+- health: `http://localhost:8000/health`
+- skill manifest: `http://localhost:8000/api/v1/skill/manifest`
+
+Auth header for protected routes:
+
 - `X-API-Key: <ADAMHUB_API_KEY>`
-- quick auth test: `GET /api/v1/auth/check`
-
-## API modules
-
-- `tasks`: create, list, update status and priorities
-- `finances`: add transactions and compute month summaries
-- `groceries`: maintain a practical shopping list
-- `groceries`: maintain shopping list; checked items automatically restock pantry
-- `recipes`: store recipes and ingredient items
-- `meal-plans`: assign recipes to breakfast/lunch/dinner, auto-add missing ingredients to groceries, then confirm-cooked to consume pantry (and unconfirm if needed)
-- `calendar`: unified agenda + reminders + iCal export for iOS/Google/Notion Calendar subscription
-- `habits`: define and log recurring habits
-- `goals`: track long-term goals and milestones
-- `events`: manage calendar events and upcoming agenda
-- `subscriptions`: recurring bills and cost projections
-- `pantry`: home inventory, low stock, expiring items
-- `notes`: notes, journal entries, ideas, pinned notes
-- `linear`: sync Linear projects/issues, read cache, create issue
-- `supermarket`: Intermarché product search cache + durable mappings for pantry and recipe ingredients
-- `skill`: discovery + action execution endpoint for OpenClaw
-
-Current scope:
-- 45+ REST endpoints under `/api/v1`
-- 70+ AI actions available through `/api/v1/skill/execute`
-- one API key-secured interface for app clients and OpenClaw
-- NTFY push reminders with deep links to `/calendar` or `/pantry`
-- Intermarché v1 workflow: search on demand, cache recent hits, and link chosen products to pantry items or recipe ingredients
-
-## Supermarket integration v1
-
-Intermarché is now integrated in a scoped v1 mode:
-- `GET /api/v1/supermarket/stores` lists supported providers
-- `POST /api/v1/supermarket/search` runs an on-demand search and stores a short-lived cache
-- `GET /api/v1/supermarket/search` reads cached recent results
-- `PUT /api/v1/supermarket/mappings/recipe-ingredients/{id}` links a recipe ingredient to a product
-- `PUT /api/v1/supermarket/mappings/pantry-items/{id}` links a pantry item to a product
-- `GET /api/v1/supermarket/mappings/...` reads the current active mapping
-- `DELETE /api/v1/supermarket/mappings/{mapping_id}` deactivates a mapping
-
-Out of scope for this version:
-- no full catalog scrape
-- no Drive account login
-- no automatic cart filling yet
 
 ## Testing
 
-Backend unit/integration suite:
+Backend:
 
 ```bash
 .venv/bin/python -m pytest
 ```
 
-Optional PostgreSQL smoke test (FK-sensitive paths):
+Optional PostgreSQL smoke tests:
 
 ```bash
 export ADAMHUB_POSTGRES_SMOKE_URL='postgresql+psycopg://adamhub:adamhub@localhost:5432/adamhub'
 .venv/bin/python -m pytest -m postgres
 ```
 
-Frontend lint + unit tests:
+Frontend build:
 
 ```bash
 cd web
-npm run lint
-npm run test
+npm run build
 ```
 
-Playwright E2E checks are run against `http://localhost:5173` (frontend) and `http://localhost:8000` (API).
+## Modification rules
 
-NTFY setup:
-- set `ADAMHUB_NTFY_TOPIC` and optional `ADAMHUB_NTFY_SERVER`
-- scheduler sends deep-link notifications:
-  - pantry expiry -> `/pantry?item=<id>`
-  - calendar reminders -> `/calendar?day=YYYY-MM-DD&item=<id>`
+Before changing a domain, read:
 
-## Skill integration for OpenClaw
+- `docs/project-tour.md`
+- `docs/phase2_1_matrix.md`
+- `openclaw/SKILL.md` if the change should also be exposed to AI
 
-1. Configure your OpenClaw skill to call:
-   - `GET /api/v1/skill/manifest` to discover actions
-   - `POST /api/v1/skill/execute` to run actions
-2. Inject these env vars in OpenClaw service:
-   - `ADAMHUB_API_URL`
-   - `ADAMHUB_API_KEY`
-   - `ADAMHUB_LINEAR_API_TOKEN` (if using Linear actions)
-   - `ADAMHUB_LINEAR_TEAM_ID` (optional default team for issue creation)
-3. Keep both services on the same private Docker network in your VPS.
+Keep these invariants in mind:
 
-Calendar interoperability:
-- `POST /api/v1/calendar/sync` to project tasks/events/subscriptions/meal-plans into one agenda
-- `GET /api/v1/calendar/export.ics` to subscribe from iPhone Calendar, Google Calendar, or Notion Calendar
+- use UTC end-to-end for scheduling data
+- do not bypass overlap validation for calendar-linked domains
+- do not create fake store metadata; use supermarket search first
+- pantry should only move because of explicit stock actions, checked groceries, or cooked recipes/meal plans
+- if a backend capability becomes important to OpenClaw, update both `app/skill/actions.py` and `openclaw/`
 
-## Next ideas
+## Documentation index
 
-Potential additions:
-- contacts and relationship CRM
-- travel planner with checklists
-- workout and health metrics
-- file vault for receipts and documents
-- notification webhooks (email/telegram/discord)
+- [Project tour](docs/project-tour.md)
+- [Coverage matrix](docs/phase2_1_matrix.md)
+- [OpenClaw master skill](openclaw/SKILL.md)
+- [OpenClaw action catalog](openclaw/references/action-catalog.md)
 
-## Deploy on same VPS
-
-```bash
-docker compose up -d --build
-```
-
-Then route through your reverse proxy (Caddy/Nginx/Traefik) with TLS.

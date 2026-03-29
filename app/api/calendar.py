@@ -19,6 +19,7 @@ from app.services.calendar_hub import (
     build_ics,
     list_due_reminders,
     sync_generated_calendar_items,
+    validate_calendar_slot_free,
 )
 
 router = APIRouter(prefix="/calendar", tags=["calendar"], dependencies=[Depends(require_api_key)])
@@ -32,6 +33,10 @@ def _sync_generated(session: SessionDep) -> None:
 def create_calendar_item(payload: CalendarItemCreate, session: SessionDep) -> CalendarItemRead:
     if payload.end_at <= payload.start_at:
         raise HTTPException(status_code=400, detail="end_at must be after start_at")
+    try:
+        validate_calendar_slot_free(session, payload.start_at, payload.end_at)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     item = CalendarItem(
         **payload.model_dump(),
@@ -117,6 +122,15 @@ def update_calendar_item(item_id: int, payload: CalendarItemUpdate, session: Ses
 
     if item.end_at <= item.start_at:
         raise HTTPException(status_code=400, detail="end_at must be after start_at")
+    try:
+        validate_calendar_slot_free(
+            session,
+            item.start_at,
+            item.end_at,
+            ignore_calendar_item_id=item.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     item.updated_at = datetime.now(UTC)
     session.add(item)

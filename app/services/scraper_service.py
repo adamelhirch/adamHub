@@ -7,6 +7,7 @@ from sqlmodel import Session, delete, select
 
 from app.models import SupermarketSearchCache, SupermarketStore
 from app.services.scrapers.intermarche import search_intermarche
+from app.services.supermarket_registry import get_store_definition
 
 CACHE_TTL_DAYS = 15
 
@@ -73,7 +74,8 @@ async def fetch_search_results(
     max_results: int = 10,
     promotions_only: bool = False,
 ) -> list[dict[str, Any]]:
-    if store is not SupermarketStore.INTERMARCHE:
+    definition = get_store_definition(store)
+    if definition is None or not definition.supports_search:
         raise ValueError(f"Unsupported supermarket store: {store}")
 
     raw_results = await search_intermarche(

@@ -100,6 +100,14 @@ def compute_recipe_missing_ingredients(
                     available_quantity=round(available, 3),
                     missing_quantity=round(needed_qty - available, 3),
                     unit=base_unit,
+                    store=ingredient.store,
+                    store_label=ingredient.store_label,
+                    external_id=ingredient.external_id,
+                    category=ingredient.category,
+                    packaging=ingredient.packaging,
+                    price_text=ingredient.price_text,
+                    product_url=ingredient.product_url,
+                    image_url=ingredient.image_url,
                 )
             )
 
@@ -139,7 +147,13 @@ def add_missing_to_grocery(
             name=ing.name,
             quantity=max(0.0, ing.missing_quantity),
             unit=ing.unit,
-            category="meal-plan",
+            category=ing.category or "meal-plan",
+            image_url=ing.image_url,
+            store_label=ing.store_label,
+            external_id=ing.external_id,
+            packaging=ing.packaging,
+            price_text=ing.price_text,
+            product_url=ing.product_url,
             checked=False,
             priority=2,
             note=f"{note_prefix}: {ing.name}" if note_prefix else None,
@@ -150,6 +164,64 @@ def add_missing_to_grocery(
 
     session.commit()
     return added
+
+
+def consume_recipe_ingredients(
+    session: Session,
+    recipe: Recipe,
+    servings_override: int | None = None,
+) -> list[dict]:
+    pantry_items = session.exec(select(PantryItem)).all()
+    now = datetime.now(timezone.utc)
+    consumption: list[dict] = []
+
+    for ingredient, needed_qty_raw, needed_base, base_unit in _scaled_recipe_ingredients(
+        session, recipe, servings_override
+    ):
+        remaining = max(0.0, needed_base)
+        consumed_base = 0.0
+        normalized_name = _normalize_name(ingredient.name)
+
+        matching = [
+            item
+            for item in pantry_items
+            if _normalize_name(item.name) == normalized_name and _to_base(item.quantity or 0.0, item.unit or "item")[1] == base_unit
+        ]
+        matching.sort(key=lambda x: x.updated_at)
+
+        for item in matching:
+            if remaining <= 1e-9:
+                break
+            available_base, _ = _to_base(item.quantity or 0.0, item.unit or "item")
+            if available_base <= 1e-9:
+                continue
+
+            consume_base = min(remaining, available_base)
+            if consume_base <= 1e-9:
+                continue
+
+            new_available = max(0.0, available_base - consume_base)
+            item.quantity = round(max(0.0, _from_base(new_available, item.unit or "item")), 3)
+            item.updated_at = now
+            session.add(item)
+
+            consumed_base += consume_base
+            remaining -= consume_base
+
+        consumed_raw = _from_base(consumed_base, ingredient.unit or "item")
+        missing_raw = _from_base(max(0.0, remaining), ingredient.unit or "item")
+        consumption.append(
+            {
+                "name": ingredient.name,
+                "unit": ingredient.unit or "item",
+                "required_quantity": round(max(0.0, needed_qty_raw), 3),
+                "consumed_quantity": round(max(0.0, consumed_raw), 3),
+                "missing_quantity": round(max(0.0, missing_raw), 3),
+            }
+        )
+
+    session.commit()
+    return consumption
 
 
 def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
@@ -220,54 +292,8 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
     if not recipe:
         raise ValueError("recipe_id not found")
 
-    pantry_items = session.exec(select(PantryItem)).all()
     now = datetime.now(timezone.utc)
-    consumption: list[dict] = []
-
-    for ingredient, needed_qty_raw, needed_base, base_unit in _scaled_recipe_ingredients(
-        session, recipe, meal_plan.servings_override
-    ):
-        remaining = max(0.0, needed_base)
-        consumed_base = 0.0
-        normalized_name = _normalize_name(ingredient.name)
-
-        matching = [
-            item
-            for item in pantry_items
-            if _normalize_name(item.name) == normalized_name and _to_base(item.quantity or 0.0, item.unit or "item")[1] == base_unit
-        ]
-        matching.sort(key=lambda x: x.updated_at)
-
-        for item in matching:
-            if remaining <= 1e-9:
-                break
-            available_base, _ = _to_base(item.quantity or 0.0, item.unit or "item")
-            if available_base <= 1e-9:
-                continue
-
-            consume_base = min(remaining, available_base)
-            if consume_base <= 1e-9:
-                continue
-
-            new_available = max(0.0, available_base - consume_base)
-            item.quantity = round(max(0.0, _from_base(new_available, item.unit or "item")), 3)
-            item.updated_at = now
-            session.add(item)
-
-            consumed_base += consume_base
-            remaining -= consume_base
-
-        consumed_raw = _from_base(consumed_base, ingredient.unit or "item")
-        missing_raw = _from_base(max(0.0, remaining), ingredient.unit or "item")
-        consumption.append(
-            {
-                "name": ingredient.name,
-                "unit": ingredient.unit or "item",
-                "required_quantity": round(max(0.0, needed_qty_raw), 3),
-                "consumed_quantity": round(max(0.0, consumed_raw), 3),
-                "missing_quantity": round(max(0.0, missing_raw), 3),
-            }
-        )
+    consumption = consume_recipe_ingredients(session, recipe, meal_plan.servings_override)
 
     confirmation = MealPlanCookConfirmation(
         meal_plan_id=meal_plan.id,

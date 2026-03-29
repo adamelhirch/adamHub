@@ -7,86 +7,98 @@ Use these sequences for high-confidence multi-step execution.
 Goal: reduce overload and produce a clear action list.
 
 1. `dashboard.overview`
-2. `task.list` with `only_open=true` and `limit=50`
-3. If too many open tasks, propose top 3 by urgency due date.
-4. On user choice, run `task.update` for priority/status/due date.
-5. Close done work with `task.complete`.
+2. `task.list` with `only_open=true`
+3. `calendar.agenda` if timing matters
+4. propose the top actions
+5. execute approved `task.update` or `task.complete`
+
+## Weekly groceries refresh
+
+Goal: keep the list actionable before shopping.
+
+1. `grocery.list_items` with `checked=false`
+2. inspect pantry gaps if relevant with `pantry.overview` or `pantry.list_items`
+3. for store-backed requests, call `supermarket.search`
+4. add selected results via `grocery.add_item`
+5. if no valid result exists, create a generic grocery item
+6. mark bought items through `grocery.check_item`
+
+## Meal planning sprint
+
+Goal: choose meals and build a trustworthy shopping list.
+
+1. `recipe.list`
+2. `recipe.get` for the selected recipes
+3. `meal_plan.add`
+4. inspect missing ingredients
+5. `supermarket.search` for each missing ingredient or tight batch
+6. create groceries only from selected results or generic fallbacks
+7. `grocery.list_items` to verify
+8. when cooked, `meal_plan.confirm_cooked`
+9. if confirmation was wrong, `meal_plan.unconfirm_cooked`
+
+## Video to recipe
+
+Goal: turn an Instagram, TikTok, or YouTube video into a recipe entry.
+
+1. `video.fetch`
+2. infer recipe name, ingredients, utensils, and steps from transcript + description
+3. search supermarket only if store-backed ingredients are desired
+4. `recipe.add` or `recipe.update`
+5. if planning is needed, `meal_plan.add`
+6. if the user wants immediate pantry deduction without planning, `recipe.confirm_cooked`
+
+## Fitness week setup
+
+Goal: plan sessions without colliding with existing scheduled work.
+
+1. `fitness.overview`
+2. `fitness.list_sessions`
+3. `calendar.list_items` or `calendar.agenda`
+4. identify free slots
+5. `fitness.create_session`
+6. after the session is done, `fitness.complete_session`
+
+## Patrimony review
+
+Goal: understand net worth and update savings goals.
+
+1. `patrimony.overview`
+2. `patrimony.list_accounts`
+3. `patrimony.list_goals`
+4. optional `patrimony.update_account`
+5. optional `patrimony.update_goal`
+
+## Daily unified agenda
+
+Goal: keep web, calendar subscriptions, and AI aligned on one timeline.
+
+1. `calendar.sync`
+2. `calendar.agenda`
+3. `calendar.due_reminders`
+4. `calendar.ack_reminder`
 
 ## Monthly money review
 
 Goal: identify spend pattern and net position.
 
-1. `finance.month_summary` for chosen month.
-2. If user asks detail, call `finance.list_transactions` with `year` and `month`.
-3. If over budget concern, call `finance.list_budgets` for same month.
-4. If missing budget, propose and create with `finance.create_budget`.
-
-## Weekly groceries refresh
-
-Goal: keep list actionable before shopping.
-
-1. `grocery.list_items` with `checked=false`.
-2. Add missing items via `grocery.add_item`.
-3. Adjust quantities via `grocery.update_item`.
-4. During checkout, mark bought via `grocery.check_item`.
-
-## Meal planning sprint
-
-Goal: choose meals and build shopping list.
-
-1. `recipe.list`
-2. For selected recipes, `recipe.get` to inspect ingredients.
-3. Create slots with `meal_plan.add` (`auto_add_missing_ingredients=true`).
-4. If needed, force refresh with `meal_plan.sync_groceries`.
-5. Confirm resulting list via `grocery.list_items` with `checked=false`.
-6. After meal is actually done, call `meal_plan.confirm_cooked` to consume pantry.
-7. If confirmation was wrong, call `meal_plan.unconfirm_cooked` to restore pantry.
-
-## Daily unified agenda
-
-Goal: keep iOS/web/AI perfectly aligned on one timeline.
-
-1. `calendar.sync`
-2. `calendar.agenda` for current day
-3. `calendar.due_reminders` with `within_minutes=180`
-4. Acknowledge delivered reminders with `calendar.ack_reminder`
-
-## Habit reboot
-
-Goal: restart routine with measurable tracking.
-
-1. `habit.list` with `active_only=true`
-2. If needed, create habit via `habit.create`.
-3. Log completion using `habit.log`.
-4. Echo streak value after each log.
-5. Pause noisy habits only with explicit confirmation via `habit.set_active`.
+1. `finance.month_summary`
+2. `finance.list_transactions`
+3. `finance.list_budgets`
+4. optional `finance.create_budget`
+5. optional `subscription.projection`
 
 ## Cross-domain sunday planning
 
-Goal: align tasks, money, meals, and habits.
+Goal: align tasks, money, groceries, meals, fitness, and patrimony.
 
 1. `dashboard.overview`
 2. `finance.month_summary`
-3. `task.list` with `only_open=true`
+3. `task.list`
 4. `recipe.list`
-5. `grocery.list_items` with `checked=false`
-6. `habit.list` with `active_only=true`
-7. Propose a concise weekly plan and execute approved writes.
+5. `grocery.list_items`
+6. `fitness.overview`
+7. `patrimony.overview`
+8. propose a concise weekly plan
+9. execute only approved writes
 
-## Long-term roadmap review
-
-Goal: align goals, milestones, and calendar.
-
-1. `goal.list` with status `active`
-2. For each selected goal, `goal.list_milestones`
-3. `event.upcoming` with `days=14`
-4. Optional updates with `goal.update` and `goal.update_milestone`
-
-## Monthly fixed-cost audit
-
-Goal: understand recurring cost pressure and due dates.
-
-1. `subscription.list` with `active_only=true`
-2. `subscription.projection`
-3. `subscription.upcoming` with `days=30`
-4. Optional cleanup with `subscription.update` to deactivate stale services

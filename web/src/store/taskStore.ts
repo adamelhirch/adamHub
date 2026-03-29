@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import api from '../lib/api';
-import { format, parseISO } from 'date-fns';
 
 export type SubTask = { id: string; title: string; completed: boolean };
 
@@ -52,7 +51,7 @@ function mapToBackendTask(t: Partial<TaskItem>) {
        // Using a naive parse, assuming local timezone for now
        try {
          const [year, month, day, hm] = t.slotId.split('-');
-         payload.due_at = new Date(`${year}-${month}-${day}T${hm}:00`).toISOString();
+         payload.due_at = `${year}-${month}-${day}T${hm}:00Z`;
        } catch (e) {
          console.warn("Invalid slotId format", t.slotId);
        }
@@ -96,8 +95,12 @@ function mapToFrontendTask(b: any): TaskItem {
    if (b.due_at) {
       // Format to yyyy-MM-dd-HH:mm
       try {
-        const d = parseISO(b.due_at);
-        slotId = format(d, 'yyyy-MM-dd-HH:mm');
+        // Force UTC extraction from the ISO string
+        const parts = b.due_at.split(/[-T:Z.]/);
+        if (parts.length >= 5) {
+          const [yyyy, MM, dd, HH, mm] = parts;
+          slotId = `${yyyy}-${MM}-${dd}-${HH}:${mm}`;
+        }
       } catch (e) {}
    }
 

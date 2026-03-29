@@ -1,11 +1,11 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
-from app.models import MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
+from app.models import CalendarSource, MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
 from app.schemas import (
     MealCookLogCreate,
     MealPlanConfirmCooked,
@@ -21,6 +21,7 @@ from app.services.meal_planning import (
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
 )
+from app.services.calendar_hub import validate_calendar_slot_free
 
 router = APIRouter(prefix="/meal-plans", tags=["meal-plans"], dependencies=[Depends(require_api_key)])
 
@@ -55,6 +56,10 @@ def create_meal_plan(payload: MealPlanCreate, session: SessionDep) -> MealPlanRe
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     planned_at = _resolve_planned_at(payload)
+    try:
+        validate_calendar_slot_free(session, planned_at, planned_at + timedelta(minutes=75), source=CalendarSource.MEAL_PLAN)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     meal_plan = MealPlan(**payload.model_dump(exclude={"planned_at"}), planned_at=planned_at)
     if meal_plan.planned_for is None:
         meal_plan.planned_for = planned_at.date()
@@ -107,6 +112,19 @@ def update_meal_plan(meal_plan_id: int, payload: MealPlanUpdate, session: Sessio
         recipe = session.get(Recipe, updates["recipe_id"])
         if not recipe:
             raise HTTPException(status_code=404, detail="Recipe not found")
+
+    preview_payload = payload.model_copy(update=updates)
+    next_planned_at = _resolve_planned_at(preview_payload, current=meal_plan.planned_at)
+    try:
+        validate_calendar_slot_free(
+            session,
+            next_planned_at,
+            next_planned_at + timedelta(minutes=75),
+            source=CalendarSource.MEAL_PLAN,
+            source_ref_id=meal_plan.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     reset_cook_confirmation = (
         ("planned_at" in updates and updates.get("planned_at") != meal_plan.planned_at)

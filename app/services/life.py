@@ -94,10 +94,17 @@ def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
         name=recipe.name,
         description=recipe.description,
         instructions=recipe.instructions,
+        steps=recipe.steps or [],
+        utensils=recipe.utensils or [],
         prep_minutes=recipe.prep_minutes,
         cook_minutes=recipe.cook_minutes,
         servings=recipe.servings,
         tags=recipe.tags,
+        source_url=recipe.source_url,
+        source_platform=recipe.source_platform,
+        source_title=recipe.source_title,
+        source_description=recipe.source_description,
+        source_transcript=recipe.source_transcript,
         ingredients=[
             {
                 "id": ing.id,
@@ -106,6 +113,14 @@ def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
                 "quantity": ing.quantity,
                 "unit": ing.unit,
                 "note": ing.note,
+                "store": ing.store,
+                "store_label": ing.store_label,
+                "external_id": ing.external_id,
+                "category": ing.category,
+                "packaging": ing.packaging,
+                "price_text": ing.price_text,
+                "product_url": ing.product_url,
+                "image_url": ing.image_url,
             }
             for ing in ingredients
         ],

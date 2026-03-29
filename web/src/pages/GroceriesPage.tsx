@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import {
   ShoppingBasket, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
-  ChevronDown, ChevronRight, Minus, Loader2, Store,
+  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil,
 } from 'lucide-react';
 import { useGroceryStore } from '../store/groceryStore';
 import type { GroceryItem, PantryItem, SupermarketMapping, SupermarketProduct } from '../store/groceryStore';
@@ -47,6 +47,26 @@ function parseGroceryNote(note: string | null): { source: string | null; details
   };
 }
 
+function normalizeListKey(value: string | null | undefined): string {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function parsePackagingQuantity(packaging: string | null | undefined): { quantity: number; unit: string } | null {
+  if (!packaging) return null;
+  const match = packaging.match(/(\d+(?:[.,]\d+)?)\s*(kg|g|L|cl|ml|item|items)/i);
+  if (!match) return null;
+  return {
+    quantity: parseFloat(match[1].replace(',', '.')),
+    unit: match[2].toLowerCase() === 'l' ? 'L' : match[2].toLowerCase(),
+  };
+}
+
 const PRIORITY_LABEL: Record<number, { label: string; color: string }> = {
   1: { label: 'Urgent', color: 'text-red-500 bg-red-50' },
   2: { label: 'Élevée', color: 'text-amber-600 bg-amber-50' },
@@ -68,196 +88,507 @@ function groupByCategory<T extends { category: string | null }>(items: T[]): [st
 }
 
 // ─── GroceryRow ───────────────────────────────────────────────────────────────
-function GroceryRow({ item, onToggle, onDelete }: {
+function GroceryRow({ item, onToggle, onDelete, onUpdate }: {
   item: GroceryItem;
   onToggle: (id: number, checked: boolean) => void;
   onDelete: (id: number) => void;
+  onUpdate: (id: number, data: Partial<Pick<GroceryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url' | 'priority' | 'note' | 'checked'>>) => Promise<void>;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftName, setDraftName] = useState(item.name);
+  const [draftQuantity, setDraftQuantity] = useState(String(item.quantity));
+  const [draftUnit, setDraftUnit] = useState(item.unit);
+  const [draftCategory, setDraftCategory] = useState(item.category ?? '');
+  const [draftPriority, setDraftPriority] = useState(item.priority);
+  const [draftNote, setDraftNote] = useState(item.note ?? '');
   const { source, details } = parseGroceryNote(item.note);
   const quantityLabel = item.quantity !== 1 || item.unit !== 'item' ? `${item.quantity} ${item.unit}` : null;
 
+  useEffect(() => {
+    setDraftName(item.name);
+    setDraftQuantity(String(item.quantity));
+    setDraftUnit(item.unit);
+    setDraftCategory(item.category ?? '');
+    setDraftPriority(item.priority);
+    setDraftNote(item.note ?? '');
+  }, [item]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draftName.trim()) return;
+    await onUpdate(item.id, {
+      name: draftName.trim(),
+      quantity: parseFloat(draftQuantity) || 0,
+      unit: draftUnit.trim() || 'item',
+      category: draftCategory.trim() || null,
+      priority: draftPriority,
+      note: draftNote.trim() || null,
+    });
+    setIsEditing(false);
+  };
+
   return (
-    <div className={`group flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-apple-gray-50 ${item.checked ? 'opacity-60' : ''}`}>
-      <button
-        onClick={() => onToggle(item.id, !item.checked)}
-        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-          item.checked
-            ? 'bg-emerald-500 border-emerald-500 text-white'
-            : 'border-apple-gray-300 hover:border-apple-blue'
-        }`}
-      >
-        {item.checked && <Check className="w-3 h-3" />}
-      </button>
-      {item.image_url ? (
-        <img
-          src={item.image_url}
-          alt={item.name}
-          className="h-12 w-12 shrink-0 rounded-xl border border-apple-gray-100 bg-white object-contain p-1"
-        />
-      ) : (
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-apple-gray-100">
-          <ShoppingBasket className="h-5 w-5 text-apple-gray-300" />
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <p className={`min-w-0 text-sm font-semibold leading-5 ${item.checked ? 'line-through text-apple-gray-400' : 'text-black'}`}>
-            {item.name}
-          </p>
-          {item.priority < 3 && (
-            <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase ${PRIORITY_LABEL[item.priority]?.color}`}>
-              {PRIORITY_LABEL[item.priority]?.label}
-            </span>
+    <div className={`group px-4 py-3.5 transition-colors hover:bg-apple-gray-50 ${item.checked ? 'opacity-60' : ''}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <button
+            onClick={() => onToggle(item.id, !item.checked)}
+            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+              item.checked
+                ? 'bg-emerald-500 border-emerald-500 text-white'
+                : 'border-apple-gray-300 hover:border-apple-blue'
+            }`}
+          >
+            {item.checked && <Check className="w-3 h-3" />}
+          </button>
+          {item.image_url ? (
+            <img
+              src={item.image_url}
+              alt={item.name}
+              className="h-12 w-12 shrink-0 rounded-xl border border-apple-gray-100 bg-white object-contain p-1"
+            />
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-apple-gray-100">
+              <ShoppingBasket className="h-5 w-5 text-apple-gray-300" />
+            </div>
           )}
-        </div>
-        {(quantityLabel || source || details) && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ backgroundColor: `${getCategoryColor(item.category)}1A`, color: getCategoryColor(item.category) }}>
-              {formatCategoryLabel(item.category)}
-            </span>
-            {quantityLabel && (
-              <span className="rounded-full bg-apple-gray-100 px-2.5 py-1 text-[11px] font-semibold text-apple-gray-600">
-                {quantityLabel}
-              </span>
-            )}
-            {source && (
-              <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
-                {source}
-              </span>
-            )}
-            {details && (
-              <span className="min-w-0 text-[11px] text-apple-gray-500">
-                {details}
-              </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start gap-2">
+              <p className={`min-w-0 flex-1 text-sm font-semibold leading-5 ${item.checked ? 'line-through text-apple-gray-400' : 'text-black'}`}>
+                {item.name}
+              </p>
+              {item.priority < 3 && (
+                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase ${PRIORITY_LABEL[item.priority]?.color}`}>
+                  {PRIORITY_LABEL[item.priority]?.label}
+                </span>
+              )}
+            </div>
+            {(quantityLabel || item.packaging || item.price_text || source || details || item.store_label) && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ backgroundColor: `${getCategoryColor(item.category)}1A`, color: getCategoryColor(item.category) }}>
+                  {formatCategoryLabel(item.category)}
+                </span>
+                {item.store_label && (
+                  <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
+                    {item.store_label}
+                  </span>
+                )}
+                {quantityLabel && (
+                  <span className="rounded-full bg-apple-gray-100 px-2.5 py-1 text-[11px] font-semibold text-apple-gray-600">
+                    {quantityLabel}
+                  </span>
+                )}
+                {item.packaging && (
+                  <span className="rounded-full bg-apple-gray-100 px-2.5 py-1 text-[11px] font-medium text-apple-gray-500">
+                    {item.packaging}
+                  </span>
+                )}
+                {item.price_text && (
+                  <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
+                    {item.price_text}
+                  </span>
+                )}
+                {source && (
+                  <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
+                    {source}
+                  </span>
+                )}
+                {details && (
+                  <span className="min-w-0 text-[11px] text-apple-gray-500">
+                    {details}
+                  </span>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
+        <div className="flex items-center justify-end gap-1 pl-8 sm:pl-0">
+          <button
+            onClick={() => setIsEditing((value) => !value)}
+            className="rounded-lg p-1.5 text-apple-gray-400 opacity-100 transition-all hover:bg-apple-gray-100 hover:text-apple-blue md:opacity-0 md:group-hover:opacity-100"
+            title="Modifier"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onDelete(item.id)}
+            className="rounded-lg p-1.5 text-apple-gray-400 opacity-100 transition-all hover:bg-red-50 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
-      <button
-        onClick={() => onDelete(item.id)}
-        className="shrink-0 rounded-lg p-1.5 text-apple-gray-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+
+      {isEditing && (
+        <form onSubmit={handleSubmit} className="mt-4 rounded-2xl border border-apple-gray-200 bg-white p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <input
+              type="text"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              placeholder="Nom"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="text"
+              value={draftCategory}
+              onChange={(e) => setDraftCategory(e.target.value)}
+              placeholder="Catégorie"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={draftQuantity}
+              onChange={(e) => setDraftQuantity(e.target.value)}
+              placeholder="Quantité"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="text"
+              value={draftUnit}
+              onChange={(e) => setDraftUnit(e.target.value)}
+              placeholder="Unité"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <select
+              value={draftPriority}
+              onChange={(e) => setDraftPriority(Number(e.target.value))}
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            >
+              <option value={1}>Urgent</option>
+              <option value={2}>Élevée</option>
+              <option value={3}>Normale</option>
+            </select>
+            <input
+              type="text"
+              value={draftNote}
+              onChange={(e) => setDraftNote(e.target.value)}
+              placeholder="Note"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="submit"
+              className="rounded-xl bg-apple-blue px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+            >
+              Enregistrer
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditing(false);
+                setDraftName(item.name);
+                setDraftQuantity(String(item.quantity));
+                setDraftUnit(item.unit);
+                setDraftCategory(item.category ?? '');
+                setDraftPriority(item.priority);
+                setDraftNote(item.note ?? '');
+              }}
+              className="rounded-xl px-4 py-2 text-sm font-medium text-apple-gray-500 hover:bg-apple-gray-100"
+            >
+              Annuler
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
 
 // ─── PantryRow ────────────────────────────────────────────────────────────────
-function PantryRow({ item, onDelete, onConsume, onUpdate, onMap }: {
+function PantryRow({ item, onDelete, onConsume, onUpdate, onMap, onRestock }: {
   item: PantryItem;
   onDelete: (id: number) => void;
   onConsume: (id: number, amount: number) => void;
-  onUpdate: (id: number, data: Partial<PantryItem>) => void;
+  onUpdate: (id: number, data: Partial<Pick<PantryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url' | 'min_quantity' | 'expires_at' | 'location' | 'note'>>) => Promise<void>;
   onMap: (item: PantryItem) => void;
+  onRestock: (item: PantryItem) => Promise<void>;
 }) {
   const [editingQty, setEditingQty] = useState(false);
   const [qtyValue, setQtyValue] = useState(String(item.quantity));
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftName, setDraftName] = useState(item.name);
+  const [draftQuantity, setDraftQuantity] = useState(String(item.quantity));
+  const [draftUnit, setDraftUnit] = useState(item.unit);
+  const [draftCategory, setDraftCategory] = useState(item.category ?? '');
+  const [draftMinQuantity, setDraftMinQuantity] = useState(String(item.min_quantity));
+  const [draftLocation, setDraftLocation] = useState(item.location ?? '');
+  const [draftExpiresAt, setDraftExpiresAt] = useState(item.expires_at ?? '');
+  const [draftNote, setDraftNote] = useState(item.note ?? '');
   const isLowStock = item.quantity <= item.min_quantity && item.min_quantity > 0;
   const expireSoon = item.expires_at
     ? differenceInDays(parseISO(item.expires_at), new Date())
     : null;
   const isExpireSoon = expireSoon !== null && expireSoon <= 7;
 
+  useEffect(() => {
+    setQtyValue(String(item.quantity));
+    setDraftName(item.name);
+    setDraftQuantity(String(item.quantity));
+    setDraftUnit(item.unit);
+    setDraftCategory(item.category ?? '');
+    setDraftMinQuantity(String(item.min_quantity));
+    setDraftLocation(item.location ?? '');
+    setDraftExpiresAt(item.expires_at ?? '');
+    setDraftNote(item.note ?? '');
+  }, [item]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!draftName.trim()) return;
+    await onUpdate(item.id, {
+      name: draftName.trim(),
+      quantity: parseFloat(draftQuantity) || 0,
+      unit: draftUnit.trim() || 'item',
+      category: draftCategory.trim() || null,
+      min_quantity: parseFloat(draftMinQuantity) || 0,
+      location: draftLocation.trim() || null,
+      expires_at: draftExpiresAt || null,
+      note: draftNote.trim() || null,
+    });
+    setIsEditing(false);
+  };
+
   return (
-    <div className={`flex items-center gap-3 px-4 py-3 hover:bg-apple-gray-50 transition-colors group ${isLowStock ? 'bg-amber-50/40' : ''}`}>
-      {item.image_url ? (
-        <img
-          src={item.image_url}
-          alt={item.name}
-          className="h-12 w-12 shrink-0 rounded-xl border border-apple-gray-100 bg-white object-contain p-1"
-        />
-      ) : (
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-apple-gray-100">
-          <Package className="h-5 w-5 text-apple-gray-300" />
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-semibold text-black truncate">{item.name}</p>
-          {isLowStock && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
-        </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          {item.category && (
-            <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ backgroundColor: `${getCategoryColor(item.category)}1A`, color: getCategoryColor(item.category) }}>
-              {formatCategoryLabel(item.category)}
-            </span>
+    <div className={`group px-4 py-3 transition-colors hover:bg-apple-gray-50 ${isLowStock ? 'bg-amber-50/40' : ''}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          {item.image_url ? (
+            <img
+              src={item.image_url}
+              alt={item.name}
+              className="h-12 w-12 shrink-0 rounded-xl border border-apple-gray-100 bg-white object-contain p-1"
+            />
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-apple-gray-100">
+              <Package className="h-5 w-5 text-apple-gray-300" />
+            </div>
           )}
-          {item.location && <span className="text-xs text-apple-gray-400">· {item.location}</span>}
-          {item.expires_at && (
-            <span className={`text-xs font-medium ${isExpireSoon ? 'text-red-500' : 'text-apple-gray-400'}`}>
-              · Exp: {format(parseISO(item.expires_at), 'dd/MM/yyyy')}
-              {expireSoon !== null && expireSoon <= 7 && ` (J-${expireSoon})`}
-            </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="min-w-0 flex-1 text-sm font-semibold leading-5 text-black break-words">{item.name}</p>
+              {isLowStock && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {item.category && (
+                <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ backgroundColor: `${getCategoryColor(item.category)}1A`, color: getCategoryColor(item.category) }}>
+                  {formatCategoryLabel(item.category)}
+                </span>
+              )}
+              {item.store_label && (
+                <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
+                  {item.store_label}
+                </span>
+              )}
+              <span className="rounded-full bg-apple-gray-100 px-2.5 py-1 text-[11px] font-semibold text-apple-gray-600">
+                {item.quantity} {item.unit}
+              </span>
+              {item.packaging && (
+                <span className="rounded-full bg-apple-gray-100 px-2.5 py-1 text-[11px] font-medium text-apple-gray-500">
+                  {item.packaging}
+                </span>
+              )}
+              {item.price_text && (
+                <span className="rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600">
+                  {item.price_text}
+                </span>
+              )}
+              {item.location && (
+                <span className="rounded-full bg-apple-gray-100 px-2.5 py-1 text-[11px] font-medium text-apple-gray-500">
+                  {item.location}
+                </span>
+              )}
+              {item.expires_at && (
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${isExpireSoon ? 'bg-red-50 text-red-500' : 'bg-apple-gray-100 text-apple-gray-500'}`}>
+                  Exp. {format(parseISO(item.expires_at), 'dd/MM/yyyy')}
+                  {expireSoon !== null && expireSoon <= 7 && ` · J-${expireSoon}`}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:max-w-[280px] sm:justify-end">
+          {!isEditing && (
+            <div className="flex items-center gap-1 rounded-full bg-apple-gray-100 px-2 py-1">
+              <button
+                onClick={() => onConsume(item.id, 1)}
+                className="rounded p-1 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
+                title="Consommer 1"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+              {editingQty ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={qtyValue}
+                    onChange={(e) => setQtyValue(e.target.value)}
+                    onBlur={() => {
+                      const v = parseFloat(qtyValue);
+                      if (!isNaN(v)) {
+                        void onUpdate(item.id, { quantity: v });
+                      }
+                      setEditingQty(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const v = parseFloat(qtyValue);
+                        if (!isNaN(v)) {
+                          void onUpdate(item.id, { quantity: v });
+                        }
+                        setEditingQty(false);
+                      }
+                      if (e.key === 'Escape') setEditingQty(false);
+                    }}
+                    autoFocus
+                    className="w-16 rounded border border-apple-blue px-2 py-1 text-center text-sm focus:outline-none"
+                    step="1"
+                  />
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setEditingQty(true); setQtyValue(String(item.quantity)); }}
+                  className={`rounded px-2 py-0.5 text-sm font-bold transition-colors hover:bg-white ${isLowStock ? 'text-amber-600' : 'text-black'}`}
+                >
+                  {item.quantity}
+                </button>
+              )}
+              <span className="text-xs text-apple-gray-400">{item.unit}</span>
+              <button
+                onClick={() => void onUpdate(item.id, { quantity: item.quantity + 1 })}
+                className="rounded p-1 text-apple-gray-400 transition-all hover:bg-emerald-50 hover:text-emerald-600 md:opacity-0 md:group-hover:opacity-100"
+                title="Ajouter 1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
           )}
+          {isLowStock && (
+            <button
+              onClick={() => void onRestock(item)}
+              className="rounded-xl bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-200"
+              title="Ajouter à la liste de courses"
+            >
+              Ajouter à la liste
+            </button>
+          )}
+          <button
+            onClick={() => setIsEditing((value) => !value)}
+            className="rounded-lg p-1.5 text-apple-gray-400 opacity-100 transition-all hover:bg-apple-gray-100 hover:text-apple-blue md:opacity-0 md:group-hover:opacity-100"
+            title="Modifier"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onMap(item)}
+            className="rounded-lg p-1.5 text-apple-gray-400 opacity-100 transition-all hover:bg-red-50 hover:text-red-600 md:opacity-0 md:group-hover:opacity-100"
+            title="Lier Intermarché"
+          >
+            <Store className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onDelete(item.id)}
+            className="rounded-lg p-1.5 text-apple-gray-400 opacity-100 transition-all hover:bg-red-50 hover:text-red-500 md:opacity-0 md:group-hover:opacity-100"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
-      {/* Quantity */}
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={() => onConsume(item.id, 1)}
-          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-apple-gray-400 hover:text-red-500 transition-all"
-          title="Consommer 1"
-        >
-          <Minus className="w-3.5 h-3.5" />
-        </button>
-        {editingQty ? (
-          <div className="flex items-center gap-1">
+      {isEditing && (
+        <form onSubmit={handleSubmit} className="mt-4 rounded-2xl border border-apple-gray-200 bg-white p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <input
+              type="text"
+              value={draftName}
+              onChange={(e) => setDraftName(e.target.value)}
+              placeholder="Nom"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="text"
+              value={draftCategory}
+              onChange={(e) => setDraftCategory(e.target.value)}
+              placeholder="Catégorie"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
             <input
               type="number"
-              value={qtyValue}
-              onChange={(e) => setQtyValue(e.target.value)}
-              onBlur={() => {
-                const v = parseFloat(qtyValue);
-                if (!isNaN(v)) onUpdate(item.id, { quantity: v });
-                setEditingQty(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const v = parseFloat(qtyValue);
-                  if (!isNaN(v)) onUpdate(item.id, { quantity: v });
-                  setEditingQty(false);
-                }
-                if (e.key === 'Escape') setEditingQty(false);
-              }}
-              autoFocus
-              className="w-16 px-2 py-1 text-sm text-center rounded border border-apple-blue focus:outline-none"
-              step="1"
+              min="0"
+              step="0.5"
+              value={draftQuantity}
+              onChange={(e) => setDraftQuantity(e.target.value)}
+              placeholder="Quantité"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="text"
+              value={draftUnit}
+              onChange={(e) => setDraftUnit(e.target.value)}
+              placeholder="Unité"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={draftMinQuantity}
+              onChange={(e) => setDraftMinQuantity(e.target.value)}
+              placeholder="Seuil stock faible"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="text"
+              value={draftLocation}
+              onChange={(e) => setDraftLocation(e.target.value)}
+              placeholder="Emplacement"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="date"
+              value={draftExpiresAt}
+              onChange={(e) => setDraftExpiresAt(e.target.value)}
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+            />
+            <input
+              type="text"
+              value={draftNote}
+              onChange={(e) => setDraftNote(e.target.value)}
+              placeholder="Note"
+              className="rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
             />
           </div>
-        ) : (
-          <button
-            onClick={() => { setEditingQty(true); setQtyValue(String(item.quantity)); }}
-            className={`text-sm font-bold px-2 py-0.5 rounded hover:bg-apple-gray-100 transition-colors ${isLowStock ? 'text-amber-600' : 'text-black'}`}
-          >
-            {item.quantity}
-          </button>
-        )}
-        <span className="text-xs text-apple-gray-400">{item.unit}</span>
-        <button
-          onClick={() => onUpdate(item.id, { quantity: item.quantity + 1 })}
-          className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-emerald-50 text-apple-gray-400 hover:text-emerald-600 transition-all"
-          title="Ajouter 1"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-      </div>
-
-      <button
-        onClick={() => onMap(item)}
-        className="opacity-0 group-hover:opacity-100 p-1.5 text-apple-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all shrink-0"
-        title="Lier Intermarché"
-      >
-        <Store className="w-3.5 h-3.5" />
-      </button>
-
-      <button
-        onClick={() => onDelete(item.id)}
-        className="opacity-0 group-hover:opacity-100 p-1.5 text-apple-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all shrink-0"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="submit"
+              className="rounded-xl bg-apple-blue px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+            >
+              Enregistrer
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditing(false);
+                setDraftName(item.name);
+                setDraftQuantity(String(item.quantity));
+                setDraftUnit(item.unit);
+                setDraftCategory(item.category ?? '');
+                setDraftMinQuantity(String(item.min_quantity));
+                setDraftLocation(item.location ?? '');
+                setDraftExpiresAt(item.expires_at ?? '');
+                setDraftNote(item.note ?? '');
+              }}
+              className="rounded-xl px-4 py-2 text-sm font-medium text-apple-gray-500 hover:bg-apple-gray-100"
+            >
+              Annuler
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -396,7 +727,7 @@ function PantryMappingPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function GroceriesPage() {
   const {
-    items, groceryLoading, fetchItems, addItem, toggleCheck, deleteItem, clearChecked,
+    items, groceryLoading, fetchItems, addItem, updateItem, toggleCheck, deleteItem, clearChecked,
     pantryItems, pantryOverview, pantryLoading, fetchPantry, fetchPantryOverview,
     addPantryItem, updatePantryItem, deletePantryItem, consumePantryItem,
     searchResults, searchLoading, searchError, searchIntermarche, clearSearchResults,
@@ -550,6 +881,11 @@ export default function GroceriesPage() {
       unit: newUnit || 'item',
       category: newCategory || undefined,
       image_url: selectedProduct?.image_url || undefined,
+      store_label: selectedProduct ? 'Intermarché' : undefined,
+      external_id: selectedProduct?.external_id || undefined,
+      packaging: selectedProduct?.packaging || undefined,
+      price_text: selectedProduct?.price_text || undefined,
+      product_url: selectedProduct?.product_url || undefined,
       priority: newPriority,
       note: selectedProduct ? `Intermarché · ${selectedProduct.price_text ?? ''} · ${selectedProduct.packaging ?? ''}`.trim().replace(/·\s*$/, '') : undefined,
     });
@@ -576,6 +912,11 @@ export default function GroceriesPage() {
       unit: pUnit || 'item',
       category: pCategory || undefined,
       image_url: selectedPantryProduct?.image_url || undefined,
+      store_label: selectedPantryProduct ? 'Intermarché' : undefined,
+      external_id: selectedPantryProduct?.external_id || undefined,
+      packaging: selectedPantryProduct?.packaging || undefined,
+      price_text: selectedPantryProduct?.price_text || undefined,
+      product_url: selectedPantryProduct?.product_url || undefined,
       min_quantity: parseFloat(pMinQty) || 0,
       expires_at: pExpires || undefined,
       location: pLocation || undefined,
@@ -587,6 +928,79 @@ export default function GroceriesPage() {
     setSelectedPantryProduct(null); setPantrySearchQuery(''); clearSearchResults();
     setShowPantryForm(false);
     fetchPantryOverview();
+  };
+
+  const handleUpdatePantry = async (
+    id: number,
+    data: Partial<Pick<PantryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url' | 'min_quantity' | 'expires_at' | 'location' | 'note'>>,
+  ) => {
+    await updatePantryItem(id, data);
+    await fetchPantryOverview();
+  };
+
+  const handleConsumePantry = async (id: number, amount: number) => {
+    await consumePantryItem(id, amount);
+    await fetchPantryOverview();
+  };
+
+  const handleDeletePantry = async (id: number) => {
+    await deletePantryItem(id);
+    await fetchPantryOverview();
+  };
+
+  const handleAddLowStockToGroceries = async (item: PantryItem) => {
+    const mapping = pantryMappings[item.id] ?? await fetchPantryMapping(item.id);
+    const mappedQuantity = parsePackagingQuantity(mapping?.packaging_snapshot);
+    const targetQuantity = mappedQuantity?.quantity ?? (
+      item.min_quantity > 0
+        ? Math.max(item.min_quantity - item.quantity, 1)
+        : 1
+    );
+    const targetUnit = mappedQuantity?.unit ?? item.unit;
+    const targetName = mapping?.name_snapshot ?? item.name;
+    const targetCategory = mapping?.category_snapshot ?? item.category;
+    const targetImage = mapping?.image_url ?? item.image_url;
+    const targetNote = [mapping?.store_label, mapping?.price_snapshot, mapping?.packaging_snapshot]
+      .filter(Boolean)
+      .join(' · ') || item.note || 'Réassort garde-manger';
+
+    const existing = items.find((candidate) => (
+      !candidate.checked &&
+      normalizeListKey(candidate.name) === normalizeListKey(targetName) &&
+      normalizeListKey(candidate.unit) === normalizeListKey(targetUnit)
+    ));
+
+    if (existing) {
+      await updateItem(existing.id, {
+        quantity: Number((existing.quantity + targetQuantity).toFixed(2)),
+        unit: targetUnit,
+        category: existing.category ?? targetCategory,
+        image_url: existing.image_url ?? targetImage,
+        store_label: existing.store_label ?? mapping?.store_label ?? item.store_label,
+        external_id: existing.external_id ?? mapping?.external_id ?? item.external_id,
+        packaging: existing.packaging ?? mapping?.packaging_snapshot ?? item.packaging,
+        price_text: existing.price_text ?? mapping?.price_snapshot ?? item.price_text,
+        product_url: existing.product_url ?? mapping?.product_url ?? item.product_url,
+        priority: Math.min(existing.priority, 2),
+        note: existing.note ?? targetNote,
+      });
+      return;
+    }
+
+    await addItem({
+      name: targetName,
+      quantity: targetQuantity,
+      unit: targetUnit,
+      category: targetCategory ?? undefined,
+      image_url: targetImage ?? undefined,
+      store_label: mapping?.store_label ?? item.store_label ?? undefined,
+      external_id: mapping?.external_id ?? item.external_id ?? undefined,
+      packaging: mapping?.packaging_snapshot ?? item.packaging ?? undefined,
+      price_text: mapping?.price_snapshot ?? item.price_text ?? undefined,
+      product_url: mapping?.product_url ?? item.product_url ?? undefined,
+      priority: 2,
+      note: targetNote,
+    });
   };
 
   const toggleGroup = (group: string) => {
@@ -601,21 +1015,22 @@ export default function GroceriesPage() {
   const inputCls = 'px-3 py-2 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/50';
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-apple-gray-50 overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-transparent overflow-hidden">
       {/* Header */}
-      <div className="px-8 py-5 border-b border-apple-gray-200 bg-white shadow-sm z-10 flex items-center justify-between gap-4 flex-wrap">
+      <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-white/60 bg-white/75 px-4 py-4 shadow-[0_8px_30px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:py-5">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-black">Groceries</h1>
-          <p className="text-apple-gray-500 mt-0.5 text-sm">Liste de courses &amp; garde-manger</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-apple-gray-500">Courses</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-black sm:text-3xl">Groceries</h1>
+          <p className="mt-1 text-sm text-apple-gray-500">Liste de courses et garde-manger.</p>
         </div>
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={activeTab === 'Liste de courses' ? 'Rechercher un article…' : 'Rechercher dans le garde-manger…'}
-            className="pl-9 pr-4 py-2 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/50 w-64"
+            className="w-full rounded-xl border border-apple-gray-200 bg-white py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50 sm:w-64"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-apple-gray-400 hover:text-black">
@@ -626,8 +1041,8 @@ export default function GroceriesPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-apple-gray-200 bg-white px-8">
-        <div className="flex gap-1">
+      <div className="border-b border-white/60 bg-white/75 px-4 backdrop-blur-xl sm:px-8">
+        <div className="flex gap-1 overflow-x-auto">
           {TAB_LIST.map((tab) => (
             <button
               key={tab}
@@ -651,7 +1066,7 @@ export default function GroceriesPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+5.75rem)] sm:px-8 sm:py-6">
         <div className="max-w-2xl mx-auto space-y-4">
 
           {/* ── GROCERY LIST ─────────────────────────────────────────────── */}
@@ -661,16 +1076,16 @@ export default function GroceriesPage() {
               <div className="flex items-center gap-3 flex-wrap">
                 <button
                   onClick={handleOpenAddForm}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-apple-blue text-white text-sm font-semibold rounded-xl hover:bg-blue-600 transition-colors shadow-sm"
+                  className="flex items-center gap-2 rounded-2xl bg-apple-blue px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-600"
                 >
                   {showAddForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                   {showAddForm ? 'Fermer' : 'Ajouter'}
                 </button>
                 {checkedItems.length > 0 && (
-                  <button
-                    onClick={clearChecked}
-                    className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-red-500 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
-                  >
+                <button
+                  onClick={clearChecked}
+                  className="flex items-center gap-2 rounded-2xl border border-red-200 px-4 py-2.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50"
+                >
                     <Trash2 className="w-4 h-4" />
                     Vider les cochés ({checkedItems.length})
                   </button>
@@ -679,7 +1094,7 @@ export default function GroceriesPage() {
 
               {/* Add form */}
               {showAddForm && (
-                <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm overflow-hidden">
+                <div className="overflow-hidden rounded-[28px] border border-white/60 bg-white/80 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
 
                   {/* ── Intermarché search ─────────────────────────────── */}
                   <div className="p-5 border-b border-apple-gray-100">
@@ -687,7 +1102,7 @@ export default function GroceriesPage() {
                       <Store className="w-4 h-4 text-red-600" />
                       <span className="text-xs font-bold text-red-600 uppercase tracking-wider">Rechercher sur Intermarché</span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
                         <input
@@ -811,7 +1226,7 @@ export default function GroceriesPage() {
                         <option value={3}>🔵 Normale</option>
                       </select>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row">
                       <button type="submit" className="px-5 py-2.5 bg-apple-blue text-white text-sm font-semibold rounded-xl hover:bg-blue-600 transition-colors">Ajouter à la liste</button>
                       <button type="button" onClick={handleOpenAddForm} className="px-5 py-2.5 text-sm font-medium text-apple-gray-500 hover:bg-apple-gray-100 rounded-xl transition-colors">Annuler</button>
                     </div>
@@ -825,7 +1240,7 @@ export default function GroceriesPage() {
                   <div className="w-8 h-8 border-2 border-apple-blue/30 border-t-apple-blue rounded-full animate-spin" />
                 </div>
               ) : filteredItems.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm py-16 text-center">
+                <div className="rounded-[28px] border border-white/60 bg-white/80 py-16 text-center shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
                   <ShoppingBasket className="w-12 h-12 text-apple-gray-300 mx-auto mb-3" />
                   <p className="text-apple-gray-500 text-sm">Liste vide</p>
                 </div>
@@ -833,7 +1248,7 @@ export default function GroceriesPage() {
                 <div className="space-y-3">
                   {/* Unchecked groups */}
                   {uncheckedGroups.map(([category, groupItems]) => (
-                    <div key={category} className="overflow-hidden rounded-2xl border border-apple-gray-200 bg-white shadow-sm">
+                    <div key={category} className="overflow-hidden rounded-[28px] border border-white/60 bg-white/80 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
                       <button
                         onClick={() => toggleGroup(category)}
                         className="flex w-full items-center gap-3 border-b border-apple-gray-100 bg-white px-4 py-3 text-left transition-colors hover:bg-apple-gray-50"
@@ -853,7 +1268,7 @@ export default function GroceriesPage() {
                       {!collapsedGroups.has(category) && (
                         <div className="divide-y divide-apple-gray-50">
                           {groupItems.map((item) => (
-                            <GroceryRow key={item.id} item={item} onToggle={toggleCheck} onDelete={deleteItem} />
+                            <GroceryRow key={item.id} item={item} onToggle={toggleCheck} onDelete={deleteItem} onUpdate={updateItem} />
                           ))}
                         </div>
                       )}
@@ -882,7 +1297,7 @@ export default function GroceriesPage() {
                       {!collapsedGroups.has('__checked__') && (
                         <div className="divide-y divide-apple-gray-50">
                           {checkedItems.map((item) => (
-                            <GroceryRow key={item.id} item={item} onToggle={toggleCheck} onDelete={deleteItem} />
+                            <GroceryRow key={item.id} item={item} onToggle={toggleCheck} onDelete={deleteItem} onUpdate={updateItem} />
                           ))}
                         </div>
                       )}
@@ -916,7 +1331,14 @@ export default function GroceriesPage() {
                     clearSearchResults();
                   }}
                   onLink={async (product) => {
-                    await updatePantryItem(mappingTarget.id, { image_url: product.image_url ?? null });
+                    await updatePantryItem(mappingTarget.id, {
+                      image_url: product.image_url ?? null,
+                      store_label: product.store === 'intermarche' ? 'Intermarché' : product.store,
+                      external_id: product.external_id ?? null,
+                      packaging: product.packaging ?? null,
+                      price_text: product.price_text ?? null,
+                      product_url: product.product_url ?? null,
+                    });
                     await savePantryMapping(mappingTarget.id, product);
                   }}
                   onUnlink={async (mappingId) => {
@@ -933,15 +1355,15 @@ export default function GroceriesPage() {
 
               {/* Overview stats */}
               {pantryOverview && (
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
                   {[
                     { label: 'Total articles', value: pantryOverview.total_items, color: 'text-black' },
                     { label: 'Stock faible', value: pantryOverview.low_stock_items, color: pantryOverview.low_stock_items > 0 ? 'text-amber-600' : 'text-black' },
                     { label: 'Bientôt périmé', value: pantryOverview.expiring_within_7_days, color: pantryOverview.expiring_within_7_days > 0 ? 'text-red-500' : 'text-black' },
                   ].map(({ label, value, color }) => (
-                    <div key={label} className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-4">
-                      <p className="text-xs font-semibold text-apple-gray-500 uppercase tracking-wider">{label}</p>
-                      <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
+                    <div key={label} className="rounded-[24px] border border-white/60 bg-white/80 p-3 shadow-[0_12px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-apple-gray-500 sm:text-xs sm:tracking-wider">{label}</p>
+                      <p className={`mt-1 text-xl font-bold sm:text-2xl ${color}`}>{value}</p>
                     </div>
                   ))}
                 </div>
@@ -951,7 +1373,7 @@ export default function GroceriesPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleTogglePantryForm}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-apple-blue text-white text-sm font-semibold rounded-xl hover:bg-blue-600 transition-colors shadow-sm"
+                  className="flex items-center gap-2 rounded-2xl bg-apple-blue px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-600"
                 >
                   <Plus className="w-4 h-4" />
                   Ajouter
@@ -960,13 +1382,13 @@ export default function GroceriesPage() {
 
               {/* Add pantry form */}
               {showPantryForm && (
-                <form onSubmit={handleAddPantry} className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm p-5 space-y-4">
+                <form onSubmit={handleAddPantry} className="rounded-[28px] border border-white/60 bg-white/80 p-5 space-y-4 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
                   <div className="space-y-4 border-b border-apple-gray-100 pb-4">
                     <div className="flex items-center gap-2">
                       <Store className="w-4 h-4 text-red-600" />
                       <span className="text-xs font-bold uppercase tracking-wider text-red-600">Choisir un produit magasin</span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
                         <input
@@ -1079,8 +1501,8 @@ export default function GroceriesPage() {
                       </div>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="text" placeholder="Nom" value={pName} onChange={(e) => setPName(e.target.value)} required autoFocus className={`col-span-2 ${inputCls}`} />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <input type="text" placeholder="Nom" value={pName} onChange={(e) => setPName(e.target.value)} required autoFocus className={`sm:col-span-2 ${inputCls}`} />
                     <div className="relative">
                       <input type="number" placeholder="Quantité" value={pQty} onChange={(e) => setPQty(e.target.value)} min="0" step="0.5" className={`w-full ${inputCls}`} />
                     </div>
@@ -1093,7 +1515,7 @@ export default function GroceriesPage() {
                     </div>
                     <input type="text" placeholder="Emplacement (frigo, placard…)" value={pLocation} onChange={(e) => setPLocation(e.target.value)} className={inputCls} />
                   </div>
-                  <div className="flex gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row">
                     <button type="submit" className="px-5 py-2.5 bg-apple-blue text-white text-sm font-semibold rounded-xl hover:bg-blue-600 transition-colors">Ajouter</button>
                     <button type="button" onClick={handleTogglePantryForm} className="px-5 py-2.5 text-sm font-medium text-apple-gray-500 hover:bg-apple-gray-100 rounded-xl transition-colors">Annuler</button>
                   </div>
@@ -1106,21 +1528,26 @@ export default function GroceriesPage() {
                   <div className="w-8 h-8 border-2 border-apple-blue/30 border-t-apple-blue rounded-full animate-spin" />
                 </div>
               ) : filteredPantry.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm py-16 text-center">
+                <div className="rounded-[28px] border border-white/60 bg-white/80 py-16 text-center shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
                   <Package className="w-12 h-12 text-apple-gray-300 mx-auto mb-3" />
                   <p className="text-apple-gray-500 text-sm">Garde-manger vide</p>
                 </div>
               ) : (
-                <div className="bg-white rounded-2xl border border-apple-gray-200 shadow-sm overflow-hidden">
+                <div className="overflow-hidden rounded-[28px] border border-white/60 bg-white/80 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
                   {pantryGroups.map(([category, groupItems]) => (
                     <div key={category} className="border-b border-apple-gray-100 last:border-b-0">
                       <button
                         onClick={() => toggleGroup(`pantry-${category}`)}
-                        className="w-full flex items-center gap-2 px-4 py-2 bg-apple-gray-50 hover:bg-apple-gray-100 transition-colors"
+                        className="flex w-full items-center gap-3 bg-apple-gray-50 px-4 py-3 text-left transition-colors hover:bg-apple-gray-100"
                       >
-                        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: getCategoryColor(groupItems[0].category) }} />
-                        <span className="text-xs font-semibold text-apple-gray-600 uppercase tracking-wider flex-1 text-left">{category}</span>
-                        <span className="text-xs text-apple-gray-400">{groupItems.length}</span>
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/80">
+                          <div className="h-2.5 w-2.5 rounded-full" style={{ background: getCategoryColor(groupItems[0].category) }} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-apple-gray-400">Rayon</p>
+                          <p className="mt-1 text-sm font-semibold leading-5 text-black">{formatCategoryLabel(category)}</p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-apple-gray-500">{groupItems.length}</span>
                         {collapsedGroups.has(`pantry-${category}`) ? <ChevronRight className="w-3.5 h-3.5 text-apple-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-apple-gray-400" />}
                       </button>
                       {!collapsedGroups.has(`pantry-${category}`) && (
@@ -1129,9 +1556,10 @@ export default function GroceriesPage() {
                             <PantryRow
                               key={item.id}
                               item={item}
-                              onDelete={deletePantryItem}
-                              onConsume={consumePantryItem}
-                              onUpdate={updatePantryItem}
+                              onDelete={handleDeletePantry}
+                              onConsume={handleConsumePantry}
+                              onUpdate={handleUpdatePantry}
+                              onRestock={handleAddLowStockToGroceries}
                               onMap={async (target) => {
                                 setMappingTarget(target);
                                 setMappingQuery(target.name);

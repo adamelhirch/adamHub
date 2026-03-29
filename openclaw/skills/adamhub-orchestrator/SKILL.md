@@ -1,51 +1,61 @@
 # AdamHUB Orchestrator Skill
 
-Use this skill for cross-domain requests that need planning and sequencing.
+Use this skill for cross-domain requests that need sequencing across multiple AdamHUB modules.
 
 ## Scope
 
-- productivity + money + groceries + recipes + habits
-- weekly and monthly planning
-- multi-step decision support with controlled writes
+- tasks
+- money
+- groceries and pantry
+- recipes and meal plans
+- calendar
+- fitness
+- patrimony
 
 ## Mandatory process
 
 1. Start with `dashboard.overview`.
-2. Read before write when target ids are unknown.
-3. Execute approved writes only.
-4. Summarize result with ids and key values.
+2. Read before write when ids are unknown.
+3. Respect calendar conflicts and supermarket rules.
+4. Execute only approved writes.
+5. Summarize the result with ids and next steps.
 
 ## Action chain templates
 
 ### Daily planning
 
 1. `dashboard.overview`
-2. `task.list` (`only_open=true`)
-3. optional `task.update` and `task.complete`
+2. `task.list`
+3. `calendar.agenda`
+4. optional `task.update` and `task.complete`
 
-### Budget control
-
-1. `finance.month_summary`
-2. `finance.list_transactions`
-3. `finance.list_budgets`
-4. optional `finance.create_budget`
-
-### Meal and shopping
+### Weekly food planning
 
 1. `recipe.list`
-2. `recipe.get` for selected ids
-3. `grocery.list_items`
-4. optional `grocery.add_item` / `grocery.update_item`
+2. `recipe.get`
+3. `meal_plan.add`
+4. `supermarket.search`
+5. `grocery.add_item`
 
-### Habit tune-up
+### Fitness + calendar
 
-1. `habit.list` (`active_only=true`)
-2. optional `habit.create`
-3. `habit.log`
-4. optional `habit.set_active` with confirmation
+1. `fitness.overview`
+2. `fitness.list_sessions`
+3. `calendar.list_items`
+4. optional `fitness.create_session`
+
+### Money + patrimony
+
+1. `finance.month_summary`
+2. `subscription.projection`
+3. `patrimony.overview`
+4. optional `patrimony.update_account` or `patrimony.update_goal`
 
 ## Guardrails
 
 - Never guess ids.
-- Confirm risky writes.
-- If action fails, follow `../../references/error-recovery.md`.
+- Never fabricate store metadata.
+- Never bypass overlap errors.
+- Confirm destructive writes.
+- If an action fails, follow `../../references/error-recovery.md`.
+

@@ -16,6 +16,7 @@ from app.schemas import (
     SupermarketStoreRead,
 )
 from app.services.scraper_service import fetch_search_results, upsert_search_cache
+from app.services.supermarket_registry import list_store_definitions
 from app.services.supermarket_mapping import (
     create_or_replace_mapping,
     deactivate_mapping,
@@ -48,9 +49,13 @@ def _to_result(row: SupermarketSearchCache) -> SupermarketSearchResult:
 def list_supported_stores() -> list[SupermarketStoreRead]:
     return [
         SupermarketStoreRead(
-            key=SupermarketStore.INTERMARCHE,
-            label="Intermarché",
+            key=definition.key,
+            label=definition.label,
+            supports_search=definition.supports_search,
+            supports_mapping=definition.supports_mapping,
+            supports_cart_automation=definition.supports_cart_automation,
         )
+        for definition in list_store_definitions()
     ]
 
 

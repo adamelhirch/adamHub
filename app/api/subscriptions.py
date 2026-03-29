@@ -1,11 +1,11 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
-from app.models import Subscription
+from app.models import CalendarSource, Subscription
 from app.schemas import (
     SubscriptionCreate,
     SubscriptionProjection,
@@ -13,12 +13,28 @@ from app.schemas import (
     SubscriptionUpdate,
 )
 from app.services.life import build_subscription_projection
+from app.services.calendar_hub import validate_calendar_slot_free
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(require_api_key)])
 
 
+def _subscription_slot_start(day: date) -> datetime:
+    return datetime.combine(day, time(hour=9, minute=0)).replace(tzinfo=timezone.utc)
+
+
 @router.post("", response_model=SubscriptionRead)
 def create_subscription(payload: SubscriptionCreate, session: SessionDep) -> SubscriptionRead:
+    slot_start = _subscription_slot_start(payload.next_due_date)
+    try:
+        validate_calendar_slot_free(
+            session,
+            slot_start,
+            slot_start + timedelta(minutes=30),
+            source=CalendarSource.SUBSCRIPTION,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     sub = Subscription(**payload.model_dump())
     session.add(sub)
     session.commit()
@@ -76,6 +92,19 @@ def update_subscription(subscription_id: int, payload: SubscriptionUpdate, sessi
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    next_due_date = updates.get("next_due_date", sub.next_due_date)
+    slot_start = _subscription_slot_start(next_due_date)
+    try:
+        validate_calendar_slot_free(
+            session,
+            slot_start,
+            slot_start + timedelta(minutes=30),
+            source=CalendarSource.SUBSCRIPTION,
+            source_ref_id=sub.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     for key, value in updates.items():
         setattr(sub, key, value)
 

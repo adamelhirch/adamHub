@@ -42,6 +42,16 @@ def sync_checked_grocery_item_to_pantry(session: Session, grocery_item: GroceryI
         target.quantity = round((target.quantity or 0.0) + quantity, 3)
         if not target.image_url and grocery_item.image_url:
             target.image_url = grocery_item.image_url
+        if not target.store_label and grocery_item.store_label:
+            target.store_label = grocery_item.store_label
+        if not target.external_id and grocery_item.external_id:
+            target.external_id = grocery_item.external_id
+        if not target.packaging and grocery_item.packaging:
+            target.packaging = grocery_item.packaging
+        if not target.price_text and grocery_item.price_text:
+            target.price_text = grocery_item.price_text
+        if not target.product_url and grocery_item.product_url:
+            target.product_url = grocery_item.product_url
         target.updated_at = now
         session.add(target)
     else:
@@ -51,6 +61,11 @@ def sync_checked_grocery_item_to_pantry(session: Session, grocery_item: GroceryI
             unit=grocery_item.unit or "item",
             category=grocery_item.category,
             image_url=grocery_item.image_url,
+            store_label=grocery_item.store_label,
+            external_id=grocery_item.external_id,
+            packaging=grocery_item.packaging,
+            price_text=grocery_item.price_text,
+            product_url=grocery_item.product_url,
             min_quantity=0,
             note=f"auto from grocery #{grocery_item.id}",
             updated_at=now,

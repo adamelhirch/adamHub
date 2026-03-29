@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.auth import router as auth_router
 from app.api.calendar import router as calendar_router
 from app.api.events import router as events_router
+from app.api.fitness import router as fitness_router
 from app.api.finances import router as finances_router
 from app.api.goals import router as goals_router
 from app.api.groceries import router as groceries_router
@@ -16,6 +17,7 @@ from app.api.recipes import router as recipes_router
 from app.api.skill import router as skill_router
 from app.api.subscriptions import router as subscriptions_router
 from app.api.tasks import router as tasks_router
+from app.api.video import router as video_router
 from app.api.endpoints.supermarket import router as supermarket_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -29,6 +31,7 @@ api_router.include_router(calendar_router)
 api_router.include_router(habits_router)
 api_router.include_router(goals_router)
 api_router.include_router(events_router)
+api_router.include_router(fitness_router)
 api_router.include_router(subscriptions_router)
 api_router.include_router(pantry_router)
 api_router.include_router(patrimony_router)
@@ -36,3 +39,4 @@ api_router.include_router(notes_router)
 api_router.include_router(linear_router)
 api_router.include_router(skill_router)
 api_router.include_router(supermarket_router)
+api_router.include_router(video_router)

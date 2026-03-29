@@ -14,6 +14,7 @@ from app.models import (
     SupermarketTargetType,
 )
 from app.schemas import SupermarketMappingCreate
+from app.services.supermarket_registry import get_store_definition
 
 
 def _validate_target_exists(session: Session, target_type: SupermarketTargetType, target_id: int) -> None:
@@ -51,7 +52,8 @@ def create_or_replace_mapping(
 ) -> SupermarketMapping:
     _validate_target_exists(session, target_type, target_id)
 
-    if payload.store is not SupermarketStore.INTERMARCHE:
+    definition = get_store_definition(payload.store)
+    if definition is None or not definition.supports_mapping:
         raise HTTPException(status_code=400, detail=f"Unsupported supermarket store: {payload.store.value}")
 
     if payload.cache_id is not None:

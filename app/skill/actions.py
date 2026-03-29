@@ -1,8 +1,10 @@
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlmodel import select
 
 from app.models import (
+    Account,
     Budget,
     CalendarCategory,
     CalendarEvent,
@@ -10,6 +12,9 @@ from app.models import (
     CalendarSource,
     EventType,
     FinanceTransaction,
+    FitnessMeasurement,
+    FitnessSession,
+    FitnessSessionStatus,
     Goal,
     GoalMilestone,
     GoalStatus,
@@ -27,19 +32,29 @@ from app.models import (
     PantryItem,
     Recipe,
     RecipeIngredient,
+    SavingsGoal,
     Subscription,
     SubscriptionInterval,
+    SupermarketStore,
     Task,
     TaskStatus,
     TransactionKind,
 )
 from app.schemas import (
+    AccountCreate,
+    AccountRead,
+    AccountUpdate,
     BudgetCreate,
     CalendarItemCreate,
     CalendarItemUpdate,
     EventCreate,
     EventUpdate,
     FinanceTransactionCreate,
+    FitnessMeasurementCreate,
+    FitnessMeasurementUpdate,
+    FitnessSessionComplete,
+    FitnessSessionCreate,
+    FitnessSessionUpdate,
     GoalCreate,
     GoalMilestoneCreate,
     GoalMilestoneUpdate,
@@ -54,7 +69,11 @@ from app.schemas import (
     NoteUpdate,
     PantryItemCreate,
     PantryItemUpdate,
+    SavingsGoalCreate,
+    SavingsGoalRead,
+    SavingsGoalUpdate,
     RecipeCreate,
+    RecipeUpdate,
     SubscriptionCreate,
     SubscriptionUpdate,
     TaskCreate,
@@ -79,6 +98,8 @@ from app.services.linear_hub import (
 )
 from app.services.meal_planning import (
     build_meal_plan_read,
+    compute_recipe_missing_ingredients,
+    consume_recipe_ingredients,
     confirm_meal_plan_cooked,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
@@ -87,8 +108,19 @@ from app.services.calendar_hub import (
     build_calendar_item_read,
     list_due_reminders,
     sync_generated_calendar_items,
+    validate_calendar_slot_free,
+)
+from app.services.fitness import (
+    _ensure_utc,
+    build_fitness_measurement_read,
+    build_fitness_overview,
+    build_fitness_session_read,
+    coerce_fitness_exercises,
 )
 from app.services.grocery_pantry import sync_checked_grocery_item_to_pantry
+from app.services.scraper_service import fetch_search_results, upsert_search_cache
+from app.services.supermarket_registry import list_store_definitions
+from app.services.video_intake import extract_video_source
 
 ACTION_CATALOG = [
     {"action": "task.create", "description": "Create a task", "input_schema": {"title": "string", "description": "string?", "due_at": "datetime?", "priority": "low|medium|high|urgent", "estimated_minutes": "int?", "tags": "string[]?"}},
@@ -100,14 +132,30 @@ ACTION_CATALOG = [
     {"action": "finance.create_budget", "description": "Create a monthly category budget", "input_schema": {"month": "YYYY-MM", "category": "string", "monthly_limit": "float", "currency": "string?", "alert_threshold": "float?"}},
     {"action": "finance.list_budgets", "description": "List budgets with optional month", "input_schema": {"month": "YYYY-MM?"}},
     {"action": "finance.month_summary", "description": "Compute month financial summary", "input_schema": {"year": "int?", "month": "int?"}},
-    {"action": "grocery.add_item", "description": "Add an item to grocery list", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "priority": "int?", "note": "string?"}},
+    {"action": "fitness.overview", "description": "Return the fitness dashboard overview", "input_schema": {}},
+    {"action": "fitness.list_sessions", "description": "List fitness sessions", "input_schema": {"limit": "int?"}},
+    {"action": "fitness.create_session", "description": "Create a fitness session", "input_schema": {"title": "string", "session_type": "strength|cardio|mobility|recovery|mixed?", "planned_at": "datetime?", "duration_minutes": "int?", "exercises": "[{name, mode, reps, duration_minutes, note}|string]?", "note": "string?"}},
+    {"action": "fitness.update_session", "description": "Update a fitness session", "input_schema": {"session_id": "int", "title": "string?", "session_type": "strength|cardio|mobility|recovery|mixed?", "planned_at": "datetime?", "duration_minutes": "int?", "exercises": "[{name, mode, reps, duration_minutes, note}|string]?", "note": "string?", "status": "planned|completed|skipped?", "actual_duration_minutes": "int?", "effort_rating": "int?", "calories_burned": "float?"}},
+    {"action": "fitness.complete_session", "description": "Mark a fitness session as completed", "input_schema": {"session_id": "int", "note": "string?", "actual_duration_minutes": "int?", "effort_rating": "int?", "calories_burned": "float?"}},
+    {"action": "fitness.delete_session", "description": "Delete a fitness session", "input_schema": {"session_id": "int"}},
+    {"action": "fitness.list_measurements", "description": "List fitness measurements", "input_schema": {"limit": "int?"}},
+    {"action": "fitness.add_measurement", "description": "Add a fitness measurement", "input_schema": {"recorded_at": "datetime?", "body_weight_kg": "float?", "body_fat_pct": "float?", "resting_hr": "int?", "sleep_hours": "float?", "steps": "int?", "note": "string?"}},
+    {"action": "fitness.update_measurement", "description": "Update a fitness measurement", "input_schema": {"measurement_id": "int", "recorded_at": "datetime?", "body_weight_kg": "float?", "body_fat_pct": "float?", "resting_hr": "int?", "sleep_hours": "float?", "steps": "int?", "note": "string?"}},
+    {"action": "fitness.delete_measurement", "description": "Delete a fitness measurement", "input_schema": {"measurement_id": "int"}},
+    {"action": "supermarket.list_stores", "description": "List supported supermarket stores and capabilities", "input_schema": {}},
+    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results", "input_schema": {"store": "intermarche?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}},
+    {"action": "grocery.add_item", "description": "Add an item to grocery list", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "image_url": "string?", "store_label": "string?", "external_id": "string?", "packaging": "string?", "price_text": "string?", "product_url": "string?", "priority": "int?", "note": "string?"}},
     {"action": "grocery.list_items", "description": "List grocery items", "input_schema": {"checked": "bool?", "limit": "int?"}},
     {"action": "grocery.update_item", "description": "Update a grocery item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "checked": "bool?", "priority": "int?", "note": "string?"}},
     {"action": "grocery.check_item", "description": "Mark grocery item checked or unchecked", "input_schema": {"item_id": "int", "checked": "bool?"}},
     {"action": "grocery.delete_item", "description": "Delete a grocery item", "input_schema": {"item_id": "int"}},
-    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "ingredients": "[{name, quantity, unit, note}]?"}},
+    {"action": "video.fetch", "description": "Fetch transcript and description from a YouTube, Instagram, or TikTok URL", "input_schema": {"url": "string"}},
+    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
     {"action": "recipe.list", "description": "List recipes", "input_schema": {"limit": "int?"}},
     {"action": "recipe.get", "description": "Get one recipe by id", "input_schema": {"recipe_id": "int"}},
+    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
+    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}},
+    {"action": "recipe.delete", "description": "Delete a recipe and its dependent recipe ingredients / meal plans", "input_schema": {"recipe_id": "int"}},
     {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
     {"action": "meal_plan.log_cooked", "description": "Log a recipe as cooked without pre-planning", "input_schema": {"recipe_id": "int", "cooked_at": "datetime?", "servings_override": "int?", "note": "string?"}},
     {"action": "meal_plan.list", "description": "List meal plans", "input_schema": {"date_from": "YYYY-MM-DD?", "date_to": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner? (legacy)", "limit": "int?"}},
@@ -148,6 +196,15 @@ ACTION_CATALOG = [
     {"action": "subscription.update", "description": "Update subscription", "input_schema": {"subscription_id": "int", "name": "string?", "category": "string?", "amount": "float?", "currency": "string?", "interval": "weekly|monthly|yearly?", "next_due_date": "YYYY-MM-DD?", "autopay": "bool?", "active": "bool?", "note": "string?"}},
     {"action": "subscription.upcoming", "description": "List upcoming subscriptions", "input_schema": {"days": "int?"}},
     {"action": "subscription.projection", "description": "Compute monthly and yearly subscription projection", "input_schema": {"currency": "string?"}},
+    {"action": "patrimony.overview", "description": "Return patrimony overview with net worth, accounts, and savings goals", "input_schema": {}},
+    {"action": "patrimony.list_accounts", "description": "List patrimony accounts", "input_schema": {"active_only": "bool?"}},
+    {"action": "patrimony.add_account", "description": "Create a patrimony account", "input_schema": {"name": "string", "account_type": "checking|savings|investment|crypto|other?", "balance": "float?", "currency": "string?", "institution": "string?", "note": "string?"}},
+    {"action": "patrimony.update_account", "description": "Update a patrimony account", "input_schema": {"account_id": "int", "name": "string?", "account_type": "checking|savings|investment|crypto|other?", "balance": "float?", "currency": "string?", "institution": "string?", "note": "string?", "is_active": "bool?"}},
+    {"action": "patrimony.delete_account", "description": "Delete a patrimony account", "input_schema": {"account_id": "int"}},
+    {"action": "patrimony.list_goals", "description": "List savings goals", "input_schema": {}},
+    {"action": "patrimony.add_goal", "description": "Create a savings goal", "input_schema": {"title": "string", "target_amount": "float", "current_amount": "float?", "currency": "string?", "target_date": "YYYY-MM-DD?", "account_id": "int?", "note": "string?"}},
+    {"action": "patrimony.update_goal", "description": "Update a savings goal", "input_schema": {"goal_id": "int", "title": "string?", "target_amount": "float?", "current_amount": "float?", "currency": "string?", "target_date": "YYYY-MM-DD?", "account_id": "int?", "note": "string?", "completed": "bool?"}},
+    {"action": "patrimony.delete_goal", "description": "Delete a savings goal", "input_schema": {"goal_id": "int"}},
     {"action": "pantry.add_item", "description": "Add pantry item", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "min_quantity": "float?", "expires_at": "YYYY-MM-DD?", "location": "string?", "note": "string?"}},
     {"action": "pantry.list_items", "description": "List pantry items", "input_schema": {"low_stock_only": "bool?", "expiring_in_days": "int?", "limit": "int?"}},
     {"action": "pantry.update_item", "description": "Update pantry item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "min_quantity": "float?", "expires_at": "YYYY-MM-DD?", "location": "string?", "note": "string?"}},
@@ -241,6 +298,17 @@ def _resolve_meal_planned_at(payload: dict, current: datetime | None = None) -> 
     if current is not None:
         return current
     return datetime.now(timezone.utc)
+
+
+def _build_account_read_payload(account: Account) -> dict:
+    return AccountRead.model_validate(account, from_attributes=True).model_dump(mode="json")
+
+
+def _build_savings_goal_read_payload(goal: SavingsGoal, accounts_by_id: dict[int, Account]) -> dict:
+    read = SavingsGoalRead.model_validate(goal, from_attributes=True)
+    if goal.account_id and goal.account_id in accounts_by_id:
+        read.current_amount = accounts_by_id[goal.account_id].balance
+    return read.model_dump(mode="json")
 
 
 def execute_action(action: str, payload: dict, session) -> dict:
@@ -356,6 +424,186 @@ def execute_action(action: str, payload: dict, session) -> dict:
         summary = build_month_summary(session, year, month)
         return {"summary": summary.model_dump(mode="json")}
 
+    if action == "fitness.overview":
+        return {"overview": build_fitness_overview(session).model_dump(mode="json")}
+
+    if action == "fitness.list_sessions":
+        limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
+        rows = session.exec(
+            select(FitnessSession).order_by(FitnessSession.planned_at.desc()).limit(limit)
+        ).all()
+        return {"sessions": [build_fitness_session_read(row).model_dump(mode="json") for row in rows]}
+
+    if action == "fitness.create_session":
+        data = FitnessSessionCreate.model_validate(payload)
+        planned_at = _ensure_utc(data.planned_at)
+        validate_calendar_slot_free(
+            session,
+            planned_at,
+            planned_at + timedelta(minutes=data.duration_minutes),
+            source=CalendarSource.FITNESS_SESSION,
+        )
+        row = FitnessSession(
+            title=data.title.strip(),
+            session_type=data.session_type,
+            planned_at=planned_at,
+            duration_minutes=data.duration_minutes,
+            exercises=coerce_fitness_exercises(data.exercises),
+            note=data.note.strip() if data.note else None,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"session": build_fitness_session_read(row).model_dump(mode="json")}
+
+    if action == "fitness.update_session":
+        session_id = int(payload.get("session_id", 0))
+        row = session.get(FitnessSession, session_id)
+        if not row:
+            raise ValueError("session_id not found")
+
+        patch = FitnessSessionUpdate.model_validate(
+            {k: v for k, v in payload.items() if k != "session_id"}
+        )
+        updates = patch.model_dump(exclude_unset=True)
+        if not updates:
+            raise ValueError("No fitness session fields to update")
+
+        if "title" in updates and updates["title"] is not None:
+            updates["title"] = str(updates["title"]).strip()
+        if "note" in updates and updates["note"] is not None:
+            updates["note"] = str(updates["note"]).strip() or None
+        if "exercises" in updates:
+            updates["exercises"] = coerce_fitness_exercises(updates["exercises"])
+        if "planned_at" in updates and updates["planned_at"] is not None:
+            updates["planned_at"] = _ensure_utc(updates["planned_at"])
+
+        next_planned_at = updates.get("planned_at", row.planned_at)
+        next_duration_minutes = updates.get("duration_minutes", row.duration_minutes)
+        validate_calendar_slot_free(
+            session,
+            next_planned_at,
+            next_planned_at + timedelta(minutes=next_duration_minutes),
+            source=CalendarSource.FITNESS_SESSION,
+            source_ref_id=row.id,
+        )
+
+        if "status" in updates and updates["status"] != FitnessSessionStatus.COMPLETED:
+            updates["completed_at"] = None
+            updates.setdefault("actual_duration_minutes", None)
+            updates.setdefault("effort_rating", None)
+            updates.setdefault("calories_burned", None)
+
+        for key, value in updates.items():
+            setattr(row, key, value)
+
+        if row.status == FitnessSessionStatus.COMPLETED and row.completed_at is None:
+            row.completed_at = now
+
+        row.updated_at = now
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"session": build_fitness_session_read(row).model_dump(mode="json")}
+
+    if action == "fitness.complete_session":
+        session_id = int(payload.get("session_id", 0))
+        row = session.get(FitnessSession, session_id)
+        if not row:
+            raise ValueError("session_id not found")
+
+        completion = FitnessSessionComplete.model_validate(
+            {k: v for k, v in payload.items() if k != "session_id"}
+        )
+        row.status = FitnessSessionStatus.COMPLETED
+        row.completed_at = now
+        row.actual_duration_minutes = completion.actual_duration_minutes or row.duration_minutes
+        if completion.effort_rating is not None:
+            row.effort_rating = completion.effort_rating
+        if completion.calories_burned is not None:
+            row.calories_burned = completion.calories_burned
+        if completion.note is not None:
+            row.note = completion.note.strip() or row.note
+        row.updated_at = now
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"session": build_fitness_session_read(row).model_dump(mode="json")}
+
+    if action == "fitness.delete_session":
+        session_id = int(payload.get("session_id", 0))
+        row = session.get(FitnessSession, session_id)
+        if not row:
+            raise ValueError("session_id not found")
+        session.delete(row)
+        session.commit()
+        return {"ok": True, "deleted_id": session_id}
+
+    if action == "fitness.list_measurements":
+        limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
+        rows = session.exec(
+            select(FitnessMeasurement)
+            .order_by(FitnessMeasurement.recorded_at.desc())
+            .limit(limit)
+        ).all()
+        return {
+            "measurements": [
+                build_fitness_measurement_read(row).model_dump(mode="json") for row in rows
+            ]
+        }
+
+    if action == "fitness.add_measurement":
+        data = FitnessMeasurementCreate.model_validate(payload)
+        row = FitnessMeasurement(
+            recorded_at=_ensure_utc(data.recorded_at),
+            body_weight_kg=data.body_weight_kg,
+            body_fat_pct=data.body_fat_pct,
+            resting_hr=data.resting_hr,
+            sleep_hours=data.sleep_hours,
+            steps=data.steps,
+            note=data.note.strip() if data.note else None,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
+
+    if action == "fitness.update_measurement":
+        measurement_id = int(payload.get("measurement_id", 0))
+        row = session.get(FitnessMeasurement, measurement_id)
+        if not row:
+            raise ValueError("measurement_id not found")
+
+        patch = FitnessMeasurementUpdate.model_validate(
+            {k: v for k, v in payload.items() if k != "measurement_id"}
+        )
+        updates = patch.model_dump(exclude_unset=True)
+        if not updates:
+            raise ValueError("No fitness measurement fields to update")
+
+        if "note" in updates and updates["note"] is not None:
+            updates["note"] = str(updates["note"]).strip() or None
+        if "recorded_at" in updates and updates["recorded_at"] is not None:
+            updates["recorded_at"] = _ensure_utc(updates["recorded_at"])
+
+        for key, value in updates.items():
+            setattr(row, key, value)
+
+        row.updated_at = now
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
+
+    if action == "fitness.delete_measurement":
+        measurement_id = int(payload.get("measurement_id", 0))
+        row = session.get(FitnessMeasurement, measurement_id)
+        if not row:
+            raise ValueError("measurement_id not found")
+        session.delete(row)
+        session.commit()
+        return {"ok": True, "deleted_id": measurement_id}
+
     if action == "grocery.add_item":
         data = GroceryItemCreate.model_validate(payload)
         item = GroceryItem(**data.model_dump())
@@ -363,6 +611,44 @@ def execute_action(action: str, payload: dict, session) -> dict:
         session.commit()
         session.refresh(item)
         return {"item": item.model_dump(mode="json")}
+
+    if action == "supermarket.list_stores":
+        return {
+            "stores": [
+                {
+                    "key": definition.key.value,
+                    "label": definition.label,
+                    "supports_search": definition.supports_search,
+                    "supports_mapping": definition.supports_mapping,
+                    "supports_cart_automation": definition.supports_cart_automation,
+                    "scraper_name": definition.scraper_name,
+                    "notes": definition.notes,
+                }
+                for definition in list_store_definitions()
+            ]
+        }
+
+    if action == "supermarket.search":
+        store = payload.get("store") or "intermarche"
+        queries = payload.get("queries")
+        if isinstance(queries, str):
+            queries = [queries]
+        if not isinstance(queries, list) or not queries:
+            raise ValueError("queries must be a non-empty list")
+        max_results = _clamp_int(payload.get("max_results"), default=10, minimum=1, maximum=30)
+        promotions_only = _as_bool(payload.get("promotions_only"), default=False)
+        if store != "intermarche":
+            raise ValueError("Unsupported supermarket store")
+        results = asyncio.run(
+            fetch_search_results(
+                store=SupermarketStore.INTERMARCHE,
+                queries=[str(query).strip() for query in queries if str(query).strip()],
+                max_results=max_results,
+                promotions_only=promotions_only,
+            )
+        )
+        saved = upsert_search_cache(session, SupermarketStore.INTERMARCHE, results)
+        return {"results": [row.model_dump(mode="json") for row in saved]}
 
     if action == "grocery.list_items":
         limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
@@ -430,16 +716,29 @@ def execute_action(action: str, payload: dict, session) -> dict:
         session.commit()
         return {"ok": True, "deleted_id": item_id}
 
+    if action == "video.fetch":
+        url = str(payload.get("url") or "").strip()
+        if not url:
+          raise ValueError("url is required")
+        return {"video": extract_video_source(url).model_dump(mode="json")}
+
     if action == "recipe.add":
         data = RecipeCreate.model_validate(payload)
         recipe = Recipe(
             name=data.name,
             description=data.description,
             instructions=data.instructions,
+            steps=data.steps,
+            utensils=data.utensils,
             prep_minutes=data.prep_minutes,
             cook_minutes=data.cook_minutes,
             servings=data.servings,
             tags=data.tags,
+            source_url=data.source_url,
+            source_platform=data.source_platform,
+            source_title=data.source_title,
+            source_description=data.source_description,
+            source_transcript=data.source_transcript,
         )
         session.add(recipe)
         session.commit()
@@ -451,6 +750,37 @@ def execute_action(action: str, payload: dict, session) -> dict:
         session.commit()
 
         recipe = session.get(Recipe, recipe.id)
+        return {"recipe": build_recipe_read(session, recipe).model_dump(mode="json")}
+
+    if action == "recipe.update":
+        recipe_id = int(payload.get("recipe_id", 0))
+        recipe = session.get(Recipe, recipe_id)
+        if not recipe:
+            raise ValueError("recipe_id not found")
+
+        patch = RecipeUpdate.model_validate({k: v for k, v in payload.items() if k != "recipe_id"})
+        updates = patch.model_dump(exclude_unset=True)
+        ingredients = updates.pop("ingredients", None)
+
+        for key, value in updates.items():
+            setattr(recipe, key, value)
+        recipe.updated_at = now
+        session.add(recipe)
+        session.commit()
+
+        if ingredients is not None:
+            existing = session.exec(select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)).all()
+            for row in existing:
+                session.delete(row)
+            session.commit()
+            for ing in ingredients:
+                ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+                session.add(ingredient)
+            recipe.updated_at = now
+            session.add(recipe)
+            session.commit()
+
+        session.refresh(recipe)
         return {"recipe": build_recipe_read(session, recipe).model_dump(mode="json")}
 
     if action == "recipe.list":
@@ -465,6 +795,49 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not recipe:
             raise ValueError("recipe_id not found")
         return {"recipe": build_recipe_read(session, recipe).model_dump(mode="json")}
+
+    if action == "recipe.confirm_cooked":
+        recipe_id = int(payload.get("recipe_id", 0))
+        recipe = session.get(Recipe, recipe_id)
+        if not recipe:
+            raise ValueError("recipe_id not found")
+        servings_override = _clamp_int(payload.get("servings_override"), default=None, minimum=1, maximum=100) if payload.get("servings_override") is not None else None
+        missing = compute_recipe_missing_ingredients(session, recipe, servings_override)
+        consumption = consume_recipe_ingredients(session, recipe, servings_override)
+        return {
+            "recipe_id": recipe.id,
+            "recipe_name": recipe.name,
+            "cooked_at": now,
+            "note": payload.get("note"),
+            "missing_ingredients": [item.model_dump(mode="json") for item in missing],
+            "pantry_consumption": consumption,
+        }
+
+    if action == "recipe.delete":
+        recipe_id = int(payload.get("recipe_id", 0))
+        recipe = session.get(Recipe, recipe_id)
+        if not recipe:
+            raise ValueError("recipe_id not found")
+        ingredient_rows = session.exec(select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)).all()
+        for row in ingredient_rows:
+            session.delete(row)
+        if ingredient_rows:
+            session.commit()
+
+        meal_plans = session.exec(select(MealPlan).where(MealPlan.recipe_id == recipe.id)).all()
+        for plan in meal_plans:
+            confirmation = session.exec(
+                select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
+            ).first()
+            if confirmation:
+                session.delete(confirmation)
+            session.delete(plan)
+        if meal_plans:
+            session.commit()
+
+        session.delete(recipe)
+        session.commit()
+        return {"ok": True, "deleted_id": recipe_id}
 
     if action == "meal_plan.add":
         data = MealPlanCreate.model_validate(payload)
@@ -998,6 +1371,126 @@ def execute_action(action: str, payload: dict, session) -> dict:
         currency = payload.get("currency", "EUR")
         projection = build_subscription_projection(session, currency=currency)
         return {"projection": projection.model_dump(mode="json")}
+
+    if action == "patrimony.overview":
+        accounts = session.exec(
+            select(Account).where(Account.is_active.is_(True)).order_by(Account.name.asc())
+        ).all()
+        goals = session.exec(select(SavingsGoal).order_by(SavingsGoal.target_date.asc())).all()
+        accounts_by_id = {account.id: account for account in accounts if account.id is not None}
+        return {
+            "overview": {
+                "net_worth": sum(account.balance for account in accounts),
+                "currency": "EUR",
+                "accounts": [_build_account_read_payload(account) for account in accounts],
+                "goals": [
+                    _build_savings_goal_read_payload(goal, accounts_by_id) for goal in goals
+                ],
+            }
+        }
+
+    if action == "patrimony.list_accounts":
+        active_only = _as_bool(payload.get("active_only"), default=True)
+        statement = select(Account).order_by(Account.name.asc())
+        if active_only:
+            statement = statement.where(Account.is_active.is_(True))
+        rows = session.exec(statement).all()
+        return {"accounts": [_build_account_read_payload(row) for row in rows]}
+
+    if action == "patrimony.add_account":
+        data = AccountCreate.model_validate(payload)
+        row = Account(**data.model_dump())
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"account": _build_account_read_payload(row)}
+
+    if action == "patrimony.update_account":
+        account_id = int(payload.get("account_id", 0))
+        row = session.get(Account, account_id)
+        if not row:
+            raise ValueError("account_id not found")
+        patch = AccountUpdate.model_validate(
+            {k: v for k, v in payload.items() if k != "account_id"}
+        )
+        updates = patch.model_dump(exclude_unset=True)
+        if not updates:
+            raise ValueError("No patrimony account fields to update")
+        for key, value in updates.items():
+            setattr(row, key, value)
+        row.updated_at = now
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {"account": _build_account_read_payload(row)}
+
+    if action == "patrimony.delete_account":
+        account_id = int(payload.get("account_id", 0))
+        row = session.get(Account, account_id)
+        if not row:
+            raise ValueError("account_id not found")
+        session.delete(row)
+        session.commit()
+        return {"ok": True, "deleted_id": account_id}
+
+    if action == "patrimony.list_goals":
+        goals = session.exec(select(SavingsGoal).order_by(SavingsGoal.target_date.asc())).all()
+        accounts_by_id = {
+            account.id: account
+            for account in session.exec(select(Account)).all()
+            if account.id is not None
+        }
+        return {
+            "goals": [
+                _build_savings_goal_read_payload(goal, accounts_by_id) for goal in goals
+            ]
+        }
+
+    if action == "patrimony.add_goal":
+        data = SavingsGoalCreate.model_validate(payload)
+        row = SavingsGoal(**data.model_dump())
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        accounts_by_id = {
+            account.id: account
+            for account in session.exec(select(Account)).all()
+            if account.id is not None
+        }
+        return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
+
+    if action == "patrimony.update_goal":
+        goal_id = int(payload.get("goal_id", 0))
+        row = session.get(SavingsGoal, goal_id)
+        if not row:
+            raise ValueError("goal_id not found")
+        patch = SavingsGoalUpdate.model_validate(
+            {k: v for k, v in payload.items() if k != "goal_id"}
+        )
+        updates = patch.model_dump(exclude_unset=True)
+        if not updates:
+            raise ValueError("No patrimony goal fields to update")
+        for key, value in updates.items():
+            setattr(row, key, value)
+        row.updated_at = now
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        accounts_by_id = {
+            account.id: account
+            for account in session.exec(select(Account)).all()
+            if account.id is not None
+        }
+        return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
+
+    if action == "patrimony.delete_goal":
+        goal_id = int(payload.get("goal_id", 0))
+        row = session.get(SavingsGoal, goal_id)
+        if not row:
+            raise ValueError("goal_id not found")
+        session.delete(row)
+        session.commit()
+        return {"ok": True, "deleted_id": goal_id}
 
     if action == "pantry.add_item":
         data = PantryItemCreate.model_validate(payload)

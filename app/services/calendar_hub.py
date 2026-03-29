@@ -9,6 +9,8 @@ from app.models import (
     CalendarEvent,
     CalendarItem,
     CalendarSource,
+    FitnessSession,
+    FitnessSessionStatus,
     MealPlan,
     MealPlanCookConfirmation,
     Recipe,
@@ -30,6 +32,46 @@ def _combine_utc(day: date, value: time) -> datetime:
 
 def build_calendar_item_read(item: CalendarItem) -> CalendarItemRead:
     return CalendarItemRead.model_validate(item, from_attributes=True)
+
+
+def _intervals_overlap(start_a: datetime, end_a: datetime, start_b: datetime, end_b: datetime) -> bool:
+    return start_a < end_b and start_b < end_a
+
+
+def _as_utc(value: datetime) -> datetime:
+    return _utc(value)
+
+
+def validate_calendar_slot_free(
+    session: Session,
+    start_at: datetime,
+    end_at: datetime,
+    *,
+    source: CalendarSource | None = None,
+    source_ref_id: int | None = None,
+    ignore_calendar_item_id: int | None = None,
+) -> None:
+    start = _as_utc(start_at)
+    end = _as_utc(end_at)
+    if end <= start:
+        raise ValueError("end_at must be after start_at")
+
+    manual_items = session.exec(select(CalendarItem).where(CalendarItem.generated.is_(False))).all()
+    for item in manual_items:
+        if ignore_calendar_item_id is not None and item.id == ignore_calendar_item_id:
+            continue
+        item_start = _as_utc(item.start_at)
+        item_end = _as_utc(item.end_at)
+        if _intervals_overlap(start, end, item_start, item_end):
+            raise ValueError(f"Calendar slot overlaps with existing manual item: {item.title}")
+
+    for row in project_generated_calendar_items(session):
+        if source is not None and source_ref_id is not None and row["source"] == source and row["source_ref_id"] == source_ref_id:
+            continue
+        item_start = _as_utc(row["start_at"])
+        item_end = _as_utc(row["end_at"])
+        if _intervals_overlap(start, end, item_start, item_end):
+            raise ValueError(f"Calendar slot overlaps with generated item: {row['title']}")
 
 
 def project_generated_calendar_items(session: Session) -> list[dict]:
@@ -134,6 +176,37 @@ def project_generated_calendar_items(session: Session) -> list[dict]:
                     "recipe_id": plan.recipe_id,
                     "servings_override": plan.servings_override,
                     "cooked_at": cooked_at.isoformat() if cooked_at else None,
+                },
+            }
+        )
+
+    fitness_sessions = session.exec(select(FitnessSession)).all()
+    for workout in fitness_sessions:
+        if workout.status == FitnessSessionStatus.SKIPPED:
+            continue
+        start_at = workout.planned_at.astimezone(UTC) if workout.planned_at.tzinfo else workout.planned_at.replace(tzinfo=UTC)
+        end_at = start_at + timedelta(minutes=workout.actual_duration_minutes or workout.duration_minutes or 45)
+        projected.append(
+            {
+                "source": CalendarSource.FITNESS_SESSION,
+                "source_ref_id": workout.id,
+                "title": f"Fitness: {workout.title}",
+                "description": workout.note,
+                "start_at": start_at,
+                "end_at": end_at,
+                "all_day": False,
+                "category": CalendarCategory.GENERAL,
+                "completed": workout.status == FitnessSessionStatus.COMPLETED,
+                "notification_enabled": workout.status != FitnessSessionStatus.COMPLETED,
+                "reminder_offsets_min": [120, 30],
+                "extra_data": {
+                    "session_type": workout.session_type.value,
+                    "duration_minutes": workout.duration_minutes,
+                    "actual_duration_minutes": workout.actual_duration_minutes,
+                    "status": workout.status.value,
+                    "exercises": workout.exercises or [],
+                    "effort_rating": workout.effort_rating,
+                    "calories_burned": workout.calories_burned,
                 },
             }
         )
