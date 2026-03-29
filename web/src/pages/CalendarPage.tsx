@@ -1241,7 +1241,7 @@ export default function CalendarPage() {
             {view === "month" ? (
               // Enhanced Premium Month View implementation
               <div
-                className={`flex-1 flex flex-col bg-apple-gray-200 border-t border-apple-gray-200 pt-px ${
+                className={`flex-1 flex flex-col bg-white border-t border-apple-gray-200 pt-px ${
                   isMobile
                     ? "overflow-y-auto overscroll-contain touch-pan-y"
                     : "overflow-hidden"
