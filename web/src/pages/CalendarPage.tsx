@@ -51,7 +51,7 @@ export type { Task };
 type CalendarItem = CalendarTimelineItem;
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
-const SNAP_INTERVAL_MIN = 15; // Base snap every 15 minutes
+const SNAP_INTERVAL_MIN = 5; // Base snap every 15 minutes
 const GRID_SNAP_THRESHOLD = 5; // Snap to grid if within 5 mins
 const TASK_SNAP_THRESHOLD = 8; // Snap to task boundary if within 8 mins
 
@@ -552,9 +552,11 @@ export default function CalendarPage() {
     dateString: string;
     minutes: number;
   } | null>(null);
-  const [dragOrigin, setDragOrigin] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [dragOrigin, setDragOrigin] = useState<{
+    x: number;
+    y: number;
+    offsetY: number;
+  } | null>(null);
   const swipeTouchRef = useRef<{
     id: string;
     x: number;
@@ -715,9 +717,29 @@ export default function CalendarPage() {
       | undefined;
     if (activator instanceof TouchEvent) {
       const touch = activator.touches[0] ?? activator.changedTouches[0];
-      setDragOrigin(touch ? { x: touch.clientX, y: touch.clientY } : null);
+      setDragOrigin(
+        touch
+          ? {
+              x: touch.clientX,
+              y: touch.clientY,
+              offsetY:
+                event.active.rect.current.initial?.top != null &&
+                touch.clientY >= event.active.rect.current.initial.top
+                  ? touch.clientY - event.active.rect.current.initial.top
+                  : 10,
+            }
+          : null,
+      );
     } else if (activator && "clientX" in activator && "clientY" in activator) {
-      setDragOrigin({ x: activator.clientX, y: activator.clientY });
+      setDragOrigin({
+        x: activator.clientX,
+        y: activator.clientY,
+        offsetY:
+          event.active.rect.current.initial?.top != null &&
+          activator.clientY >= event.active.rect.current.initial.top
+            ? activator.clientY - event.active.rect.current.initial.top
+            : 10,
+      });
     } else {
       setDragOrigin(null);
     }
@@ -730,7 +752,7 @@ export default function CalendarPage() {
 
       const { delta } = event;
       const currentX = dragOrigin.x + delta.x;
-      const currentY = dragOrigin.y + delta.y;
+      const currentY = dragOrigin.y + delta.y - dragOrigin.offsetY;
       const duration = getActiveDurationMinutes(activeTask, activeCalendarItem);
 
       for (const [dateString, el] of columnRefs.current.entries()) {
