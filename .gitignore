@@ -9,3 +9,7 @@ data/
 
 *.egg-info/
 .playwright-cli/
+.vscode/
+output/
+conv-gemini.md
+intermarche_results.html
