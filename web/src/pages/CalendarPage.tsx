@@ -1105,7 +1105,7 @@ export default function CalendarPage() {
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex h-full w-full bg-transparent pb-[calc(env(safe-area-inset-bottom)+6.25rem)] text-black font-sans overflow-hidden md:pb-0">
+      <div className="flex h-full w-full bg-transparent  text-black font-sans overflow-hidden md:pb-0">
         {/* INBOX PANEL (Left Sidebar) */}
         <div className="hidden h-full w-48 shrink-0 border-r border-apple-gray-200 bg-apple-gray-100 md:flex lg:w-64">
           <div className="flex h-full w-full flex-col">
@@ -1251,9 +1251,9 @@ export default function CalendarPage() {
                     ? {
                         WebkitOverflowScrolling: "touch",
                         scrollPaddingBottom:
-                          "calc(env(safe-area-inset-bottom) + 4.25rem)",
+                          "calc(env(safe-area-inset-bottom) + 6.25rem)",
                         paddingBottom:
-                          "calc(env(safe-area-inset-bottom) + 4.25rem)",
+                          "calc(env(safe-area-inset-bottom) + 6.25rem)",
                       }
                     : undefined
                 }
