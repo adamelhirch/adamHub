@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlmodel import select
 
@@ -108,9 +108,10 @@ ACTION_CATALOG = [
     {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "ingredients": "[{name, quantity, unit, note}]?"}},
     {"action": "recipe.list", "description": "List recipes", "input_schema": {"limit": "int?"}},
     {"action": "recipe.get", "description": "Get one recipe by id", "input_schema": {"recipe_id": "int"}},
-    {"action": "meal_plan.add", "description": "Plan a recipe on one date and meal slot", "input_schema": {"planned_for": "YYYY-MM-DD", "slot": "breakfast|lunch|dinner", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
-    {"action": "meal_plan.list", "description": "List meal plans", "input_schema": {"date_from": "YYYY-MM-DD?", "date_to": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "limit": "int?"}},
-    {"action": "meal_plan.update", "description": "Update one meal plan", "input_schema": {"meal_plan_id": "int", "planned_for": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "recipe_id": "int?", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
+    {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
+    {"action": "meal_plan.log_cooked", "description": "Log a recipe as cooked without pre-planning", "input_schema": {"recipe_id": "int", "cooked_at": "datetime?", "servings_override": "int?", "note": "string?"}},
+    {"action": "meal_plan.list", "description": "List meal plans", "input_schema": {"date_from": "YYYY-MM-DD?", "date_to": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner? (legacy)", "limit": "int?"}},
+    {"action": "meal_plan.update", "description": "Update one meal plan", "input_schema": {"meal_plan_id": "int", "planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int?", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
     {"action": "meal_plan.delete", "description": "Delete one meal plan", "input_schema": {"meal_plan_id": "int"}},
     {"action": "meal_plan.sync_groceries", "description": "Sync missing ingredients to grocery list for one meal plan", "input_schema": {"meal_plan_id": "int"}},
     {"action": "meal_plan.confirm_cooked", "description": "Confirm meal was cooked and consume pantry ingredients", "input_schema": {"meal_plan_id": "int", "note": "string?"}},
@@ -217,6 +218,29 @@ def _parse_date(value, field_name: str) -> date | None:
         except ValueError as exc:
             raise ValueError(f"{field_name} must be in YYYY-MM-DD format") from exc
     raise ValueError(f"{field_name} must be date")
+
+
+_SLOT_DEFAULT_TIME: dict[str, time] = {
+    "breakfast": time(hour=8, minute=0),
+    "lunch": time(hour=12, minute=30),
+    "dinner": time(hour=19, minute=30),
+}
+
+
+def _resolve_meal_planned_at(payload: dict, current: datetime | None = None) -> datetime:
+    planned_at = _parse_datetime(payload.get("planned_at"), "planned_at")
+    if planned_at is not None:
+        return planned_at
+
+    planned_for = _parse_date(payload.get("planned_for"), "planned_for")
+    if planned_for is not None:
+        slot = str(payload.get("slot") or "").strip().lower()
+        slot_time = _SLOT_DEFAULT_TIME.get(slot, time(hour=12, minute=0))
+        return datetime.combine(planned_for, slot_time).replace(tzinfo=timezone.utc)
+
+    if current is not None:
+        return current
+    return datetime.now(timezone.utc)
 
 
 def execute_action(action: str, payload: dict, session) -> dict:
@@ -448,13 +472,10 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not recipe:
             raise ValueError("recipe_id not found")
 
-        existing = session.exec(
-            select(MealPlan).where(MealPlan.planned_for == data.planned_for, MealPlan.slot == data.slot)
-        ).first()
-        if existing:
-            raise ValueError("a meal already exists for this date and slot")
-
-        plan = MealPlan(**data.model_dump())
+        planned_at = _resolve_meal_planned_at(payload)
+        plan = MealPlan(**data.model_dump(), planned_at=planned_at)
+        if plan.planned_for is None:
+            plan.planned_for = planned_at.date()
         session.add(plan)
         session.commit()
         session.refresh(plan)
@@ -465,11 +486,13 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.list":
         limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=400)
-        statement = select(MealPlan).order_by(MealPlan.planned_for.asc(), MealPlan.slot.asc()).limit(limit)
+        statement = select(MealPlan).order_by(MealPlan.planned_at.asc()).limit(limit)
         if payload.get("date_from"):
-            statement = statement.where(MealPlan.planned_for >= _parse_date(payload.get("date_from"), "date_from"))
+            date_from = _parse_date(payload.get("date_from"), "date_from")
+            statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
         if payload.get("date_to"):
-            statement = statement.where(MealPlan.planned_for <= _parse_date(payload.get("date_to"), "date_to"))
+            date_to = _parse_date(payload.get("date_to"), "date_to")
+            statement = statement.where(MealPlan.planned_at <= datetime.combine(date_to, time.max).replace(tzinfo=timezone.utc))
         if payload.get("slot"):
             statement = statement.where(MealPlan.slot == MealSlot(payload.get("slot")))
         plans = session.exec(statement).all()
@@ -487,20 +510,9 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if "recipe_id" in updates and not session.get(Recipe, updates["recipe_id"]):
             raise ValueError("recipe_id not found")
 
-        target_date = updates.get("planned_for", plan.planned_for)
-        target_slot = updates.get("slot", plan.slot)
-        if target_date != plan.planned_for or target_slot != plan.slot:
-            existing = session.exec(
-                select(MealPlan).where(
-                    MealPlan.planned_for == target_date,
-                    MealPlan.slot == target_slot,
-                    MealPlan.id != plan.id,
-                )
-            ).first()
-            if existing:
-                raise ValueError("a meal already exists for this date and slot")
-
         reset_cook_confirmation = (
+            ("planned_at" in updates and updates.get("planned_at") != plan.planned_at)
+            or
             ("planned_for" in updates and updates.get("planned_for") != plan.planned_for)
             or ("slot" in updates and updates.get("slot") != plan.slot)
             or ("recipe_id" in updates and updates.get("recipe_id") != plan.recipe_id)
@@ -509,6 +521,9 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
         for key, value in updates.items():
             setattr(plan, key, value)
+        plan.planned_at = _resolve_meal_planned_at({**payload, **updates}, current=plan.planned_at)
+        if plan.planned_for is None:
+            plan.planned_for = plan.planned_at.date()
         if reset_cook_confirmation:
             confirmation = session.exec(
                 select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
@@ -560,6 +575,29 @@ def execute_action(action: str, payload: dict, session) -> dict:
             "confirmed_at": result.get("confirmed_at"),
             "note": result.get("note"),
             "pantry_consumption": result.get("pantry_consumption", []),
+        }
+
+    if action == "meal_plan.log_cooked":
+        recipe_id = int(payload.get("recipe_id", 0))
+        recipe = session.get(Recipe, recipe_id)
+        if not recipe:
+            raise ValueError("recipe_id not found")
+        cooked_at = _parse_datetime(payload.get("cooked_at"), "cooked_at") or now
+        plan = MealPlan(
+            recipe_id=recipe_id,
+            planned_at=cooked_at,
+            planned_for=cooked_at.date(),
+            servings_override=payload.get("servings_override"),
+            note=payload.get("note") or "cooked without explicit planning",
+            auto_add_missing_ingredients=False,
+        )
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+        result = confirm_meal_plan_cooked(session, plan, note=payload.get("note"))
+        return {
+            "meal_plan": build_meal_plan_read(session, plan).model_dump(mode="json"),
+            "confirmation": result,
         }
 
     if action == "meal_plan.unconfirm_cooked":

@@ -28,12 +28,13 @@ engine = create_engine(settings.db_url, connect_args=connect_args, pool_pre_ping
 
 
 def init_db() -> None:
-    # Alembic handles migrations now, we just ensure we can connect
+    # Keep startup resilient in local/dev setups where migrations may not have run yet.
     retries = max(settings.db_connect_retries, 0)
     for attempt in range(retries + 1):
         try:
             with engine.connect():
                 pass
+            SQLModel.metadata.create_all(engine)
             return
         except OperationalError:
             if attempt == retries:

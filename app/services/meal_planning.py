@@ -167,6 +167,7 @@ def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
 
     return MealPlanRead(
         id=meal_plan.id,
+        planned_at=meal_plan.planned_at,
         planned_for=meal_plan.planned_for,
         slot=meal_plan.slot,
         recipe_id=meal_plan.recipe_id,
@@ -190,7 +191,7 @@ def sync_meal_plan_to_grocery(session: Session, meal_plan: MealPlan) -> tuple[in
         return 0, []
 
     missing = compute_recipe_missing_ingredients(session, recipe, meal_plan.servings_override)
-    note_prefix = f"meal {meal_plan.planned_for.isoformat()} {meal_plan.slot.value}"
+    note_prefix = f"meal {meal_plan.planned_at.isoformat()}"
     added = add_missing_to_grocery(session, missing, note_prefix=note_prefix)
 
     meal_plan.synced_grocery_at = datetime.now(timezone.utc)

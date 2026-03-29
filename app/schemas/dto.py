@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import (
+    AccountType,
     EventType,
     GoalStatus,
     HabitFrequency,
@@ -13,6 +14,8 @@ from app.models import (
     SubscriptionInterval,
     TaskPriority,
     TaskStatus,
+    SupermarketStore,
+    SupermarketTargetType,
     TransactionKind,
 )
 
@@ -113,14 +116,17 @@ class GroceryItemCreate(BaseModel):
     quantity: float = 1
     unit: str = "item"
     category: str | None = None
+    image_url: str | None = None
     priority: int = 3
     note: str | None = None
 
 
 class GroceryItemUpdate(BaseModel):
+    name: str | None = None
     quantity: float | None = None
     unit: str | None = None
     category: str | None = None
+    image_url: str | None = None
     checked: bool | None = None
     priority: int | None = None
     note: str | None = None
@@ -132,6 +138,7 @@ class GroceryItemRead(BaseModel):
     quantity: float
     unit: str
     category: str | None
+    image_url: str | None
     checked: bool
     priority: int
     note: str | None
@@ -153,6 +160,71 @@ class RecipeIngredientRead(BaseModel):
     quantity: float
     unit: str
     note: str | None
+
+
+class SupermarketSearchRequest(BaseModel):
+    store: SupermarketStore = SupermarketStore.INTERMARCHE
+    queries: list[str] = Field(default_factory=list, min_length=1, max_length=10)
+    max_results: int = Field(default=10, ge=1, le=30)
+    promotions_only: bool = False
+
+
+class SupermarketSearchResult(BaseModel):
+    cache_id: int
+    store: SupermarketStore
+    query: str
+    external_id: str | None
+    name: str
+    brand: str | None
+    category: str | None = None
+    packaging: str | None
+    price_amount: float | None
+    price_text: str | None
+    image_url: str | None
+    product_url: str | None
+    fetched_at: datetime
+    expires_at: datetime
+
+
+class SupermarketStoreRead(BaseModel):
+    key: SupermarketStore
+    label: str
+    supports_search: bool = True
+    supports_mapping: bool = True
+    supports_cart_automation: bool = False
+
+
+class SupermarketMappingCreate(BaseModel):
+    cache_id: int | None = None
+    store: SupermarketStore = SupermarketStore.INTERMARCHE
+    external_id: str
+    store_label: str
+    name_snapshot: str
+    category_snapshot: str | None = None
+    packaging_snapshot: str | None = None
+    price_snapshot: str | None = None
+    product_url: str | None = None
+    image_url: str | None = None
+    last_verified_at: datetime | None = None
+
+
+class SupermarketMappingRead(BaseModel):
+    id: int
+    target_type: SupermarketTargetType
+    target_id: int
+    store: SupermarketStore
+    external_id: str
+    store_label: str
+    name_snapshot: str
+    category_snapshot: str | None
+    packaging_snapshot: str | None
+    price_snapshot: str | None
+    product_url: str | None
+    image_url: str | None
+    last_verified_at: datetime
+    active: bool
+    created_at: datetime
+    updated_at: datetime
 
 
 class RecipeCreate(BaseModel):
@@ -189,8 +261,9 @@ class MissingIngredientRead(BaseModel):
 
 
 class MealPlanCreate(BaseModel):
-    planned_for: date
-    slot: MealSlot
+    planned_at: datetime | None = None
+    planned_for: date | None = None
+    slot: MealSlot | None = None
     recipe_id: int
     servings_override: int | None = Field(default=None, ge=1, le=100)
     note: str | None = None
@@ -198,6 +271,7 @@ class MealPlanCreate(BaseModel):
 
 
 class MealPlanUpdate(BaseModel):
+    planned_at: datetime | None = None
     planned_for: date | None = None
     slot: MealSlot | None = None
     recipe_id: int | None = None
@@ -208,8 +282,9 @@ class MealPlanUpdate(BaseModel):
 
 class MealPlanRead(BaseModel):
     id: int
-    planned_for: date
-    slot: MealSlot
+    planned_at: datetime
+    planned_for: date | None
+    slot: MealSlot | None
     recipe_id: int
     recipe_name: str
     servings_override: int | None
@@ -225,6 +300,13 @@ class MealPlanRead(BaseModel):
 
 
 class MealPlanConfirmCooked(BaseModel):
+    note: str | None = None
+
+
+class MealCookLogCreate(BaseModel):
+    recipe_id: int
+    cooked_at: datetime | None = None
+    servings_override: int | None = Field(default=None, ge=1, le=100)
     note: str | None = None
 
 
@@ -492,6 +574,7 @@ class PantryItemCreate(BaseModel):
     quantity: float = 0
     unit: str = "item"
     category: str | None = None
+    image_url: str | None = None
     min_quantity: float = 0
     expires_at: date | None = None
     location: str | None = None
@@ -499,9 +582,11 @@ class PantryItemCreate(BaseModel):
 
 
 class PantryItemUpdate(BaseModel):
+    name: str | None = None
     quantity: float | None = None
     unit: str | None = None
     category: str | None = None
+    image_url: str | None = None
     min_quantity: float | None = None
     expires_at: date | None = None
     location: str | None = None
@@ -518,6 +603,7 @@ class PantryItemRead(BaseModel):
     quantity: float
     unit: str
     category: str | None
+    image_url: str | None
     min_quantity: float
     expires_at: date | None
     location: str | None
@@ -608,6 +694,80 @@ class SkillExecuteResponse(BaseModel):
     action: str
     ok: bool
     data: dict
+
+
+class AccountCreate(BaseModel):
+    name: str
+    account_type: AccountType = AccountType.SAVINGS
+    balance: float = 0.0
+    currency: str = "EUR"
+    institution: str | None = None
+    note: str | None = None
+
+
+class AccountUpdate(BaseModel):
+    name: str | None = None
+    account_type: AccountType | None = None
+    balance: float | None = None
+    currency: str | None = None
+    institution: str | None = None
+    note: str | None = None
+    is_active: bool | None = None
+
+
+class AccountRead(BaseModel):
+    id: int
+    name: str
+    account_type: AccountType
+    balance: float
+    currency: str
+    institution: str | None
+    note: str | None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SavingsGoalCreate(BaseModel):
+    title: str
+    target_amount: float
+    current_amount: float = 0.0
+    currency: str = "EUR"
+    target_date: date | None = None
+    account_id: int | None = None
+    note: str | None = None
+
+
+class SavingsGoalUpdate(BaseModel):
+    title: str | None = None
+    target_amount: float | None = None
+    current_amount: float | None = None
+    currency: str | None = None
+    target_date: date | None = None
+    account_id: int | None = None
+    note: str | None = None
+    completed: bool | None = None
+
+
+class SavingsGoalRead(BaseModel):
+    id: int
+    title: str
+    target_amount: float
+    current_amount: float
+    currency: str
+    target_date: date | None
+    account_id: int | None
+    note: str | None
+    completed: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class PatrimoineOverview(BaseModel):
+    net_worth: float
+    currency: str
+    accounts: list["AccountRead"]
+    goals: list["SavingsGoalRead"]
 
 
 class DashboardOverview(BaseModel):

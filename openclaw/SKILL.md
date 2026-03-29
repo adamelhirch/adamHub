@@ -67,7 +67,7 @@ Use this map for intent-to-action selection.
 - monthly money synthesis -> `finance.month_summary`
 - shopping list operations -> `grocery.add_item|list_items|update_item|check_item|delete_item` (checked items auto-sync pantry)
 - recipe knowledge base -> `recipe.add|list|get`
-- meal planning + auto grocery from pantry gaps -> `meal_plan.add|list|update|delete|sync_groceries|confirm_cooked|unconfirm_cooked` (planning does not consume pantry; `confirm_cooked` consumes pantry; `unconfirm_cooked` rolls it back)
+- meal planning + auto grocery from pantry gaps -> `meal_plan.add|list|update|delete|sync_groceries|confirm_cooked|unconfirm_cooked|log_cooked` (plan with `planned_at` datetime; planning does not consume pantry; `confirm_cooked` consumes pantry; `unconfirm_cooked` rolls it back; `log_cooked` records an unplanned cooked recipe)
 - unified agenda + reminders -> `calendar.sync|list_items|agenda|due_reminders|ack_reminder|add_item|update_item|delete_item`
 - habits setup/tracking -> `habit.create|list|set_active|log|list_logs`
 - goals and milestones -> `goal.create|list|get|update|add_milestone|list_milestones|update_milestone`

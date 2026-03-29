@@ -65,3 +65,14 @@ def complete_task(task_id: int, session: SessionDep) -> TaskRead:
     session.commit()
     session.refresh(task)
     return TaskRead.model_validate(task, from_attributes=True)
+
+
+@router.delete("/{task_id}")
+def delete_task(task_id: int, session: SessionDep) -> dict:
+    task = session.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    session.delete(task)
+    session.commit()
+    return {"ok": True}

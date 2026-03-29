@@ -47,7 +47,7 @@ npm run dev
 
 Open:
 - Frontend (official React/Vite): `http://localhost:5173/`
-- Frontend legacy (FastAPI static): `http://localhost:8000/`
+- Frontend production (after `npm run build`, served by FastAPI): `http://localhost:8000/`
 - App docs: `http://localhost:8000/docs`
 - Health: `http://localhost:8000/health`
 - Skill manifest: `http://localhost:8000/api/v1/skill/manifest`
@@ -72,12 +72,31 @@ Use header on all protected requests:
 - `pantry`: home inventory, low stock, expiring items
 - `notes`: notes, journal entries, ideas, pinned notes
 - `linear`: sync Linear projects/issues, read cache, create issue
+- `supermarket`: Intermarché product search cache + durable mappings for pantry and recipe ingredients
 - `skill`: discovery + action execution endpoint for OpenClaw
 
 Current scope:
 - 45+ REST endpoints under `/api/v1`
 - 70+ AI actions available through `/api/v1/skill/execute`
 - one API key-secured interface for app clients and OpenClaw
+- NTFY push reminders with deep links to `/calendar` or `/pantry`
+- Intermarché v1 workflow: search on demand, cache recent hits, and link chosen products to pantry items or recipe ingredients
+
+## Supermarket integration v1
+
+Intermarché is now integrated in a scoped v1 mode:
+- `GET /api/v1/supermarket/stores` lists supported providers
+- `POST /api/v1/supermarket/search` runs an on-demand search and stores a short-lived cache
+- `GET /api/v1/supermarket/search` reads cached recent results
+- `PUT /api/v1/supermarket/mappings/recipe-ingredients/{id}` links a recipe ingredient to a product
+- `PUT /api/v1/supermarket/mappings/pantry-items/{id}` links a pantry item to a product
+- `GET /api/v1/supermarket/mappings/...` reads the current active mapping
+- `DELETE /api/v1/supermarket/mappings/{mapping_id}` deactivates a mapping
+
+Out of scope for this version:
+- no full catalog scrape
+- no Drive account login
+- no automatic cart filling yet
 
 ## Testing
 
@@ -103,6 +122,12 @@ npm run test
 ```
 
 Playwright E2E checks are run against `http://localhost:5173` (frontend) and `http://localhost:8000` (API).
+
+NTFY setup:
+- set `ADAMHUB_NTFY_TOPIC` and optional `ADAMHUB_NTFY_SERVER`
+- scheduler sends deep-link notifications:
+  - pantry expiry -> `/pantry?item=<id>`
+  - calendar reminders -> `/calendar?day=YYYY-MM-DD&item=<id>`
 
 ## Skill integration for OpenClaw
 

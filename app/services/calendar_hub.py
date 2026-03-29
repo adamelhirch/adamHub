@@ -11,20 +11,12 @@ from app.models import (
     CalendarSource,
     MealPlan,
     MealPlanCookConfirmation,
-    MealSlot,
     Recipe,
     Subscription,
     Task,
     TaskStatus,
 )
 from app.schemas import CalendarItemRead, CalendarReminderRead
-
-_MEAL_DEFAULT_TIMES: dict[MealSlot, tuple[time, time]] = {
-    MealSlot.BREAKFAST: (time(hour=8, minute=0), time(hour=8, minute=45)),
-    MealSlot.LUNCH: (time(hour=12, minute=30), time(hour=13, minute=30)),
-    MealSlot.DINNER: (time(hour=19, minute=30), time(hour=20, minute=45)),
-}
-
 
 def _utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -113,7 +105,12 @@ def project_generated_calendar_items(session: Session) -> list[dict]:
     }
     recipes_by_id = {recipe.id: recipe for recipe in session.exec(select(Recipe)).all()}
     for plan in meal_plans:
-        start_t, end_t = _MEAL_DEFAULT_TIMES[plan.slot]
+        if plan.planned_at.tzinfo is None:
+            start_at = plan.planned_at.replace(tzinfo=UTC)
+        else:
+            start_at = plan.planned_at.astimezone(UTC)
+        slot_label = plan.slot.value if plan.slot else start_at.strftime("%H:%M")
+        end_at = start_at + timedelta(minutes=75)
         recipe = recipes_by_id.get(plan.recipe_id)
         recipe_name = recipe.name if recipe else f"Recipe #{plan.recipe_id}"
         confirmation = cooked_by_plan.get(plan.id)
@@ -123,17 +120,17 @@ def project_generated_calendar_items(session: Session) -> list[dict]:
             {
                 "source": CalendarSource.MEAL_PLAN,
                 "source_ref_id": plan.id,
-                "title": f"Meal ({plan.slot.value}): {recipe_name}",
+                "title": f"Meal ({slot_label}): {recipe_name}",
                 "description": plan.note,
-                "start_at": _combine_utc(plan.planned_for, start_t),
-                "end_at": _combine_utc(plan.planned_for, end_t),
+                "start_at": start_at,
+                "end_at": end_at,
                 "all_day": False,
                 "category": CalendarCategory.MEAL,
                 "completed": completed,
                 "notification_enabled": not completed,
                 "reminder_offsets_min": [180, 60],
                 "extra_data": {
-                    "slot": plan.slot.value,
+                    "slot": plan.slot.value if plan.slot else None,
                     "recipe_id": plan.recipe_id,
                     "servings_override": plan.servings_override,
                     "cooked_at": cooked_at.isoformat() if cooked_at else None,

@@ -40,6 +40,8 @@ def sync_checked_grocery_item_to_pantry(session: Session, grocery_item: GroceryI
 
     if target:
         target.quantity = round((target.quantity or 0.0) + quantity, 3)
+        if not target.image_url and grocery_item.image_url:
+            target.image_url = grocery_item.image_url
         target.updated_at = now
         session.add(target)
     else:
@@ -48,6 +50,7 @@ def sync_checked_grocery_item_to_pantry(session: Session, grocery_item: GroceryI
             quantity=quantity,
             unit=grocery_item.unit or "item",
             category=grocery_item.category,
+            image_url=grocery_item.image_url,
             min_quantity=0,
             note=f"auto from grocery #{grocery_item.id}",
             updated_at=now,

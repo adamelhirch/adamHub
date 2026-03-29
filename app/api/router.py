@@ -11,10 +11,12 @@ from app.api.linear_hub import router as linear_router
 from app.api.meal_plans import router as meal_plans_router
 from app.api.notes import router as notes_router
 from app.api.pantry import router as pantry_router
+from app.api.patrimony import router as patrimony_router
 from app.api.recipes import router as recipes_router
 from app.api.skill import router as skill_router
 from app.api.subscriptions import router as subscriptions_router
 from app.api.tasks import router as tasks_router
+from app.api.endpoints.supermarket import router as supermarket_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -29,6 +31,8 @@ api_router.include_router(goals_router)
 api_router.include_router(events_router)
 api_router.include_router(subscriptions_router)
 api_router.include_router(pantry_router)
+api_router.include_router(patrimony_router)
 api_router.include_router(notes_router)
 api_router.include_router(linear_router)
 api_router.include_router(skill_router)
+api_router.include_router(supermarket_router)

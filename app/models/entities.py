@@ -23,6 +23,23 @@ class TaskPriority(str, Enum):
     URGENT = "urgent"
 
 
+class AccountType(str, Enum):
+    CHECKING = "checking"
+    SAVINGS = "savings"
+    INVESTMENT = "investment"
+    CRYPTO = "crypto"
+    OTHER = "other"
+
+
+class SupermarketStore(str, Enum):
+    INTERMARCHE = "intermarche"
+
+
+class SupermarketTargetType(str, Enum):
+    RECIPE_INGREDIENT = "recipe_ingredient"
+    PANTRY_ITEM = "pantry_item"
+
+
 class TransactionKind(str, Enum):
     EXPENSE = "expense"
     INCOME = "income"
@@ -124,6 +141,7 @@ class GroceryItem(SQLModel, table=True):
     quantity: float = 1
     unit: str = "item"
     category: str | None = None
+    image_url: str | None = None
     checked: bool = False
     priority: int = 3
     note: str | None = None
@@ -162,8 +180,10 @@ class RecipeIngredient(SQLModel, table=True):
 
 class MealPlan(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    planned_for: date
-    slot: MealSlot
+    planned_at: datetime = Field(default_factory=utcnow)
+    # Legacy fields kept nullable for backward compatibility with old clients/data.
+    planned_for: date | None = None
+    slot: MealSlot | None = None
     recipe_id: int = Field(foreign_key="recipe.id", index=True)
     servings_override: int | None = None
     note: str | None = None
@@ -259,6 +279,7 @@ class PantryItem(SQLModel, table=True):
     quantity: float = 0
     unit: str = "item"
     category: str | None = None
+    image_url: str | None = None
     min_quantity: float = 0
     expires_at: date | None = None
     location: str | None = None
@@ -322,3 +343,80 @@ class LinearIssueCache(SQLModel, table=True):
     project_linear_id: str | None = Field(default=None, index=True)
     url: str | None = None
     synced_at: datetime = Field(default_factory=utcnow)
+
+
+class SupermarketProduct(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    packaging: str | None = None
+    price: str | None = None
+    image_url: str | None = None
+    store: str
+    external_id: str | None = Field(default=None, index=True)
+    category: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SupermarketSearchCache(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    store: SupermarketStore = Field(index=True)
+    query: str = Field(index=True)
+    external_id: str | None = Field(default=None, index=True)
+    name: str
+    brand: str | None = None
+    category: str | None = None
+    packaging: str | None = None
+    price_amount: float | None = None
+    price_text: str | None = None
+    image_url: str | None = None
+    product_url: str | None = None
+    payload_json: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    fetched_at: datetime = Field(default_factory=utcnow, index=True)
+    expires_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class SupermarketMapping(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    target_type: SupermarketTargetType = Field(index=True)
+    target_id: int = Field(index=True)
+    store: SupermarketStore = Field(index=True)
+    external_id: str
+    store_label: str
+    name_snapshot: str
+    category_snapshot: str | None = None
+    packaging_snapshot: str | None = None
+    price_snapshot: str | None = None
+    product_url: str | None = None
+    image_url: str | None = None
+    last_verified_at: datetime = Field(default_factory=utcnow)
+    active: bool = Field(default=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class Account(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    account_type: AccountType = AccountType.SAVINGS
+    balance: float = 0.0
+    currency: str = Field(default="EUR", max_length=8)
+    institution: str | None = None
+    note: str | None = None
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SavingsGoal(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    title: str
+    target_amount: float
+    current_amount: float = 0.0
+    currency: str = Field(default="EUR", max_length=8)
+    target_date: date | None = None
+    account_id: int | None = Field(default=None, foreign_key="account.id", index=True)
+    note: str | None = None
+    completed: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

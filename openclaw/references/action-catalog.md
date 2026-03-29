@@ -53,6 +53,7 @@ Request shape:
 - `meal_plan.sync_groceries`
 - `meal_plan.confirm_cooked`
 - `meal_plan.unconfirm_cooked`
+- `meal_plan.log_cooked`
 
 ## Calendar
 
