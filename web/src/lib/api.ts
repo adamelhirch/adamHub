@@ -1,11 +1,14 @@
 import axios from "axios";
 
+const apiBaseUrl = import.meta.env.VITE_API_URL?.trim() || "/api/v1";
+const apiKey = import.meta.env.VITE_API_KEY?.trim();
+
 // Create an Axios instance with base configuration
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api/v1",
+  baseURL: apiBaseUrl,
   headers: {
     "Content-Type": "application/json",
-    "X-API-Key": import.meta.env.VITE_API_KEY || "change-me",
+    ...(apiKey ? { "X-API-Key": apiKey } : {}),
   },
 });
 

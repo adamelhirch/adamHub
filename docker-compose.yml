@@ -16,7 +16,11 @@ services:
     restart: unless-stopped
 
   adamhub-api:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+        VITE_API_KEY: ${VITE_API_KEY:-}
     container_name: adamhub-api
     depends_on:
       postgres:

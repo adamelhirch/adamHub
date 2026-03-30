@@ -32,8 +32,11 @@ Remplis au minimum:
 
 ```env
 ADAMHUB_API_KEYS=un_secret_long_et_random
+ADAMHUB_API_KEY=un_secret_long_et_random
 ADAMHUB_PUBLIC_BASE_URL=https://adamhub.ton-domaine.com
 ADAMHUB_ALLOW_ORIGINS=https://adamhub.ton-domaine.com
+VITE_API_URL=https://adamhub.ton-domaine.com/api/v1
+VITE_API_KEY=un_secret_long_et_random
 
 POSTGRES_DB=adamhub
 POSTGRES_USER=adamhub
@@ -46,6 +49,8 @@ Important:
 
 - le backend AdamHUB valide les requetes avec `ADAMHUB_API_KEYS`
 - `ADAMHUB_API_KEY` est juste un miroir de confort pour la doc et certains outils
+- `VITE_API_URL` et `VITE_API_KEY` sont injectees au build du frontend
+- apres toute modification de `VITE_*`, il faut rebuild l'image avec `docker compose ... up -d --build`
 - OpenClaw n'a pas besoin de tourner dans le meme `docker compose`
 
 Lance l'installation:
@@ -66,7 +71,7 @@ Ce script:
 Le flux de demarrage est:
 
 1. le conteneur attend que la DB soit joignable
-2. `alembic upgrade head`
+2. `alembic upgrade heads`
 3. `uvicorn app.main:app`
 
 Donc pour une mise a jour, tu n'as pas besoin de lancer les migrations a la main.

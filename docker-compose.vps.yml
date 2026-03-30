@@ -18,6 +18,9 @@ services:
   adamhub-api:
     build:
       context: .
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+        VITE_API_KEY: ${VITE_API_KEY:-}
     image: adamhub-api:latest
     container_name: adamhub-api
     depends_on:
