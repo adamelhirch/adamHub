@@ -5,6 +5,7 @@ description = "Unified life management API for tasks, finances, groceries, recip
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.14.0",
   "fastapi>=0.115.0",
   "pydantic-settings>=2.6.1",
   "psycopg[binary]>=3.2.3",

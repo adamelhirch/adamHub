@@ -6,7 +6,7 @@ DELAY="${ADAMHUB_MIGRATION_DELAY:-2}"
 ATTEMPT=1
 
 while :; do
-  if alembic upgrade head; then
+  if python -m alembic upgrade head; then
     break
   fi
 
