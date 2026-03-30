@@ -92,10 +92,21 @@ interface FinanceStore {
   fetchSummary: (year: number, month: number) => Promise<void>;
 
   fetchSubscriptions: () => Promise<void>;
+  addSubscription: (data: {
+    name: string;
+    category?: string;
+    amount: number;
+    currency?: string;
+    interval?: SubscriptionInterval;
+    next_due_date: string;
+    autopay?: boolean;
+    active?: boolean;
+    note?: string;
+  }) => Promise<Subscription>;
   fetchProjection: () => Promise<void>;
 }
 
-export const useFinanceStore = create<FinanceStore>((set) => ({
+export const useFinanceStore = create<FinanceStore>((set, get) => ({
   transactions: [],
   budgets: [],
   summary: null,
@@ -159,6 +170,23 @@ export const useFinanceStore = create<FinanceStore>((set) => ({
       set({ subscriptions: res.data });
     } catch (e) {
       set({ error: 'Failed to fetch subscriptions' });
+    }
+  },
+
+  addSubscription: async (data) => {
+    try {
+      const res = await api.post('/subscriptions', data);
+      set((state) => ({
+        subscriptions: [...state.subscriptions, res.data].sort((a, b) =>
+          String(a.next_due_date).localeCompare(String(b.next_due_date)),
+        ),
+        error: null,
+      }));
+      await get().fetchProjection();
+      return res.data;
+    } catch (e) {
+      set({ error: 'Failed to add subscription' });
+      throw e;
     }
   },
 

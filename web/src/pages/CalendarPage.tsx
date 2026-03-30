@@ -24,11 +24,14 @@ import {
   Plus,
   Trash2,
   Calendar as CalendarIcon,
+  RadioTower,
 } from "lucide-react";
 import {
   format,
   addDays,
+  addMonths,
   subDays,
+  subMonths,
   startOfWeek,
   endOfWeek,
   isSameDay,
@@ -43,8 +46,9 @@ import DroppableSlot from "../components/DroppableSlot";
 import DraggableCalendarItem, {
   type CalendarTimelineItem,
 } from "../components/DraggableCalendarItem";
+import CalendarFeedPanel from "../components/CalendarFeedPanel";
 import { useTaskStore } from "../store/taskStore";
-import type { TaskItem as Task } from "../store/taskStore";
+import type { TaskItem as Task, TaskScheduleMode } from "../store/taskStore";
 
 export type { Task };
 
@@ -54,6 +58,21 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const SNAP_INTERVAL_MIN = 5; // Base snap every 15 minutes
 const GRID_SNAP_THRESHOLD = 5; // Snap to grid if within 5 mins
 const TASK_SNAP_THRESHOLD = 8; // Snap to task boundary if within 8 mins
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: "Lundi" },
+  { value: 1, label: "Mardi" },
+  { value: 2, label: "Mercredi" },
+  { value: 3, label: "Jeudi" },
+  { value: 4, label: "Vendredi" },
+  { value: 5, label: "Samedi" },
+  { value: 6, label: "Dimanche" },
+];
+const TASK_SCHEDULE_LABELS: Record<TaskScheduleMode, string> = {
+  none: "Non planifiée",
+  once: "Une fois",
+  daily: "Tous les jours",
+  weekly: "Un jour de semaine",
+};
 
 const timeToMinutes = (timeStr: string) => {
   const [h, m] = timeStr.split(":").map(Number);
@@ -65,6 +84,119 @@ const minutesToTimeStr = (totalMinutes: number) => {
   const m = totalMinutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
+
+function buildTaskScheduleUpdate(
+  scheduleMode: TaskScheduleMode,
+  dateValue: string,
+  timeValue: string,
+  weekdayValue: number | null,
+): Pick<Task, "scheduleMode" | "slotId" | "scheduleTime" | "scheduleWeekday"> {
+  if (scheduleMode === "none") {
+    return {
+      scheduleMode,
+      slotId: null,
+      scheduleTime: null,
+      scheduleWeekday: null,
+    };
+  }
+
+  if (scheduleMode === "once") {
+    return {
+      scheduleMode,
+      slotId: dateValue && timeValue ? `${dateValue}-${timeValue}` : null,
+      scheduleTime: null,
+      scheduleWeekday: null,
+    };
+  }
+
+  return {
+    scheduleMode,
+    slotId: null,
+    scheduleTime: timeValue || null,
+    scheduleWeekday: scheduleMode === "weekly" ? weekdayValue : null,
+  };
+}
+
+function getWeekdayFromDateString(dateString: string) {
+  const date = new Date(`${dateString}T00:00:00Z`);
+  return (date.getUTCDay() + 6) % 7;
+}
+
+function getCalendarWindow(currentDate: Date, view: "day" | "week" | "month") {
+  if (view === "day") {
+    const day = format(currentDate, "yyyy-MM-dd");
+    return {
+      fromAt: `${day}T00:00:00Z`,
+      toAt: `${day}T23:59:59Z`,
+    };
+  }
+
+  if (view === "week") {
+    const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const end = endOfWeek(currentDate, { weekStartsOn: 1 });
+    return {
+      fromAt: `${format(start, "yyyy-MM-dd")}T00:00:00Z`,
+      toAt: `${format(end, "yyyy-MM-dd")}T23:59:59Z`,
+    };
+  }
+
+  const monthStart = startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 });
+  const monthEnd = endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 });
+  return {
+    fromAt: `${format(monthStart, "yyyy-MM-dd")}T00:00:00Z`,
+    toAt: `${format(monthEnd, "yyyy-MM-dd")}T23:59:59Z`,
+  };
+}
+
+function getCalendarItemScheduleMode(item: CalendarItem): TaskScheduleMode | null {
+  const rawMode = item.extra_data?.["schedule_mode"];
+  if (
+    rawMode === "none" ||
+    rawMode === "once" ||
+    rawMode === "daily" ||
+    rawMode === "weekly"
+  ) {
+    return rawMode;
+  }
+  return null;
+}
+
+function getHabitScheduleTimes(item: CalendarItem): string[] {
+  const raw = item.extra_data?.["schedule_times"];
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .sort();
+  }
+  const fallback = item.extra_data?.["schedule_time"];
+  return typeof fallback === "string" && fallback.length > 0 ? [fallback] : [];
+}
+
+function getHabitScheduleWeekdays(item: CalendarItem): number[] {
+  const raw = item.extra_data?.["schedule_weekdays"];
+  if (Array.isArray(raw)) {
+    return raw
+      .filter(
+        (value): value is number =>
+          typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6,
+      )
+      .sort((a, b) => a - b);
+  }
+  const fallback = item.extra_data?.["schedule_weekday"];
+  return typeof fallback === "number" ? [fallback] : [];
+}
+
+function isOneOffTask(task: Task) {
+  return task.scheduleMode === "once" && Boolean(task.slotId);
+}
+
+function isInboxTask(task: Task) {
+  return task.scheduleMode === "none" || (task.scheduleMode === "once" && !task.slotId);
+}
+
+function isOneOffCalendarTask(item: CalendarItem) {
+  return item.source === "task" && getCalendarItemScheduleMode(item) === "once";
+}
 
 function getCalendarItemDurationMinutes(item: CalendarItem) {
   const start = new Date(item.start_at).getTime();
@@ -84,6 +216,8 @@ function getCalendarItemSourceLabel(item: CalendarItem) {
       return "Fitness";
     case "task":
       return "Tâche";
+    case "habit":
+      return "Routine";
     case "event":
       return "Événement";
     case "subscription":
@@ -124,9 +258,7 @@ function getScheduleKeyFromTask(task: Task) {
 }
 
 function getScheduleKeyFromCalendarItem(item: CalendarItem) {
-  return item.source === "manual"
-    ? `manual:${item.id}`
-    : `${item.source}:${item.source_ref_id ?? item.id}`;
+  return `${item.source}:${item.id}`;
 }
 
 function computeSnappedMinutes(
@@ -382,54 +514,177 @@ function TaskEditorModal({
                 </div>
               </div>
 
-              <div className="flex flex-col md:flex-row gap-4 p-4 bg-apple-gray-50 rounded-xl border border-apple-gray-100">
-                <div className="flex-1">
-                  <label className="block text-xs font-semibold text-apple-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <CalendarIcon className="w-3.5 h-3.5" /> Date
+              <div className="grid gap-4 rounded-xl border border-apple-gray-100 bg-apple-gray-50 p-4 md:grid-cols-3">
+                <div>
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                    <span className="inline-flex items-center gap-1">
+                      <CalendarIcon className="h-3.5 w-3.5" />
+                      Planning
+                    </span>
                   </label>
-                  <input
-                    type="date"
-                    min={format(new Date(), "yyyy-MM-dd")}
-                    value={
-                      task.slotId
-                        ? task.slotId.substring(0, 10)
-                        : format(new Date(), "yyyy-MM-dd")
-                    }
+                  <select
+                    value={task.scheduleMode}
                     onChange={(e) => {
-                      const date = e.target.value;
-                      if (!date) {
-                        onUpdate({ slotId: null });
-                        return;
-                      }
-                      const hourStr = task.slotId
-                        ? task.slotId.substring(11, 16)
-                        : "09:00";
-                      onUpdate({ slotId: `${date}-${hourStr}` });
+                      const nextMode = e.target.value as TaskScheduleMode;
+                      const currentDate =
+                        task.slotId?.substring(0, 10) ??
+                        format(new Date(), "yyyy-MM-dd");
+                      const currentTime =
+                        task.slotId?.substring(11, 16) ??
+                        task.scheduleTime ??
+                        "09:00";
+                      onUpdate(
+                        buildTaskScheduleUpdate(
+                          nextMode,
+                          currentDate,
+                          currentTime,
+                          task.scheduleWeekday ?? 0,
+                        ),
+                      );
                     }}
-                    className="w-full px-4 py-2.5 rounded-lg border border-apple-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50 text-sm bg-white"
-                  />
+                    className="w-full rounded-lg border border-apple-gray-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                  >
+                    {Object.entries(TASK_SCHEDULE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex-1">
-                  <label className="block text-xs font-semibold text-apple-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" /> Heure
-                  </label>
-                  <input
-                    type="time"
-                    value={task.slotId ? task.slotId.substring(11, 16) : ""}
-                    onChange={(e) => {
-                      const time = e.target.value;
-                      if (!time) {
-                        onUpdate({ slotId: null });
-                        return;
+
+                {task.scheduleMode === "once" ? (
+                  <>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarIcon className="h-3.5 w-3.5" />
+                          Date
+                        </span>
+                      </label>
+                      <input
+                        type="date"
+                        min={format(new Date(), "yyyy-MM-dd")}
+                        value={
+                          task.slotId
+                            ? task.slotId.substring(0, 10)
+                            : format(new Date(), "yyyy-MM-dd")
+                        }
+                        onChange={(e) =>
+                          onUpdate(
+                            buildTaskScheduleUpdate(
+                              "once",
+                              e.target.value,
+                              task.slotId?.substring(11, 16) ?? "09:00",
+                              null,
+                            ),
+                          )
+                        }
+                        className="w-full rounded-lg border border-apple-gray-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          Heure
+                        </span>
+                      </label>
+                      <input
+                        type="time"
+                        value={task.slotId?.substring(11, 16) ?? "09:00"}
+                        onChange={(e) =>
+                          onUpdate(
+                            buildTaskScheduleUpdate(
+                              "once",
+                              task.slotId?.substring(0, 10) ??
+                                format(new Date(), "yyyy-MM-dd"),
+                              e.target.value,
+                              null,
+                            ),
+                          )
+                        }
+                        className="w-full rounded-lg border border-apple-gray-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {task.scheduleMode === "daily" ? (
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        Heure
+                      </span>
+                    </label>
+                    <input
+                      type="time"
+                      value={task.scheduleTime ?? "09:00"}
+                      onChange={(e) =>
+                        onUpdate(
+                          buildTaskScheduleUpdate("daily", "", e.target.value, null),
+                        )
                       }
-                      const date = task.slotId
-                        ? task.slotId.substring(0, 10)
-                        : format(new Date(), "yyyy-MM-dd");
-                      onUpdate({ slotId: `${date}-${time}` });
-                    }}
-                    className="w-full px-4 py-2.5 rounded-lg border border-apple-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50 text-sm bg-white"
-                  />
-                </div>
+                      className="w-full rounded-lg border border-apple-gray-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                    />
+                  </div>
+                ) : null}
+
+                {task.scheduleMode === "weekly" ? (
+                  <>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarIcon className="h-3.5 w-3.5" />
+                          Jour
+                        </span>
+                      </label>
+                      <select
+                        value={task.scheduleWeekday ?? 0}
+                        onChange={(e) =>
+                          onUpdate(
+                            buildTaskScheduleUpdate(
+                              "weekly",
+                              "",
+                              task.scheduleTime ?? "09:00",
+                              parseInt(e.target.value, 10),
+                            ),
+                          )
+                        }
+                        className="w-full rounded-lg border border-apple-gray-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                      >
+                        {WEEKDAY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          Heure
+                        </span>
+                      </label>
+                      <input
+                        type="time"
+                        value={task.scheduleTime ?? "09:00"}
+                        onChange={(e) =>
+                          onUpdate(
+                            buildTaskScheduleUpdate(
+                              "weekly",
+                              "",
+                              e.target.value,
+                              task.scheduleWeekday ?? 0,
+                            ),
+                          )
+                        }
+                        className="w-full rounded-lg border border-apple-gray-200 bg-white px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                      />
+                    </div>
+                  </>
+                ) : null}
               </div>
             </div>
 
@@ -546,6 +801,7 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<"day" | "week" | "month">("week");
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [isFeedPanelOpen, setIsFeedPanelOpen] = useState(false);
 
   // Ghost indicator during drag (snapped time per column)
   const [dragGhost, setDragGhost] = useState<{
@@ -568,11 +824,14 @@ export default function CalendarPage() {
   // Refs to map each date column's DOM element for pixel→time computation
   const columnRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const calendarWindow = getCalendarWindow(currentDate, view);
 
   const loadCalendarItems = useCallback(async () => {
     try {
       const response = await api.get("/calendar/items", {
         params: {
+          from_at: calendarWindow.fromAt,
+          to_at: calendarWindow.toAt,
           include_completed: true,
           limit: 1000,
         },
@@ -582,7 +841,7 @@ export default function CalendarPage() {
       console.error("Failed to load calendar items", error);
       setCalendarItems([]);
     }
-  }, []);
+  }, [calendarWindow.fromAt, calendarWindow.toAt]);
 
   useEffect(() => {
     fetchTasks();
@@ -679,6 +938,7 @@ export default function CalendarPage() {
     ) => {
       const endMinutes = minutes + duration;
       const taskConflict = tasks.some((task) => {
+        if (!isOneOffTask(task)) return false;
         if (!task.slotId || !task.slotId.startsWith(dateString)) return false;
         if (ignoreKeys.has(getScheduleKeyFromTask(task))) return false;
         const startMinutes = timeToMinutes(task.slotId.substring(11, 16));
@@ -690,6 +950,7 @@ export default function CalendarPage() {
       if (taskConflict) return true;
 
       return calendarItems.some((item) => {
+        if (isOneOffCalendarTask(item)) return false;
         const itemDate = item.start_at.substring(0, 10);
         if (itemDate !== dateString) return false;
         if (ignoreKeys.has(getScheduleKeyFromCalendarItem(item))) return false;
@@ -768,12 +1029,14 @@ export default function CalendarPage() {
             activeCalendarItem,
           );
           const otherTasks = tasks.filter(
-            (task) => !ignoreKeys.has(getScheduleKeyFromTask(task)),
+            (task) =>
+              isOneOffTask(task) && !ignoreKeys.has(getScheduleKeyFromTask(task)),
           );
           const otherCalendarItems = calendarItems.filter((item) => {
             const itemDate = item.start_at.substring(0, 10);
             return (
               itemDate === dateString &&
+              !isOneOffCalendarTask(item) &&
               !ignoreKeys.has(getScheduleKeyFromCalendarItem(item))
             );
           });
@@ -818,17 +1081,89 @@ export default function CalendarPage() {
       const timeString = minutesToTimeStr(minutes);
       const startAt = parseLocalDateTime(dateString, timeString);
       const endAt = new Date(startAt.getTime() + duration * 60000);
-      const taskSlotId = `${dateString}-${timeString}`;
+      const weekday = getWeekdayFromDateString(dateString);
 
       try {
         if (task) {
-          await updateTask(task.id, { slotId: taskSlotId });
+          await api.patch(`/tasks/${task.id}`, {
+            due_at: startAt.toISOString(),
+            schedule_mode: "once",
+            schedule_time: null,
+            schedule_weekday: null,
+          });
         } else if (item) {
           switch (item.source) {
-            case "task":
+            case "task": {
               if (item.source_ref_id !== null) {
-                await updateTask(String(item.source_ref_id), {
-                  slotId: taskSlotId,
+                const scheduleMode = getCalendarItemScheduleMode(item);
+                if (scheduleMode === "daily") {
+                  await api.patch(`/tasks/${item.source_ref_id}`, {
+                    schedule_mode: "daily",
+                    schedule_time: timeString,
+                    schedule_weekday: null,
+                    due_at: null,
+                  });
+                } else if (scheduleMode === "weekly") {
+                  await api.patch(`/tasks/${item.source_ref_id}`, {
+                    schedule_mode: "weekly",
+                    schedule_time: timeString,
+                    schedule_weekday: weekday,
+                    due_at: null,
+                  });
+                } else {
+                  await api.patch(`/tasks/${item.source_ref_id}`, {
+                    due_at: startAt.toISOString(),
+                    schedule_mode: "once",
+                    schedule_time: null,
+                    schedule_weekday: null,
+                  });
+                }
+              }
+              break;
+            }
+            case "habit":
+              if (item.source_ref_id !== null) {
+                const occurrenceTime =
+                  typeof item.extra_data?.["occurrence_time"] === "string"
+                    ? item.extra_data["occurrence_time"]
+                    : null;
+                const occurrenceDate =
+                  typeof item.extra_data?.["occurrence_date"] === "string"
+                    ? item.extra_data["occurrence_date"]
+                    : null;
+                const currentTimes = getHabitScheduleTimes(item);
+                const currentWeekdays = getHabitScheduleWeekdays(item);
+                const nextTimes =
+                  occurrenceTime && currentTimes.length > 0
+                    ? Array.from(
+                        new Set(
+                          currentTimes.map((value) =>
+                            value === occurrenceTime ? timeString : value,
+                          ),
+                        ),
+                      ).sort()
+                    : [timeString];
+                const occurrenceWeekday =
+                  occurrenceDate !== null
+                    ? getWeekdayFromDateString(occurrenceDate)
+                    : null;
+                const nextWeekdays =
+                  item.extra_data?.["habit_frequency"] === "weekly"
+                    ? occurrenceWeekday !== null && currentWeekdays.length > 0
+                      ? Array.from(
+                          new Set(
+                            currentWeekdays.map((value) =>
+                              value === occurrenceWeekday ? weekday : value,
+                            ),
+                          ),
+                        ).sort((a, b) => a - b)
+                      : [weekday]
+                    : [];
+                await api.patch(`/habits/${item.source_ref_id}`, {
+                  schedule_time: timeString,
+                  schedule_times: nextTimes,
+                  schedule_weekday: nextWeekdays[0] ?? null,
+                  schedule_weekdays: nextWeekdays,
                 });
               }
               break;
@@ -888,7 +1223,6 @@ export default function CalendarPage() {
       fetchTasks,
       hasScheduleOverlap,
       loadCalendarItems,
-      updateTask,
     ],
   );
 
@@ -908,23 +1242,53 @@ export default function CalendarPage() {
     }
 
     if (movedTask && over?.id === "inbox") {
-      void updateTask(movedTask.id, { slotId: null }).then(() => {
-        void loadCalendarItems();
-      });
+      void api
+        .patch(`/tasks/${movedTask.id}`, {
+          schedule_mode: "none",
+          due_at: null,
+          schedule_time: null,
+          schedule_weekday: null,
+        })
+        .then(async () => {
+          await fetchTasks();
+          await loadCalendarItems();
+        });
       return;
     }
 
-    if (
-      movedCalendarItem &&
-      over?.id === "inbox" &&
-      movedCalendarItem.source === "task" &&
-      movedCalendarItem.source_ref_id !== null
-    ) {
-      void updateTask(String(movedCalendarItem.source_ref_id), {
-        slotId: null,
-      }).then(() => {
-        void loadCalendarItems();
-      });
+    if (movedCalendarItem && over?.id === "inbox") {
+      if (
+        movedCalendarItem.source === "task" &&
+        movedCalendarItem.source_ref_id !== null
+      ) {
+        void api
+          .patch(`/tasks/${movedCalendarItem.source_ref_id}`, {
+            schedule_mode: "none",
+            due_at: null,
+            schedule_time: null,
+            schedule_weekday: null,
+          })
+          .then(async () => {
+            await fetchTasks();
+            await loadCalendarItems();
+          });
+      }
+
+      if (
+        movedCalendarItem.source === "habit" &&
+        movedCalendarItem.source_ref_id !== null
+      ) {
+        void api
+          .patch(`/habits/${movedCalendarItem.source_ref_id}`, {
+            schedule_time: null,
+            schedule_times: [],
+            schedule_weekday: null,
+            schedule_weekdays: [],
+          })
+          .then(async () => {
+            await loadCalendarItems();
+          });
+      }
     }
   };
 
@@ -1023,6 +1387,15 @@ export default function CalendarPage() {
   };
 
   const handleCalendarItemClick = (item: CalendarItem) => {
+    if (item.source === "task" && item.source_ref_id !== null) {
+      const linkedTask = tasks.find(
+        (task) => task.id === String(item.source_ref_id),
+      );
+      if (linkedTask) {
+        openTaskEditor(linkedTask);
+        return;
+      }
+    }
     setEditingCalendarItem(item);
     setOverlapError(null);
   };
@@ -1047,11 +1420,12 @@ export default function CalendarPage() {
     openTaskEditor(task);
   };
 
-  const visibleTasks = tasks.filter((t) => !t.completed);
+  const openTasks = tasks.filter((task) => !task.completed);
+  const oneOffTasks = openTasks.filter(isOneOffTask);
+  const inboxTasks = openTasks.filter(isInboxTask);
   const visibleCalendarItems = calendarItems.filter(
-    (item) => item.source !== "task",
+    (item) => !isOneOffCalendarTask(item),
   );
-  const inboxTasks = visibleTasks.filter((t) => !t.slotId);
 
   const startDate = startOfWeek(currentDate, { weekStartsOn: 1 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(startDate, i));
@@ -1173,7 +1547,9 @@ export default function CalendarPage() {
                       setCurrentDate(
                         view === "day"
                           ? subDays(currentDate, 1)
-                          : subDays(currentDate, 7),
+                          : view === "week"
+                            ? subDays(currentDate, 7)
+                            : subMonths(currentDate, 1),
                       )
                     }
                     className="p-1.5 rounded-full hover:bg-apple-gray-100 text-apple-gray-600 transition-colors"
@@ -1191,7 +1567,9 @@ export default function CalendarPage() {
                       setCurrentDate(
                         view === "day"
                           ? addDays(currentDate, 1)
-                          : addDays(currentDate, 7),
+                          : view === "week"
+                            ? addDays(currentDate, 7)
+                            : addMonths(currentDate, 1),
                       )
                     }
                     className="p-1.5 rounded-full hover:bg-apple-gray-100 text-apple-gray-600 transition-colors"
@@ -1206,21 +1584,31 @@ export default function CalendarPage() {
                 </h1>
               </div>
 
-              {/* View Switcher */}
-              <div className="flex items-center self-start rounded-2xl border border-white/60 bg-white/80 p-0.5 shadow-sm md:self-auto">
-                {availableViews.map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setView(v)}
-                    className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition-all md:px-4 ${
-                      view === v
-                        ? "bg-white text-black shadow-sm ring-1 ring-black/5"
-                        : "text-apple-gray-500 hover:text-black"
-                    }`}
-                  >
-                    {v}
-                  </button>
-                ))}
+              {/* Feed access + view switcher */}
+              <div className="flex flex-wrap items-center gap-2 md:gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsFeedPanelOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 text-xs font-semibold text-apple-gray-600 shadow-sm transition hover:text-black md:px-4"
+                >
+                  <RadioTower className="h-4 w-4 text-apple-blue" />
+                  Abonnements
+                </button>
+                <div className="flex items-center self-start rounded-2xl border border-white/60 bg-white/80 p-0.5 shadow-sm md:self-auto">
+                  {availableViews.map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setView(v)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-semibold capitalize transition-all md:px-4 ${
+                        view === v
+                          ? "bg-white text-black shadow-sm ring-1 ring-black/5"
+                          : "text-apple-gray-500 hover:text-black"
+                      }`}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1304,7 +1692,7 @@ export default function CalendarPage() {
                       const isToday = isSameDay(date, new Date());
                       const isCurrentMonth = isSameMonth(date, currentDate);
                       const dateString = format(date, "yyyy-MM-dd");
-                      const dayTasks = visibleTasks.filter((t) =>
+                      const dayTasks = oneOffTasks.filter((t) =>
                         t.slotId?.startsWith(dateString),
                       );
                       const dayCalendarItems = calendarItemsForDay(dateString);
@@ -1354,13 +1742,22 @@ export default function CalendarPage() {
                                 className="flex items-center gap-1.5 px-0.5 group"
                               >
                                 <div
-                                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.source === "fitness_session" ? "bg-emerald-500" : item.source === "meal_plan" ? "bg-orange-500" : "bg-apple-gray-400"}`}
+                                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    item.source === "fitness_session"
+                                      ? "bg-emerald-500"
+                                      : item.source === "meal_plan"
+                                        ? "bg-orange-500"
+                                        : item.source === "habit"
+                                          ? "bg-cyan-500"
+                                          : "bg-apple-gray-400"
+                                  }`}
                                 />
                                 <span
                                   className={`text-[9px] sm:text-[10px] font-medium truncate group-hover:text-black transition-colors ${item.completed ? "text-apple-gray-400 line-through" : "text-apple-gray-500"}`}
                                 >
-                                  {getCalendarItemSourceLabel(item)} ·{" "}
-                                  {item.title}
+                                  {item.source === "habit"
+                                    ? item.title
+                                    : `${getCalendarItemSourceLabel(item)} · ${item.title}`}
                                 </span>
                               </div>
                             ))}
@@ -1488,7 +1885,7 @@ export default function CalendarPage() {
                   {/* Day columns */}
                   {columnsToShow.map((date) => {
                     const dateString = format(date, "yyyy-MM-dd");
-                    const colTasks = visibleTasks
+                    const colTasks = oneOffTasks
                       .filter((t) => t.slotId?.startsWith(dateString))
                       .slice()
                       .sort(
@@ -1683,7 +2080,7 @@ export default function CalendarPage() {
                         Source
                       </p>
                       <p className="text-sm font-medium text-black capitalize">
-                        {editingCalendarItem.source}
+                        {getCalendarItemSourceLabel(editingCalendarItem)}
                       </p>
                     </div>
                   </div>
@@ -1730,6 +2127,10 @@ export default function CalendarPage() {
           </div>
         </div>
       )}
+      <CalendarFeedPanel
+        open={isFeedPanelOpen}
+        onClose={() => setIsFeedPanelOpen(false)}
+      />
     </DndContext>
   );
 }

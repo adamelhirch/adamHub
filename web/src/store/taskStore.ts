@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import api from '../lib/api';
 
 export type SubTask = { id: string; title: string; completed: boolean };
+export type TaskScheduleMode = 'none' | 'once' | 'daily' | 'weekly';
 
 export type TaskItem = { 
   id: string; 
@@ -12,6 +13,9 @@ export type TaskItem = {
   description?: string;
   subtasks?: SubTask[];
   slotId?: string | null; // Used for Calendar positioning (yyyy-MM-dd-HH:mm)
+  scheduleMode: TaskScheduleMode;
+  scheduleTime?: string | null;
+  scheduleWeekday?: number | null;
   color: string; // Used for UI
 };
 
@@ -38,26 +42,45 @@ const getRandomColor = () => {
   return colors[Math.floor(Math.random() * colors.length)];
 };
 
+function getEffectiveScheduleMode(b: any): TaskScheduleMode {
+  if (b.schedule_mode) {
+    return String(b.schedule_mode).toLowerCase() as TaskScheduleMode;
+  }
+  return b.due_at ? 'once' : 'none';
+}
+
 // Helper: Frontend to Backend
 function mapToBackendTask(t: Partial<TaskItem>) {
   const payload: any = {};
   if (t.title !== undefined) payload.title = t.title;
   if (t.duration !== undefined) payload.estimated_minutes = t.duration;
   if (t.tags !== undefined) payload.tags = t.tags;
+  if (t.scheduleMode !== undefined) payload.schedule_mode = t.scheduleMode;
+  if (t.scheduleTime !== undefined) payload.schedule_time = t.scheduleTime || null;
+  if (t.scheduleWeekday !== undefined) payload.schedule_weekday = t.scheduleWeekday ?? null;
   
   // Mapping slotId (yyyy-MM-dd-HH:mm) to due_at
   if (t.slotId !== undefined) {
     if (t.slotId) {
-       // Using a naive parse, assuming local timezone for now
-       try {
-         const [year, month, day, hm] = t.slotId.split('-');
-         payload.due_at = `${year}-${month}-${day}T${hm}:00Z`;
-       } catch (e) {
-         console.warn("Invalid slotId format", t.slotId);
-       }
+      try {
+        const [year, month, day, hm] = t.slotId.split('-');
+        payload.due_at = `${year}-${month}-${day}T${hm}:00Z`;
+      } catch (e) {
+        console.warn("Invalid slotId format", t.slotId);
+      }
     } else {
       payload.due_at = null;
     }
+  }
+
+  if (t.scheduleMode === 'daily' || t.scheduleMode === 'weekly') {
+    payload.due_at = null;
+  }
+
+  if (t.scheduleMode === 'none') {
+    payload.due_at = null;
+    payload.schedule_time = null;
+    payload.schedule_weekday = null;
   }
 
   // description + subtasks are stored as a JSON string in description to keep it simple
@@ -80,6 +103,7 @@ function mapToBackendTask(t: Partial<TaskItem>) {
 function mapToFrontendTask(b: any): TaskItem {
    let descriptionText = "";
    let subtasks: SubTask[] = [];
+   const scheduleMode = getEffectiveScheduleMode(b);
 
    if (b.description) {
       try {
@@ -92,7 +116,7 @@ function mapToFrontendTask(b: any): TaskItem {
    }
 
    let slotId = null;
-   if (b.due_at) {
+   if (b.due_at && scheduleMode === 'once') {
       // Format to yyyy-MM-dd-HH:mm
       try {
         // Force UTC extraction from the ISO string
@@ -113,6 +137,9 @@ function mapToFrontendTask(b: any): TaskItem {
      description: descriptionText,
      subtasks: subtasks,
      slotId: slotId,
+     scheduleMode,
+     scheduleTime: b.schedule_time ?? null,
+     scheduleWeekday: b.schedule_weekday ?? null,
      color: getRandomColor(), // Assign random color on load for now
    };
 }

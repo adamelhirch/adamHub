@@ -3,6 +3,7 @@ from app.models.entities import (
     AccountType,
     Budget,
     CalendarCategory,
+    CalendarFeed,
     CalendarEvent,
     CalendarItem,
     CalendarSource,
@@ -41,6 +42,7 @@ from app.models.entities import (
     SupermarketProduct,
     Task,
     TaskPriority,
+    TaskScheduleMode,
     TaskStatus,
     TransactionKind,
 )
@@ -50,6 +52,7 @@ __all__ = [
     "AccountType",
     "Budget",
     "CalendarCategory",
+    "CalendarFeed",
     "CalendarEvent",
     "CalendarItem",
     "CalendarSource",
@@ -88,6 +91,7 @@ __all__ = [
     "SupermarketTargetType",
     "Task",
     "TaskPriority",
+    "TaskScheduleMode",
     "TaskStatus",
     "TransactionKind",
 ]

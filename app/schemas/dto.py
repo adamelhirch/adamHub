@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import re
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import (
@@ -17,6 +18,7 @@ from app.models import (
     NoteKind,
     SubscriptionInterval,
     TaskPriority,
+    TaskScheduleMode,
     TaskStatus,
     SupermarketStore,
     SupermarketTargetType,
@@ -24,18 +26,90 @@ from app.models import (
 )
 
 
+SCHEDULE_TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+def _normalize_schedule_times(
+    schedule_time: str | None,
+    schedule_times: list[str] | None,
+) -> tuple[str | None, list[str]]:
+    pattern = re.compile(SCHEDULE_TIME_PATTERN)
+    combined = [
+        value
+        for value in [schedule_time, *(schedule_times or [])]
+        if value is not None and value != ""
+    ]
+    for value in combined:
+        if pattern.fullmatch(value) is None:
+            raise ValueError("schedule_times must use HH:MM format")
+    unique_times = sorted(set(combined))
+    return (unique_times[0] if unique_times else None, unique_times)
+
+
+def _normalize_schedule_weekdays(
+    schedule_weekday: int | None,
+    schedule_weekdays: list[int] | None,
+) -> tuple[int | None, list[int]]:
+    combined = [
+        value
+        for value in [schedule_weekday, *(schedule_weekdays or [])]
+        if value is not None
+    ]
+    for value in combined:
+        if value < 0 or value > 6:
+            raise ValueError("schedule_weekdays values must be between 0 and 6")
+    unique_days = sorted(set(combined))
+    return (unique_days[0] if unique_days else None, unique_days)
+
+
 class TaskCreate(BaseModel):
     title: str
     description: str | None = None
+    schedule_mode: TaskScheduleMode | None = None
+    schedule_time: str | None = Field(default=None, pattern=SCHEDULE_TIME_PATTERN)
+    schedule_weekday: int | None = Field(default=None, ge=0, le=6)
     due_at: datetime | None = None
     priority: TaskPriority = TaskPriority.MEDIUM
     estimated_minutes: int | None = None
     tags: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def normalize_schedule(self) -> "TaskCreate":
+        if self.schedule_mode is None:
+            self.schedule_mode = (
+                TaskScheduleMode.ONCE if self.due_at is not None else TaskScheduleMode.NONE
+            )
+
+        if self.schedule_mode == TaskScheduleMode.NONE:
+            self.due_at = None
+            self.schedule_time = None
+            self.schedule_weekday = None
+        elif self.schedule_mode == TaskScheduleMode.ONCE:
+            if self.due_at is None:
+                raise ValueError("due_at is required when schedule_mode is once")
+            self.schedule_time = None
+            self.schedule_weekday = None
+        elif self.schedule_mode == TaskScheduleMode.DAILY:
+            if not self.schedule_time:
+                raise ValueError("schedule_time is required when schedule_mode is daily")
+            self.due_at = None
+            self.schedule_weekday = None
+        elif self.schedule_mode == TaskScheduleMode.WEEKLY:
+            if not self.schedule_time:
+                raise ValueError("schedule_time is required when schedule_mode is weekly")
+            if self.schedule_weekday is None:
+                raise ValueError("schedule_weekday is required when schedule_mode is weekly")
+            self.due_at = None
+
+        return self
+
 
 class TaskUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
+    schedule_mode: TaskScheduleMode | None = None
+    schedule_time: str | None = Field(default=None, pattern=SCHEDULE_TIME_PATTERN)
+    schedule_weekday: int | None = Field(default=None, ge=0, le=6)
     due_at: datetime | None = None
     priority: TaskPriority | None = None
     status: TaskStatus | None = None
@@ -49,6 +123,9 @@ class TaskRead(BaseModel):
     description: str | None
     status: TaskStatus
     priority: TaskPriority
+    schedule_mode: TaskScheduleMode
+    schedule_time: str | None
+    schedule_weekday: int | None
     due_at: datetime | None
     estimated_minutes: int | None
     tags: list[str]
@@ -461,6 +538,36 @@ class HabitCreate(BaseModel):
     description: str | None = None
     frequency: HabitFrequency = HabitFrequency.DAILY
     target_per_period: int = 1
+    schedule_time: str | None = Field(default=None, pattern=SCHEDULE_TIME_PATTERN)
+    schedule_times: list[str] = Field(default_factory=list)
+    schedule_weekday: int | None = Field(default=None, ge=0, le=6)
+    schedule_weekdays: list[int] = Field(default_factory=list)
+    duration_minutes: int = Field(default=30, ge=1, le=1440)
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> "HabitCreate":
+        self.schedule_time, self.schedule_times = _normalize_schedule_times(
+            self.schedule_time,
+            self.schedule_times,
+        )
+        self.schedule_weekday, self.schedule_weekdays = _normalize_schedule_weekdays(
+            self.schedule_weekday,
+            self.schedule_weekdays,
+        )
+
+        if self.schedule_time is None:
+            self.schedule_weekday = None
+            self.schedule_weekdays = []
+            return self
+
+        if self.frequency == HabitFrequency.WEEKLY and self.schedule_weekday is None:
+            raise ValueError("schedule_weekday is required for weekly habits scheduled in the calendar")
+
+        if self.frequency == HabitFrequency.DAILY:
+            self.schedule_weekday = None
+            self.schedule_weekdays = []
+
+        return self
 
 
 class HabitRead(BaseModel):
@@ -469,10 +576,28 @@ class HabitRead(BaseModel):
     description: str | None
     frequency: HabitFrequency
     target_per_period: int
+    schedule_time: str | None
+    schedule_times: list[str] = Field(default_factory=list)
+    schedule_weekday: int | None
+    schedule_weekdays: list[int] = Field(default_factory=list)
+    duration_minutes: int
     streak: int
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class HabitUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    frequency: HabitFrequency | None = None
+    target_per_period: int | None = Field(default=None, ge=1, le=365)
+    schedule_time: str | None = Field(default=None, pattern=SCHEDULE_TIME_PATTERN)
+    schedule_times: list[str] | None = None
+    schedule_weekday: int | None = Field(default=None, ge=0, le=6)
+    schedule_weekdays: list[int] | None = None
+    duration_minutes: int | None = Field(default=None, ge=1, le=1440)
+    active: bool | None = None
 
 
 class HabitLogCreate(BaseModel):
@@ -755,6 +880,26 @@ class CalendarSyncResult(BaseModel):
     removed: int
     generated_by_source: dict[str, int]
     synced_at: datetime
+
+
+class CalendarFeedCreate(BaseModel):
+    name: str
+    sources: list[CalendarSource] = Field(default_factory=list)
+    include_completed: bool = True
+
+
+class CalendarFeedRead(BaseModel):
+    id: int
+    name: str
+    token: str
+    sources: list[CalendarSource] = Field(default_factory=list)
+    include_completed: bool
+    active: bool
+    ics_url: str
+    webcal_url: str
+    last_accessed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CalendarReminderRead(BaseModel):

@@ -12,7 +12,14 @@ export type CalendarTimelineItem = {
   end_at: string;
   all_day: boolean;
   category: string;
-  source: 'manual' | 'task' | 'event' | 'subscription' | 'meal_plan' | 'fitness_session';
+  source:
+    | 'manual'
+    | 'task'
+    | 'habit'
+    | 'event'
+    | 'subscription'
+    | 'meal_plan'
+    | 'fitness_session';
   source_ref_id: number | null;
   generated: boolean;
   completed: boolean;
@@ -62,6 +69,12 @@ function getSourceMeta(item: CalendarTimelineItem) {
         tone: 'bg-apple-gray-50 text-black border-apple-gray-200',
         accent: 'bg-apple-gray-500',
       };
+    case 'habit':
+      return {
+        label: 'Routine',
+        tone: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+        accent: 'bg-cyan-500',
+      };
     default:
       return {
         label: 'Manuel',
@@ -72,9 +85,11 @@ function getSourceMeta(item: CalendarTimelineItem) {
 }
 
 export default function DraggableCalendarItem({ item, isOverlay, compactMobile }: Props) {
+  const isMovable = item.source !== 'habit';
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `calendar-${item.id}`,
     data: { kind: 'calendar-item' as const, item },
+    disabled: !isMovable,
   });
 
   const style = {
@@ -103,6 +118,7 @@ export default function DraggableCalendarItem({ item, isOverlay, compactMobile }
       className={twMerge(
         clsx(
           'flex h-full w-full flex-col overflow-hidden rounded-xl border shadow-xs ring-1 ring-black/5 transition-all backdrop-blur-md touch-none cursor-grab active:cursor-grabbing select-none',
+          !isMovable && 'cursor-default active:cursor-default',
           meta.tone,
           isDragging ? 'opacity-40 scale-[0.98]' : 'opacity-100',
           isOverlay ? 'rotate-1 shadow-2xl scale-[1.03] z-50' : '',
@@ -112,13 +128,26 @@ export default function DraggableCalendarItem({ item, isOverlay, compactMobile }
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className={`h-2.5 w-2.5 rounded-full ${meta.accent}`} />
-            <span className="text-[9px] font-bold uppercase tracking-[0.24em] opacity-70">{meta.label}</span>
-          </div>
-          <p className={`mt-1 font-semibold tracking-tight ${compactMobile ? 'text-[11px] leading-tight' : 'text-xs leading-tight'}`}>
-            {item.title}
-          </p>
+          {item.source === 'habit' ? (
+            <div className="flex items-center gap-1.5">
+              <span className={`h-2.5 w-2.5 rounded-full ${meta.accent}`} />
+              <p
+                className={`font-semibold tracking-tight ${compactMobile ? 'text-[11px] leading-tight' : 'text-xs leading-tight'}`}
+              >
+                {item.title}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className={`h-2.5 w-2.5 rounded-full ${meta.accent}`} />
+                <span className="text-[9px] font-bold uppercase tracking-[0.24em] opacity-70">{meta.label}</span>
+              </div>
+              <p className={`mt-1 font-semibold tracking-tight ${compactMobile ? 'text-[11px] leading-tight' : 'text-xs leading-tight'}`}>
+                {item.title}
+              </p>
+            </>
+          )}
         </div>
         {item.completed && (
           <BadgeCheck className="h-4 w-4 shrink-0 text-emerald-500" />

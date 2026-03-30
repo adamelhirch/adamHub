@@ -2,6 +2,8 @@
 
 Use for creating habits, tracking logs, and active state management.
 
+This is the correct skill behind the frontend `Routine` tab inside the Tasks page.
+
 ## Actions
 
 - `habit.create`
@@ -17,6 +19,7 @@ Use for creating habits, tracking logs, and active state management.
 - Track completion -> `habit.log`
 - Pause/reactivate -> `habit.set_active`
 - Audit history -> `habit.list_logs`
+- If the user says "tache recurrente", "routine", or "habitude", treat it as a habit.
 
 ## Safety
 

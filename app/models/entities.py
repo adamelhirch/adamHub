@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, String
 from sqlmodel import Field, SQLModel
 
 
@@ -46,6 +46,13 @@ class TransactionKind(str, Enum):
 
 
 class HabitFrequency(str, Enum):
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
+class TaskScheduleMode(str, Enum):
+    NONE = "none"
+    ONCE = "once"
     DAILY = "daily"
     WEEKLY = "weekly"
 
@@ -114,10 +121,23 @@ class CalendarCategory(str, Enum):
 class CalendarSource(str, Enum):
     MANUAL = "manual"
     TASK = "task"
+    HABIT = "habit"
     EVENT = "event"
     SUBSCRIPTION = "subscription"
     MEAL_PLAN = "meal_plan"
     FITNESS_SESSION = "fitness_session"
+
+
+class CalendarFeed(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    token: str = Field(sa_column=Column(String, unique=True, nullable=False, index=True))
+    sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    include_completed: bool = True
+    active: bool = True
+    last_accessed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class Task(SQLModel, table=True):
@@ -126,6 +146,9 @@ class Task(SQLModel, table=True):
     description: str | None = None
     status: TaskStatus = Field(default=TaskStatus.TODO)
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
+    schedule_mode: TaskScheduleMode = Field(default=TaskScheduleMode.NONE)
+    schedule_time: str | None = Field(default=None, max_length=5)
+    schedule_weekday: int | None = Field(default=None, ge=0, le=6)
     due_at: datetime | None = None
     estimated_minutes: int | None = None
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
@@ -248,6 +271,11 @@ class Habit(SQLModel, table=True):
     description: str | None = None
     frequency: HabitFrequency = HabitFrequency.DAILY
     target_per_period: int = 1
+    schedule_time: str | None = Field(default=None, max_length=5)
+    schedule_times: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    schedule_weekday: int | None = Field(default=None, ge=0, le=6)
+    schedule_weekdays: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    duration_minutes: int = 30
     streak: int = 0
     active: bool = True
     created_at: datetime = Field(default_factory=utcnow)

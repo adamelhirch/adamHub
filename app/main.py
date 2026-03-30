@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.calendar_feeds import public_router as public_calendar_feeds_router
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.db import init_db
@@ -52,6 +53,7 @@ def health() -> dict:
 
 
 app.include_router(api_router)
+app.include_router(public_calendar_feeds_router)
 
 
 def _frontend_available() -> bool:

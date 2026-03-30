@@ -35,7 +35,6 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 | Events | `/events` | Non | Oui | `app/api/events.py` | Integres au calendrier |
 | Subscriptions | `/subscriptions` | Partiel | Oui | `app/api/subscriptions.py`, `web/src/pages/FinancesPage.tsx` | Projection visible via finances, UI dediee absente |
 | Notes | `/notes` | Non | Oui | `app/api/notes.py` | Backend et skill prets, UI absente |
-| Linear | `/linear` | Non | Oui | `app/api/linear_hub.py`, `app/services/linear_hub.py` | Sync + cache + creation issue |
 | Skill | `/skill` | Non | n/a | `app/api/skill.py`, `app/skill/actions.py` | Surface AI unifiee |
 
 ## Pages front officielles
@@ -68,7 +67,6 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 - events
 - subscriptions
 - notes
-- linear
 - video transcript intake
 
 ### Contraintes a rappeler cote IA
@@ -96,4 +94,3 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 2. Ajouter de nouvelles enseignes en reutilisant `supermarket_registry.py`.
 3. Continuer la decoupe du frontend pour reduire la taille du bundle principal.
 4. Ajouter des skill playbooks plus fins pour les flows courses / recettes / fitness / patrimoine.
-

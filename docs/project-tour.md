@@ -55,6 +55,8 @@ Ce document sert de point de reprise pour les futures modifications. Il decrit l
 - `web/src/pages/`
   - `CalendarPage.tsx`
   - `TasksPage.tsx`
+    - onglet `Tâches` pour le ponctuel
+    - onglet `Routine` pour les habitudes récurrentes
   - `FinancesPage.tsx`
   - `GroceriesPage.tsx`
   - `RecipesPage.tsx`
@@ -269,7 +271,6 @@ Ces domaines sont deja exposes en backend, mais la couverture UI reste partielle
 - `events`
 - `subscriptions` (partiellement visible dans finances)
 - `notes`
-- `linear`
 - `auth`
 
 Pour toute extension UI sur ces domaines:
@@ -390,4 +391,3 @@ PY
 4. verifier si OpenClaw depend du domaine
 5. modifier backend avant frontend si le contrat change
 6. finir par le skill et la doc
-

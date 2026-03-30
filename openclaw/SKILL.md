@@ -74,12 +74,11 @@ Never perform destructive writes on implicit intent.
 - meal planning -> `meal_plan.add|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked|meal_plan.log_cooked`
 - calendar -> `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder`
 - fitness -> `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
-- habits -> `habit.create|habit.list|habit.set_active|habit.log|habit.list_logs`
+- habits / routine -> `habit.create|habit.list|habit.set_active|habit.log|habit.list_logs`
 - goals -> `goal.create|goal.list|goal.get|goal.update|goal.add_milestone|goal.list_milestones|goal.update_milestone`
 - events -> `event.create|event.list|event.upcoming|event.get|event.update|event.delete`
 - subscriptions -> `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
 - notes -> `note.create|note.list|note.get|note.update|note.delete|note.journal`
-- linear -> `linear.projects|linear.issues|linear.issue_create|linear.sync`
 - video ingestion -> `video.fetch`
 
 ## 7) Domain rules you must respect
@@ -106,6 +105,12 @@ Never perform destructive writes on implicit intent.
 
 - Sessions can contain exercises tracked by reps or by duration.
 - Fitness sessions also participate in calendar conflict validation.
+
+### Tasks and routine rules
+
+- Use `task.*` only for one-time work.
+- Use `habit.*` for recurring routines, rituals, and habits.
+- Do not duplicate a recurring routine into normal tasks unless the user explicitly wants that downgrade.
 
 ### Video rules
 
@@ -144,7 +149,6 @@ When the user does not provide an id:
 - event id -> `event.list`
 - subscription id -> `subscription.list`
 - note id -> `note.list`
-- linear project id -> `linear.projects`
 
 Never invent ids.
 
@@ -253,5 +257,3 @@ After a read:
 - `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
 - `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
 - `note.create|note.list|note.get|note.update|note.delete|note.journal`
-- `linear.projects|linear.issues|linear.issue_create|linear.sync`
-

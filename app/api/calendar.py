@@ -16,8 +16,10 @@ from app.schemas import (
 )
 from app.services.calendar_hub import (
     build_calendar_item_read,
+    build_virtual_calendar_item_read,
     build_ics,
     list_due_reminders,
+    project_virtual_calendar_items,
     sync_generated_calendar_items,
     validate_calendar_slot_free,
 )
@@ -76,7 +78,23 @@ def list_calendar_items(
         statement = statement.where(CalendarItem.generated == generated_only)
 
     rows = session.exec(statement).all()
-    return [build_calendar_item_read(item) for item in rows]
+    payload = [build_calendar_item_read(item) for item in rows]
+
+    virtual_rows = project_virtual_calendar_items(
+        session,
+        from_at=from_at,
+        to_at=to_at,
+        source=source,
+    )
+    for row in virtual_rows:
+        if category is not None and row["category"] != category:
+            continue
+        if not include_completed and row["completed"]:
+            continue
+        payload.append(build_virtual_calendar_item_read(row))
+
+    payload.sort(key=lambda item: item.start_at)
+    return payload[:limit]
 
 
 @router.get("/agenda", response_model=list[CalendarItemRead])
@@ -85,18 +103,18 @@ def day_agenda(
     day: date | None = None,
     include_completed: bool = False,
 ) -> list[CalendarItemRead]:
-    _sync_generated(session)
     if day is None:
         day = datetime.now(UTC).date()
 
     start = datetime.combine(day, datetime.min.time()).replace(tzinfo=UTC)
     end = start + timedelta(days=1)
-    statement = select(CalendarItem).where(CalendarItem.start_at >= start, CalendarItem.start_at < end).order_by(CalendarItem.start_at.asc())
-    if not include_completed:
-        statement = statement.where(CalendarItem.completed.is_(False))
-
-    rows = session.exec(statement).all()
-    return [build_calendar_item_read(item) for item in rows]
+    return list_calendar_items(
+        session,
+        from_at=start,
+        to_at=end,
+        include_completed=include_completed,
+        limit=500,
+    )
 
 
 @router.get("/items/{item_id}", response_model=CalendarItemRead)

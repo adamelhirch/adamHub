@@ -154,13 +154,6 @@ Request shape:
 - `note.delete`
 - `note.journal`
 
-## Linear
-
-- `linear.projects`
-- `linear.issues`
-- `linear.issue_create`
-- `linear.sync`
-
 ## Field highlights
 
 - money datetimes: ISO 8601
@@ -176,4 +169,3 @@ Request shape:
 - `fitness.create_session` and `fitness.update_session` are subject to calendar overlap validation
 - `patrimony.overview` returns net worth, active accounts, and savings goals
 - `video.fetch` returns normalized metadata, transcript, and transcript segments; when captions are unavailable it can fall back to local Whisper
-

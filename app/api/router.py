@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.auth import router as auth_router
 from app.api.calendar import router as calendar_router
+from app.api.calendar_feeds import private_router as calendar_feeds_router
 from app.api.events import router as events_router
 from app.api.fitness import router as fitness_router
 from app.api.finances import router as finances_router
@@ -28,6 +29,7 @@ api_router.include_router(groceries_router)
 api_router.include_router(recipes_router)
 api_router.include_router(meal_plans_router)
 api_router.include_router(calendar_router)
+api_router.include_router(calendar_feeds_router)
 api_router.include_router(habits_router)
 api_router.include_router(goals_router)
 api_router.include_router(events_router)

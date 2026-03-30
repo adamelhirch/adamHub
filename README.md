@@ -22,7 +22,7 @@ State audited on `2026-03-29`:
 Frontend pages already shipped:
 
 - `Calendar`: unified timeline, drag and drop scheduling, overlap prevention, meals, fitness sessions, tasks, events, subscriptions, manual items
-- `Tasks`: task capture, filtering, scheduling, completion
+- `Tasks`: two-tab workspace with one-shot tasks plus a `Routine` tab for recurring habits
 - `Finances`: month summary, budgets, transactions, subscriptions, patrimony overview
 - `Groceries`: grocery list + pantry, store-backed items, Intermarche search/mapping, pantry restock from checked groceries
 - `Recipes`: manual recipe authoring, ingredient-by-ingredient editing, meal planning, supermarket-backed ingredients, cooked confirmation
@@ -45,7 +45,6 @@ REST modules available even when the UI is partial or missing:
 - `events`
 - `subscriptions`
 - `notes`
-- `linear`
 - `supermarket`
 - `video`
 - `skill`
@@ -57,6 +56,7 @@ REST modules available even when the UI is partial or missing:
 - Recipes can contain custom ingredients and store-backed ingredients.
 - Meal plans and direct `recipe.confirm_cooked` consume pantry only when the meal/recipe is actually confirmed as cooked.
 - Calendar is the shared planning layer. Tasks, meals, subscriptions, events, fitness sessions, and manual items are validated against overlap rules.
+- Calendar also supports public signed `ICS/webcal` feeds. External calendar apps subscribe to AdamHUB feeds directly; no Google OAuth is required.
 - Video ingestion returns transcript + source metadata only. Recipe extraction logic is intentionally delegated to OpenClaw.
 
 ## Repo map
@@ -104,6 +104,39 @@ Auth header for protected routes:
 
 - `X-API-Key: <ADAMHUB_API_KEY>`
 
+## Calendar subscriptions
+
+AdamHUB can publish signed calendar feeds that external apps subscribe to:
+
+- create feed: `POST /api/v1/calendar/feeds`
+- list feeds: `GET /api/v1/calendar/feeds`
+- delete feed: `DELETE /api/v1/calendar/feeds/{feed_id}`
+- public ICS feed: `GET /calendar/feed/{token}.ics`
+
+Example feed creation:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/calendar/feeds \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: change-me' \
+  -d '{
+    "name": "AdamHUB Tasks + Meals",
+    "sources": ["task", "meal_plan"],
+    "include_completed": true
+  }'
+```
+
+The response includes:
+
+- `ics_url`: direct HTTPS subscription URL
+- `webcal_url`: ready-to-paste `webcal://...` URL for Apple Calendar, Google Calendar import/subscription, Outlook, and similar apps
+
+Production note:
+
+- backend secret list: `ADAMHUB_API_KEYS`
+- OpenClaw client secret: `ADAMHUB_API_KEY`
+- in practice, use the same secret value on both sides
+
 ## Testing
 
 Backend:
@@ -146,6 +179,7 @@ Keep these invariants in mind:
 
 - [Project tour](docs/project-tour.md)
 - [Coverage matrix](docs/phase2_1_matrix.md)
+- [VPS install + OpenClaw hookup](docs/vps-install.md)
 - [OpenClaw master skill](openclaw/SKILL.md)
+- [OpenClaw env example](openclaw/.env.example)
 - [OpenClaw action catalog](openclaw/references/action-catalog.md)
-

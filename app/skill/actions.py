@@ -123,9 +123,9 @@ from app.services.supermarket_registry import list_store_definitions
 from app.services.video_intake import extract_video_source
 
 ACTION_CATALOG = [
-    {"action": "task.create", "description": "Create a task", "input_schema": {"title": "string", "description": "string?", "due_at": "datetime?", "priority": "low|medium|high|urgent", "estimated_minutes": "int?", "tags": "string[]?"}},
+    {"action": "task.create", "description": "Create a task", "input_schema": {"title": "string", "description": "string?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent", "estimated_minutes": "int?", "tags": "string[]?"}},
     {"action": "task.list", "description": "List tasks with optional status filter", "input_schema": {"status": "todo|in_progress|done|blocked?", "only_open": "bool?", "limit": "int?"}},
-    {"action": "task.update", "description": "Update an existing task", "input_schema": {"task_id": "int", "title": "string?", "description": "string?", "due_at": "datetime?", "priority": "low|medium|high|urgent?", "status": "todo|in_progress|done|blocked?", "estimated_minutes": "int?", "tags": "string[]?"}},
+    {"action": "task.update", "description": "Update an existing task", "input_schema": {"task_id": "int", "title": "string?", "description": "string?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent?", "status": "todo|in_progress|done|blocked?", "estimated_minutes": "int?", "tags": "string[]?"}},
     {"action": "task.complete", "description": "Mark a task as done", "input_schema": {"task_id": "int"}},
     {"action": "finance.add_transaction", "description": "Add an income or expense transaction", "input_schema": {"kind": "income|expense", "amount": "float", "currency": "string?", "category": "string", "note": "string?", "occurred_at": "datetime?", "is_recurring": "bool?"}},
     {"action": "finance.list_transactions", "description": "List transactions", "input_schema": {"kind": "income|expense?", "year": "int?", "month": "int?", "limit": "int?"}},
@@ -165,14 +165,14 @@ ACTION_CATALOG = [
     {"action": "meal_plan.confirm_cooked", "description": "Confirm meal was cooked and consume pantry ingredients", "input_schema": {"meal_plan_id": "int", "note": "string?"}},
     {"action": "meal_plan.unconfirm_cooked", "description": "Undo cooked confirmation and restore pantry", "input_schema": {"meal_plan_id": "int"}},
     {"action": "calendar.add_item", "description": "Create a manual calendar item", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}},
-    {"action": "calendar.list_items", "description": "List calendar items", "input_schema": {"from_at": "datetime?", "to_at": "datetime?", "category": "general|task|event|subscription|meal?", "source": "manual|task|event|subscription|meal_plan?", "include_completed": "bool?", "generated_only": "bool?", "limit": "int?"}},
+    {"action": "calendar.list_items", "description": "List calendar items", "input_schema": {"from_at": "datetime?", "to_at": "datetime?", "category": "general|task|event|subscription|meal?", "source": "manual|task|habit|event|subscription|meal_plan|fitness_session?", "include_completed": "bool?", "generated_only": "bool?", "limit": "int?"}},
     {"action": "calendar.update_item", "description": "Update calendar item", "input_schema": {"item_id": "int", "title": "string?", "description": "string?", "start_at": "datetime?", "end_at": "datetime?", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "completed": "bool?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}},
     {"action": "calendar.delete_item", "description": "Delete calendar item", "input_schema": {"item_id": "int"}},
     {"action": "calendar.agenda", "description": "List day agenda", "input_schema": {"day": "YYYY-MM-DD?", "include_completed": "bool?"}},
     {"action": "calendar.sync", "description": "Sync tasks/events/subscriptions/meal plans into calendar", "input_schema": {}},
     {"action": "calendar.due_reminders", "description": "List due reminders in next N minutes", "input_schema": {"within_minutes": "int?"}},
     {"action": "calendar.ack_reminder", "description": "Acknowledge reminders for a calendar item", "input_schema": {"item_id": "int"}},
-    {"action": "habit.create", "description": "Create a habit", "input_schema": {"name": "string", "description": "string?", "frequency": "daily|weekly?", "target_per_period": "int?"}},
+    {"action": "habit.create", "description": "Create a habit", "input_schema": {"name": "string", "description": "string?", "frequency": "daily|weekly?", "target_per_period": "int?", "schedule_time": "HH:MM?", "schedule_times": "HH:MM[]?", "schedule_weekday": "0=Monday..6=Sunday?", "schedule_weekdays": "0..6[]?", "duration_minutes": "int?"}},
     {"action": "habit.list", "description": "List habits", "input_schema": {"active_only": "bool?"}},
     {"action": "habit.set_active", "description": "Activate or deactivate a habit", "input_schema": {"habit_id": "int", "active": "bool"}},
     {"action": "habit.log", "description": "Log completion for a habit", "input_schema": {"habit_id": "int", "value": "int?", "note": "string?"}},

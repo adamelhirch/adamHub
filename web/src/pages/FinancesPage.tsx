@@ -4,7 +4,7 @@ import {
   TrendingUp, TrendingDown, CreditCard, Plus, X, Calendar, RefreshCw, Zap, AlertTriangle, CheckCircle, Landmark, Target, Pencil, Check, Trash2
 } from 'lucide-react';
 import { useFinanceStore } from '../store/financeStore';
-import type { TransactionKind } from '../store/financeStore';
+import type { TransactionKind, SubscriptionInterval } from '../store/financeStore';
 import { usePatrimonyStore } from '../store/patrimonyStore';
 import type { AccountType } from '../store/patrimonyStore';
 
@@ -81,7 +81,7 @@ export default function FinancesPage() {
   const {
     transactions, summary, subscriptions, projection,
     fetchTransactions, addTransaction, fetchBudgets, addBudget,
-    fetchSummary, fetchSubscriptions, fetchProjection,
+    fetchSummary, fetchSubscriptions, addSubscription, fetchProjection,
   } = useFinanceStore();
   const { overview, fetchOverview, addAccount, updateAccount, deleteAccount, addGoal, updateGoal, deleteGoal } = usePatrimonyStore();
 
@@ -103,6 +103,17 @@ export default function FinancesPage() {
   const [showBudgetForm, setShowBudgetForm] = useState(false);
   const [budgetCategory, setBudgetCategory] = useState('');
   const [budgetLimit, setBudgetLimit] = useState('');
+
+  // Add-Subscription form state
+  const [showSubForm, setShowSubForm] = useState(false);
+  const [subName, setSubName] = useState('');
+  const [subCategory, setSubCategory] = useState('General');
+  const [subAmount, setSubAmount] = useState('');
+  const [subInterval, setSubInterval] = useState<SubscriptionInterval>('monthly');
+  const [subDate, setSubDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [subAutopay, setSubAutopay] = useState(false);
+  const [subNote, setSubNote] = useState('');
+  const [subError, setSubError] = useState<string | null>(null);
 
   const monthStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
@@ -177,6 +188,37 @@ export default function FinancesPage() {
     if (!budgetCategory || !budgetLimit) return;
     await addBudget({ month: monthStr, category: budgetCategory, monthly_limit: parseFloat(budgetLimit) });
     setBudgetCategory(''); setBudgetLimit(''); setShowBudgetForm(false);
+  };
+
+  const handleAddSubscription = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subName || !subAmount || !subDate) return;
+    setSubError(null);
+
+    try {
+      await addSubscription({
+        name: subName,
+        category: subCategory || 'General',
+        amount: parseFloat(subAmount),
+        interval: subInterval,
+        next_due_date: subDate,
+        autopay: subAutopay,
+        note: subNote || undefined,
+      });
+      setSubName('');
+      setSubCategory('General');
+      setSubAmount('');
+      setSubInterval('monthly');
+      setSubDate(format(new Date(), 'yyyy-MM-dd'));
+      setSubAutopay(false);
+      setSubNote('');
+      setShowSubForm(false);
+    } catch (error: any) {
+      setSubError(
+        error?.response?.data?.detail ??
+          "Impossible d'ajouter cet abonnement.",
+      );
+    }
   };
 
   const intervalLabel: Record<string, string> = { weekly: '/sem', monthly: '/mois', yearly: '/an' };
@@ -430,6 +472,19 @@ export default function FinancesPage() {
           {/* ── SUBSCRIPTIONS TAB ─────────────────────────────────── */}
           {activeTab === 'Subscriptions' && (
             <>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => {
+                    setShowSubForm((current) => !current);
+                    setSubError(null);
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-apple-blue text-white text-sm font-semibold rounded-xl hover:bg-blue-600 transition-colors shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Nouvel abonnement
+                </button>
+              </div>
+
               {/* Projection summary */}
               {projection && (
                 <div className="grid grid-cols-2 gap-4">
@@ -442,6 +497,96 @@ export default function FinancesPage() {
                     <p className="text-2xl font-bold text-black mt-1">{fmtEur(projection.yearly_total)}</p>
                   </div>
                 </div>
+              )}
+
+              {showSubForm && (
+                <form onSubmit={handleAddSubscription} className={SURFACE + ' p-5 space-y-4'}>
+                  <h3 className="text-sm font-semibold text-black">Ajouter un abonnement</h3>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      placeholder="Nom (ex: Spotify)"
+                      value={subName}
+                      onChange={(e) => setSubName(e.target.value)}
+                      required
+                      className="px-3 py-2.5 rounded-xl border border-apple-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Catégorie (ex: Streaming)"
+                      value={subCategory}
+                      onChange={(e) => setSubCategory(e.target.value)}
+                      className="px-3 py-2.5 rounded-xl border border-apple-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                    />
+                    <div className="relative">
+                      <input
+                        type="number"
+                        placeholder="Montant"
+                        value={subAmount}
+                        onChange={(e) => setSubAmount(e.target.value)}
+                        min="0"
+                        step="0.01"
+                        required
+                        className="w-full pl-3 pr-7 py-2.5 rounded-xl border border-apple-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-apple-gray-400">€</span>
+                    </div>
+                    <select
+                      value={subInterval}
+                      onChange={(e) => setSubInterval(e.target.value as SubscriptionInterval)}
+                      className="px-3 py-2.5 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                    >
+                      <option value="weekly">Hebdomadaire</option>
+                      <option value="monthly">Mensuel</option>
+                      <option value="yearly">Annuel</option>
+                    </select>
+                    <input
+                      type="date"
+                      value={subDate}
+                      onChange={(e) => setSubDate(e.target.value)}
+                      required
+                      className="px-3 py-2.5 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                    />
+                    <label className="flex items-center gap-3 rounded-xl border border-apple-gray-200 bg-apple-gray-50 px-3 py-2.5 text-sm font-medium text-black">
+                      <input
+                        type="checkbox"
+                        checked={subAutopay}
+                        onChange={(e) => setSubAutopay(e.target.checked)}
+                        className="h-4 w-4 rounded border-apple-gray-300 text-apple-blue focus:ring-apple-blue/50"
+                      />
+                      Paiement automatique
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Note (optionnel)"
+                      value={subNote}
+                      onChange={(e) => setSubNote(e.target.value)}
+                      className="sm:col-span-2 px-3 py-2.5 rounded-xl border border-apple-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50"
+                    />
+                  </div>
+
+                  {subError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                      {subError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button type="submit" className="px-5 py-2.5 bg-apple-blue text-white text-sm font-semibold rounded-xl hover:bg-blue-600 transition-colors">
+                      Ajouter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSubForm(false);
+                        setSubError(null);
+                      }}
+                      className="px-5 py-2.5 text-sm font-medium text-apple-gray-500 hover:bg-apple-gray-100 rounded-xl transition-colors"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
               )}
 
               {/* Subscriptions list */}

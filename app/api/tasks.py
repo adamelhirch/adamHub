@@ -5,9 +5,9 @@ from sqlmodel import select
 
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
-from app.models import CalendarSource, Task, TaskStatus
+from app.models import CalendarSource, Task, TaskScheduleMode, TaskStatus
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
-from app.services.calendar_hub import validate_calendar_slot_free
+from app.services.calendar_hub import validate_task_schedule_free
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_api_key)])
 
@@ -15,11 +15,10 @@ router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(requir
 @router.post("", response_model=TaskRead)
 def create_task(payload: TaskCreate, session: SessionDep) -> TaskRead:
     task = Task(**payload.model_dump())
-    if task.due_at is not None:
-        try:
-            validate_calendar_slot_free(session, task.due_at, task.due_at + timedelta(minutes=30), source=CalendarSource.TASK)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        validate_task_schedule_free(session, task)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.add(task)
     session.commit()
     session.refresh(task)
@@ -50,21 +49,39 @@ def update_task(task_id: int, payload: TaskUpdate, session: SessionDep) -> TaskR
         raise HTTPException(status_code=404, detail="Task not found")
 
     updates = payload.model_dump(exclude_unset=True)
-    next_due_at = updates.get("due_at", task.due_at)
-    if next_due_at is not None:
-        try:
-            validate_calendar_slot_free(
-                session,
-                next_due_at,
-                next_due_at + timedelta(minutes=30),
-                source=CalendarSource.TASK,
-                source_ref_id=task.id,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if "due_at" in updates and "schedule_mode" not in updates:
+        updates["schedule_mode"] = (
+            TaskScheduleMode.ONCE if updates["due_at"] is not None else TaskScheduleMode.NONE
+        )
+
+    if "schedule_mode" in updates:
+        mode = updates["schedule_mode"]
+        if mode == TaskScheduleMode.NONE:
+            updates["due_at"] = None
+            updates["schedule_time"] = None
+            updates["schedule_weekday"] = None
+        elif mode == TaskScheduleMode.ONCE:
+            updates["schedule_time"] = None
+            updates["schedule_weekday"] = None
+        elif mode == TaskScheduleMode.DAILY:
+            updates["due_at"] = None
+            updates["schedule_weekday"] = None
+        elif mode == TaskScheduleMode.WEEKLY:
+            updates["due_at"] = None
 
     for key, value in updates.items():
         setattr(task, key, value)
+
+    if task.schedule_mode == TaskScheduleMode.NONE and task.due_at is not None:
+        task.schedule_mode = TaskScheduleMode.ONCE
+
+    if task.schedule_mode == TaskScheduleMode.ONCE and task.due_at is None:
+        task.schedule_mode = TaskScheduleMode.NONE
+
+    try:
+        validate_task_schedule_free(session, task, ignore_task_id=task.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     task.updated_at = datetime.now(timezone.utc)
     session.add(task)

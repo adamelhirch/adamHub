@@ -1,6 +1,8 @@
 # AdamHUB Tasks Skill
 
-Use for all task lifecycle operations.
+Use for one-shot tasks.
+
+If the user is describing something recurring like a routine, a ritual, or a habit, do not create a normal task. Switch to the habits skill and use `habit.*`.
 
 ## Actions
 
@@ -14,6 +16,7 @@ Use for all task lifecycle operations.
 - Need task id and missing -> call `task.list` first.
 - User says "done" -> `task.complete`.
 - User edits priority/date/title -> `task.update`.
+- Recurring intent -> `habit.create`, not `task.create`.
 
 ## Valid enums
 
