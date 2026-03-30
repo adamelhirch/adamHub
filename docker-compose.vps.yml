@@ -3,9 +3,9 @@ services:
     image: postgres:16-alpine
     container_name: adamhub-postgres
     environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,7 +16,9 @@ services:
     restart: unless-stopped
 
   adamhub-api:
-    build: .
+    build:
+      context: .
+    image: adamhub-api:latest
     container_name: adamhub-api
     depends_on:
       postgres:
@@ -24,7 +26,7 @@ services:
     env_file:
       - .env
     environment:
-      - ADAMHUB_DB_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ADAMHUB_DB_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     ports:
       - "${ADAMHUB_PORT:-8000}:8000"
     restart: unless-stopped

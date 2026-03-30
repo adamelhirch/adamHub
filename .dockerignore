@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.playwright-cli
+.vscode
+__pycache__
+*.pyc
+*.db
+data
+output
+conv-gemini.md
+intermarche_results.html
+web/node_modules
+web/dist
