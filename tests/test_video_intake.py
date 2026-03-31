@@ -114,6 +114,42 @@ def test_extract_video_source_youtube_uses_whisper_fallback(monkeypatch):
     assert len(result.transcript_segments) == 2
 
 
+def test_extract_video_source_tiktok_prefers_structured_desc_over_generic_meta(monkeypatch):
+    sigi_state = {
+        "ItemModule": {
+            "video-1": {
+                "desc": "Pates creme citron en 10 minutes",
+                "author": "chefada",
+                "video": {
+                    "subtitleInfos": [],
+                },
+            }
+        }
+    }
+    html = f"""
+    <html>
+      <head>
+        <meta property="og:title" content="TikTok" />
+        <meta property="og:description" content="Watch more trending videos on TikTok" />
+        <meta property="og:image" content="https://img.test/tiktok.jpg" />
+      </head>
+      <body>
+        <script id="SIGI_STATE" type="application/json">{json.dumps(sigi_state)}</script>
+      </body>
+    </html>
+    """
+
+    monkeypatch.setattr(video_intake, "_fetch_html", lambda url: (html, url))
+    monkeypatch.setattr(video_intake, "_whisper_transcribe", lambda url: (None, [], None, ["whisper_audio_download_failed"]))  # noqa: ARG005
+
+    result = video_intake.extract_video_source("https://www.tiktok.com/@chef/video/123")
+
+    assert result.platform == "tiktok"
+    assert result.description == "Pates creme citron en 10 minutes"
+    assert result.author == "chefada"
+    assert "tiktok_caption_unavailable" in result.warnings
+
+
 
 
 def test_video_extract_endpoint_returns_payload(monkeypatch, client, auth_headers):

@@ -291,11 +291,12 @@ def _extract_tiktok(html: str, final_url: str) -> VideoSourceRead:
     title = _clean_text(
         soup.find("meta", attrs={"property": "og:title"})["content"] if soup.find("meta", attrs={"property": "og:title"}) else None
     )
-    description = _clean_text(
+    meta_description = _clean_text(
         soup.find("meta", attrs={"property": "og:description"})["content"] if soup.find("meta", attrs={"property": "og:description"}) else None
     ) or _clean_text(
         soup.find("meta", attrs={"name": "description"})["content"] if soup.find("meta", attrs={"name": "description"}) else None
     )
+    description = meta_description
     thumbnail_url = _clean_text(
         soup.find("meta", attrs={"property": "og:image"})["content"] if soup.find("meta", attrs={"property": "og:image"}) else None
     )
@@ -308,6 +309,7 @@ def _extract_tiktok(html: str, final_url: str) -> VideoSourceRead:
         [
             r"<script id=\"SIGI_STATE\"[^>]*>(\{.*?\})</script>",
             r"window\.__UNIVERSAL_DATA_FOR_REHYDRATION__\s*=\s*(\{.*?\});",
+            r"<script id=\"__NEXT_DATA__\"[^>]*>(\{.*?\})</script>",
         ],
         html,
     ) or {}
@@ -323,11 +325,10 @@ def _extract_tiktok(html: str, final_url: str) -> VideoSourceRead:
             if isinstance(item_module, dict):
                 video_meta = item_module
 
-    if not description:
-        desc = None
-        if isinstance(video_meta, dict):
-            desc = video_meta.get("desc") or video_meta.get("description")
-        description = _clean_text(desc)
+    structured_description = None
+    if isinstance(video_meta, dict):
+        structured_description = _clean_text(video_meta.get("desc") or video_meta.get("description"))
+    description = structured_description or meta_description
 
     subtitle_url = None
     if isinstance(video_meta, dict):
