@@ -125,7 +125,8 @@ Never perform destructive writes on implicit intent.
 - Do not duplicate a recurring routine into normal tasks unless the user explicitly wants that downgrade.
 - If the user asks for a task at a specific datetime or duration, stay in `task.create` or `task.update` with `due_at` and `estimated_minutes`.
 - Do not use `calendar.add_item` as a substitute for a real task request.
-- If the user asks for steps or a checklist and `task.*` has no dedicated field, store the numbered list in `description`.
+- If the user asks for steps or a checklist, store them in `subtasks`.
+- Keep `description` for freeform notes only.
 - If the user says "recreate" and the only missing detail is the exact step content, ask once. If they repeat the same request unchanged, use a neutral numbered placeholder list rather than looping.
 
 ### Video rules

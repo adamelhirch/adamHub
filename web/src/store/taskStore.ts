@@ -55,6 +55,8 @@ function mapToBackendTask(t: Partial<TaskItem>) {
   if (t.title !== undefined) payload.title = t.title;
   if (t.duration !== undefined) payload.estimated_minutes = t.duration;
   if (t.tags !== undefined) payload.tags = t.tags;
+  if (t.description !== undefined) payload.description = t.description || null;
+  if (t.subtasks !== undefined) payload.subtasks = t.subtasks;
   if (t.scheduleMode !== undefined) payload.schedule_mode = t.scheduleMode;
   if (t.scheduleTime !== undefined) payload.schedule_time = t.scheduleTime || null;
   if (t.scheduleWeekday !== undefined) payload.schedule_weekday = t.scheduleWeekday ?? null;
@@ -83,14 +85,6 @@ function mapToBackendTask(t: Partial<TaskItem>) {
     payload.schedule_weekday = null;
   }
 
-  // description + subtasks are stored as a JSON string in description to keep it simple
-  if (t.description !== undefined || t.subtasks !== undefined) {
-      payload.description = JSON.stringify({
-          text: t.description || "",
-          subtasks: t.subtasks || []
-      });
-  }
-
   // Status mapping
   if (t.completed !== undefined) {
     payload.status = t.completed ? "done" : "todo";
@@ -105,11 +99,17 @@ function mapToFrontendTask(b: any): TaskItem {
    let subtasks: SubTask[] = [];
    const scheduleMode = getEffectiveScheduleMode(b);
 
+   if (Array.isArray(b.subtasks)) {
+      subtasks = b.subtasks;
+   }
+
    if (b.description) {
       try {
         const parsed = JSON.parse(b.description);
         descriptionText = parsed.text || "";
-        subtasks = parsed.subtasks || [];
+        if (subtasks.length === 0) {
+          subtasks = parsed.subtasks || [];
+        }
       } catch (e) {
         descriptionText = b.description;
       }

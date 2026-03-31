@@ -92,6 +92,7 @@ from app.schemas.dto import (
     SubscriptionUpdate,
     TaskCreate,
     TaskRead,
+    TaskSubtask,
     TaskUpdate,
 )
 
@@ -189,5 +190,6 @@ __all__ = [
     "SubscriptionUpdate",
     "TaskCreate",
     "TaskRead",
+    "TaskSubtask",
     "TaskUpdate",
 ]

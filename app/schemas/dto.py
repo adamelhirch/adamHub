@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from uuid import uuid4
 import re
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -65,6 +66,7 @@ def _normalize_schedule_weekdays(
 class TaskCreate(BaseModel):
     title: str
     description: str | None = None
+    subtasks: list["TaskSubtask"] = Field(default_factory=list)
     schedule_mode: TaskScheduleMode | None = None
     schedule_time: str | None = Field(default=None, pattern=SCHEDULE_TIME_PATTERN)
     schedule_weekday: int | None = Field(default=None, ge=0, le=6)
@@ -75,6 +77,8 @@ class TaskCreate(BaseModel):
 
     @model_validator(mode="after")
     def normalize_schedule(self) -> "TaskCreate":
+        self.subtasks = _normalize_task_subtasks(self.subtasks)
+
         if self.schedule_mode is None:
             self.schedule_mode = (
                 TaskScheduleMode.ONCE if self.due_at is not None else TaskScheduleMode.NONE
@@ -107,6 +111,7 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
+    subtasks: list["TaskSubtask"] | None = None
     schedule_mode: TaskScheduleMode | None = None
     schedule_time: str | None = Field(default=None, pattern=SCHEDULE_TIME_PATTERN)
     schedule_weekday: int | None = Field(default=None, ge=0, le=6)
@@ -116,11 +121,18 @@ class TaskUpdate(BaseModel):
     estimated_minutes: int | None = None
     tags: list[str] | None = None
 
+    @model_validator(mode="after")
+    def normalize_subtasks(self) -> "TaskUpdate":
+        if self.subtasks is not None:
+            self.subtasks = _normalize_task_subtasks(self.subtasks)
+        return self
+
 
 class TaskRead(BaseModel):
     id: int
     title: str
     description: str | None
+    subtasks: list["TaskSubtask"] = Field(default_factory=list)
     status: TaskStatus
     priority: TaskPriority
     schedule_mode: TaskScheduleMode
@@ -131,6 +143,28 @@ class TaskRead(BaseModel):
     tags: list[str]
     created_at: datetime
     updated_at: datetime
+
+
+class TaskSubtask(BaseModel):
+    id: str | None = None
+    title: str
+    completed: bool = False
+
+
+def _normalize_task_subtasks(subtasks: list["TaskSubtask"] | None) -> list["TaskSubtask"]:
+    normalized: list[TaskSubtask] = []
+    for subtask in subtasks or []:
+        title = subtask.title.strip()
+        if not title:
+            continue
+        normalized.append(
+            TaskSubtask(
+                id=(subtask.id or uuid4().hex),
+                title=title,
+                completed=subtask.completed,
+            )
+        )
+    return normalized
 
 
 class FinanceTransactionCreate(BaseModel):

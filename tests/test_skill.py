@@ -124,3 +124,31 @@ def test_skill_calendar_add_item_rejects_overlap_with_existing_task(client, auth
     )
     assert calendar_item.status_code == 400
     assert "overlaps" in calendar_item.json()["detail"].lower()
+
+
+def test_skill_task_create_returns_structured_subtasks(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "task.create",
+            "input": {
+                "title": "Checklist task",
+                "description": "Freeform note",
+                "subtasks": [
+                    {"title": "Step 1", "completed": False},
+                    {"title": "Step 2", "completed": True},
+                ],
+                "due_at": "2026-03-29T09:00:00Z",
+                "estimated_minutes": 30,
+            },
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()["data"]["task"]
+    assert payload["description"] == "Freeform note"
+    assert len(payload["subtasks"]) == 2
+    assert payload["subtasks"][0]["title"] == "Step 1"
+    assert payload["subtasks"][0]["completed"] is False
+    assert payload["subtasks"][0]["id"]
+    assert payload["subtasks"][1]["completed"] is True

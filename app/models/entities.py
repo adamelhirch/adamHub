@@ -144,6 +144,7 @@ class Task(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str
     description: str | None = None
+    subtasks: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
     status: TaskStatus = Field(default=TaskStatus.TODO)
     priority: TaskPriority = Field(default=TaskPriority.MEDIUM)
     schedule_mode: TaskScheduleMode = Field(default=TaskScheduleMode.NONE)

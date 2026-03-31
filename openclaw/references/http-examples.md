@@ -43,6 +43,15 @@ curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/skill/execute"
 ```
 
+## Create scheduled task with checklist
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"task.create","input":{"title":"Deep work checklist","subtasks":[{"title":"Step 1","completed":false},{"title":"Step 2","completed":false},{"title":"Step 3","completed":false}],"due_at":"2026-03-31T17:00:00Z","estimated_minutes":30,"priority":"high"}}' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
 ## Month summary
 
 ```bash
