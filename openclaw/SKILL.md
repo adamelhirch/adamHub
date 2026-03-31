@@ -10,13 +10,19 @@ As of `2026-03-29`, the skill surface exposes `99` actions.
 
 ## 1) Runtime contract
 
-- API base URL: `http://adamhub-api:8000`
+- API base URL: `ADAMHUB_API_URL`
 - Auth header on every protected request: `X-API-Key: <ADAMHUB_API_KEY>`
 - Health endpoint: `GET /health`
 - Manifest endpoint: `GET /api/v1/skill/manifest`
 - Unified action endpoint: `POST /api/v1/skill/execute`
 - Supermarket store registry: `supermarket.list_stores`
 - Video transcript intake: `video.fetch`
+
+Runtime URL rules:
+
+- If OpenClaw is outside the AdamHUB Docker network, use the public AdamHUB URL in `ADAMHUB_API_URL`.
+- If OpenClaw runs in the same Docker network, `ADAMHUB_API_URL=http://adamhub-api:8000` is valid.
+- Never use `127.0.0.1` unless OpenClaw and AdamHUB run in the exact same container namespace.
 
 ## 2) Core objective
 
@@ -31,10 +37,11 @@ Turn natural language requests into deterministic AdamHUB actions while preservi
 
 At session start:
 
-1. Call `GET /health`.
-2. Call `GET /api/v1/skill/manifest`.
-3. Cache the `actions` list and each `input_schema`.
-4. If the manifest fails, stop all write attempts.
+1. Read `ADAMHUB_API_URL`.
+2. Call `GET /health`.
+3. Call `GET /api/v1/skill/manifest`.
+4. Cache the `actions` list and each `input_schema`.
+5. If the manifest fails, stop all write attempts.
 
 ## 4) Universal execution loop
 

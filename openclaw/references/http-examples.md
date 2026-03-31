@@ -2,8 +2,14 @@
 
 All examples assume:
 
-- `BASE_URL=http://adamhub-api:8000`
+- `BASE_URL=$ADAMHUB_API_URL`
 - `API_KEY=<ADAMHUB_API_KEY>`
+
+Use:
+
+- a public AdamHUB URL if OpenClaw is external
+- `http://adamhub-api:8000` only if OpenClaw shares the same Docker network
+- never `127.0.0.1` for a remote OpenClaw instance
 
 ## Health
 
@@ -204,4 +210,3 @@ curl -s -H "X-API-Key: $API_KEY" \
 curl -s -H "X-API-Key: $API_KEY" \
   "$BASE_URL/api/v1/calendar/export.ics" > adamhub-calendar.ics
 ```
-
