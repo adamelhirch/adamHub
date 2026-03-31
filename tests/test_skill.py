@@ -65,3 +65,62 @@ def test_skill_manifest_and_execute_action(client, auth_headers):
     patrimony_payload = patrimony.json()
     assert patrimony_payload["ok"] is True
     assert patrimony_payload["data"]["account"]["name"] == "Livret A"
+
+
+def test_skill_task_create_rejects_overlap_with_existing_fitness_session(client, auth_headers):
+    fitness = client.post(
+        "/api/v1/fitness/sessions",
+        headers=auth_headers,
+        json={
+            "title": "Skill overlap",
+            "session_type": "strength",
+            "planned_at": "2026-03-29T18:00:00Z",
+            "duration_minutes": 60,
+            "exercises": [{"name": "Squats", "mode": "reps", "reps": 12}],
+        },
+    )
+    assert fitness.status_code == 200
+
+    task = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "task.create",
+            "input": {
+                "title": "Should overlap",
+                "due_at": "2026-03-29T18:30:00Z",
+                "estimated_minutes": 30,
+            },
+        },
+    )
+    assert task.status_code == 400
+    assert "overlaps" in task.json()["detail"].lower()
+
+
+def test_skill_calendar_add_item_rejects_overlap_with_existing_task(client, auth_headers):
+    task = client.post(
+        "/api/v1/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Task already planned",
+            "due_at": "2026-03-29T09:00:00Z",
+            "estimated_minutes": 30,
+        },
+    )
+    assert task.status_code == 200
+
+    calendar_item = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "calendar.add_item",
+            "input": {
+                "title": "Manual overlap",
+                "start_at": "2026-03-29T09:15:00Z",
+                "end_at": "2026-03-29T09:45:00Z",
+                "all_day": False,
+            },
+        },
+    )
+    assert calendar_item.status_code == 400
+    assert "overlaps" in calendar_item.json()["detail"].lower()

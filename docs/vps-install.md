@@ -107,6 +107,7 @@ Minimum:
 
 ```env
 ADAMHUB_API_URL=https://adamhub.ton-domaine.com
+ADAMHUB_URL=https://adamhub.ton-domaine.com
 ADAMHUB_API_KEY=un_secret_long_et_random
 ```
 
@@ -114,6 +115,7 @@ Si OpenClaw tourne dans le meme reseau Docker que AdamHUB, tu peux utiliser l'UR
 
 ```env
 ADAMHUB_API_URL=http://adamhub-api:8000
+ADAMHUB_URL=http://adamhub-api:8000
 ADAMHUB_API_KEY=un_secret_long_et_random
 ```
 
@@ -121,6 +123,7 @@ Le plus simple est:
 
 - dans `.env` de ton backend VPS: `ADAMHUB_API_KEYS=un_secret_long_et_random`
 - dans l'environnement d'OpenClaw: `ADAMHUB_API_KEY=un_secret_long_et_random`
+- mirror l'URL dans `ADAMHUB_API_URL` et `ADAMHUB_URL` si ton runtime OpenClaw n'est pas strict sur le nom exact
 
 Un exemple pret a copier est fourni dans `openclaw/.env.example`.
 

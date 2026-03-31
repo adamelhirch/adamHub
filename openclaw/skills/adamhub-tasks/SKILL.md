@@ -17,6 +17,10 @@ If the user is describing something recurring like a routine, a ritual, or a hab
 - User says "done" -> `task.complete`.
 - User edits priority/date/title -> `task.update`.
 - Recurring intent -> `habit.create`, not `task.create`.
+- Scheduled one-shot task -> `task.create` or `task.update` with `due_at` and `estimated_minutes`.
+- Do not use `calendar.add_item` for a normal task request.
+- If the user wants steps, checklist, or "5 etapes" and there is no dedicated structured task field, put the numbered list in `description`.
+- Ask for missing step content once at most. If the user repeats the same request unchanged, use a neutral numbered placeholder list and say so.
 
 ## Valid enums
 
@@ -29,6 +33,18 @@ Create:
 
 ```json
 {"action":"task.create","input":{"title":"Call bank","priority":"high"}}
+```
+
+Create scheduled task:
+
+```json
+{"action":"task.create","input":{"title":"Call bank","due_at":"2026-03-31T17:00:00Z","estimated_minutes":30,"priority":"high"}}
+```
+
+Create scheduled task with checklist in description:
+
+```json
+{"action":"task.create","input":{"title":"Task (5 steps)","description":"1. Step 1\n2. Step 2\n3. Step 3\n4. Step 4\n5. Step 5","due_at":"2026-03-31T17:00:00Z","estimated_minutes":30,"priority":"medium"}}
 ```
 
 List open:

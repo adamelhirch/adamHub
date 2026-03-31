@@ -2,7 +2,7 @@
 
 All examples assume:
 
-- `BASE_URL=$ADAMHUB_API_URL`
+- `BASE_URL=${ADAMHUB_API_URL:-$ADAMHUB_URL}`
 - `API_KEY=<ADAMHUB_API_KEY>`
 
 Use:
@@ -10,6 +10,7 @@ Use:
 - a public AdamHUB URL if OpenClaw is external
 - `http://adamhub-api:8000` only if OpenClaw shares the same Docker network
 - never `127.0.0.1` for a remote OpenClaw instance
+- prefer `ADAMHUB_API_URL`; `ADAMHUB_URL` is only a compatibility fallback
 
 ## Health
 
@@ -30,6 +31,15 @@ curl -s -H "X-API-Key: $API_KEY" \
 curl -s -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"action":"task.create","input":{"title":"Pay rent","priority":"urgent"}}' \
+  "$BASE_URL/api/v1/skill/execute"
+```
+
+## Create scheduled task
+
+```bash
+curl -s -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"task.create","input":{"title":"Deep work","due_at":"2026-03-31T17:00:00Z","estimated_minutes":30,"priority":"high"}}' \
   "$BASE_URL/api/v1/skill/execute"
 ```
 

@@ -108,6 +108,7 @@ from app.services.calendar_hub import (
     build_calendar_item_read,
     list_due_reminders,
     sync_generated_calendar_items,
+    validate_task_schedule_free,
     validate_calendar_slot_free,
 )
 from app.services.fitness import (
@@ -123,9 +124,9 @@ from app.services.supermarket_registry import list_store_definitions
 from app.services.video_intake import extract_video_source
 
 ACTION_CATALOG = [
-    {"action": "task.create", "description": "Create a task", "input_schema": {"title": "string", "description": "string?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent", "estimated_minutes": "int?", "tags": "string[]?"}},
+    {"action": "task.create", "description": "Create a one-shot task. For a scheduled task, use due_at plus estimated_minutes. If the user wants a checklist or steps, store them in description. Do not use calendar.add_item for normal tasks.", "input_schema": {"title": "string", "description": "string?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent", "estimated_minutes": "int?", "tags": "string[]?"}},
     {"action": "task.list", "description": "List tasks with optional status filter", "input_schema": {"status": "todo|in_progress|done|blocked?", "only_open": "bool?", "limit": "int?"}},
-    {"action": "task.update", "description": "Update an existing task", "input_schema": {"task_id": "int", "title": "string?", "description": "string?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent?", "status": "todo|in_progress|done|blocked?", "estimated_minutes": "int?", "tags": "string[]?"}},
+    {"action": "task.update", "description": "Update an existing task. Use this to change title, description, timing, duration, or status. Keep task scheduling inside task.update, not calendar.update_item.", "input_schema": {"task_id": "int", "title": "string?", "description": "string?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent?", "status": "todo|in_progress|done|blocked?", "estimated_minutes": "int?", "tags": "string[]?"}},
     {"action": "task.complete", "description": "Mark a task as done", "input_schema": {"task_id": "int"}},
     {"action": "finance.add_transaction", "description": "Add an income or expense transaction", "input_schema": {"kind": "income|expense", "amount": "float", "currency": "string?", "category": "string", "note": "string?", "occurred_at": "datetime?", "is_recurring": "bool?"}},
     {"action": "finance.list_transactions", "description": "List transactions", "input_schema": {"kind": "income|expense?", "year": "int?", "month": "int?", "limit": "int?"}},
@@ -164,7 +165,7 @@ ACTION_CATALOG = [
     {"action": "meal_plan.sync_groceries", "description": "Sync missing ingredients to grocery list for one meal plan", "input_schema": {"meal_plan_id": "int"}},
     {"action": "meal_plan.confirm_cooked", "description": "Confirm meal was cooked and consume pantry ingredients", "input_schema": {"meal_plan_id": "int", "note": "string?"}},
     {"action": "meal_plan.unconfirm_cooked", "description": "Undo cooked confirmation and restore pantry", "input_schema": {"meal_plan_id": "int"}},
-    {"action": "calendar.add_item", "description": "Create a manual calendar item", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}},
+    {"action": "calendar.add_item", "description": "Create a manual calendar block only when the user wants a generic time slot and not a real task, habit, event, meal, subscription, or fitness session.", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}},
     {"action": "calendar.list_items", "description": "List calendar items", "input_schema": {"from_at": "datetime?", "to_at": "datetime?", "category": "general|task|event|subscription|meal?", "source": "manual|task|habit|event|subscription|meal_plan|fitness_session?", "include_completed": "bool?", "generated_only": "bool?", "limit": "int?"}},
     {"action": "calendar.update_item", "description": "Update calendar item", "input_schema": {"item_id": "int", "title": "string?", "description": "string?", "start_at": "datetime?", "end_at": "datetime?", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "completed": "bool?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}},
     {"action": "calendar.delete_item", "description": "Delete calendar item", "input_schema": {"item_id": "int"}},
@@ -317,6 +318,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
     if action == "task.create":
         data = TaskCreate.model_validate(payload)
         task = Task(**data.model_dump())
+        validate_task_schedule_free(session, task)
         session.add(task)
         session.commit()
         session.refresh(task)
@@ -346,8 +348,36 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No task fields to update")
 
+        if "due_at" in updates and "schedule_mode" not in updates:
+            updates["schedule_mode"] = (
+                TaskScheduleMode.ONCE if updates["due_at"] is not None else TaskScheduleMode.NONE
+            )
+
+        if "schedule_mode" in updates:
+            mode = updates["schedule_mode"]
+            if mode == TaskScheduleMode.NONE:
+                updates["due_at"] = None
+                updates["schedule_time"] = None
+                updates["schedule_weekday"] = None
+            elif mode == TaskScheduleMode.ONCE:
+                updates["schedule_time"] = None
+                updates["schedule_weekday"] = None
+            elif mode == TaskScheduleMode.DAILY:
+                updates["due_at"] = None
+                updates["schedule_weekday"] = None
+            elif mode == TaskScheduleMode.WEEKLY:
+                updates["due_at"] = None
+
         for key, value in updates.items():
             setattr(task, key, value)
+
+        if task.schedule_mode == TaskScheduleMode.NONE and task.due_at is not None:
+            task.schedule_mode = TaskScheduleMode.ONCE
+
+        if task.schedule_mode == TaskScheduleMode.ONCE and task.due_at is None:
+            task.schedule_mode = TaskScheduleMode.NONE
+
+        validate_task_schedule_free(session, task, ignore_task_id=task.id)
         task.updated_at = now
 
         session.add(task)
@@ -991,6 +1021,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         data = CalendarItemCreate.model_validate(payload)
         if data.end_at <= data.start_at:
             raise ValueError("end_at must be after start_at")
+        validate_calendar_slot_free(session, data.start_at, data.end_at)
         item = CalendarItem(
             **data.model_dump(),
             source=CalendarSource.MANUAL,
@@ -1036,6 +1067,12 @@ def execute_action(action: str, payload: dict, session) -> dict:
             setattr(item, key, value)
         if item.end_at <= item.start_at:
             raise ValueError("end_at must be after start_at")
+        validate_calendar_slot_free(
+            session,
+            item.start_at,
+            item.end_at,
+            ignore_calendar_item_id=item.id,
+        )
         item.updated_at = now
         session.add(item)
         session.commit()

@@ -11,6 +11,7 @@ As of `2026-03-29`, the skill surface exposes `99` actions.
 ## 1) Runtime contract
 
 - API base URL: `ADAMHUB_API_URL`
+- Compatibility alias: `ADAMHUB_URL`
 - Auth header on every protected request: `X-API-Key: <ADAMHUB_API_KEY>`
 - Health endpoint: `GET /health`
 - Manifest endpoint: `GET /api/v1/skill/manifest`
@@ -20,9 +21,11 @@ As of `2026-03-29`, the skill surface exposes `99` actions.
 
 Runtime URL rules:
 
+- Resolve the base URL from `ADAMHUB_API_URL` first, then fall back to `ADAMHUB_URL` if needed.
 - If OpenClaw is outside the AdamHUB Docker network, use the public AdamHUB URL in `ADAMHUB_API_URL`.
 - If OpenClaw runs in the same Docker network, `ADAMHUB_API_URL=http://adamhub-api:8000` is valid.
 - Never use `127.0.0.1` unless OpenClaw and AdamHUB run in the exact same container namespace.
+- If either `ADAMHUB_API_URL` or `ADAMHUB_URL` is already present with `ADAMHUB_API_KEY`, do not ask the user which variables are needed. Test the service first.
 
 ## 2) Core objective
 
@@ -37,11 +40,12 @@ Turn natural language requests into deterministic AdamHUB actions while preservi
 
 At session start:
 
-1. Read `ADAMHUB_API_URL`.
-2. Call `GET /health`.
-3. Call `GET /api/v1/skill/manifest`.
-4. Cache the `actions` list and each `input_schema`.
-5. If the manifest fails, stop all write attempts.
+1. Assume "adamhub" refers to this AdamHUB service when this skill is loaded.
+2. Read `ADAMHUB_API_URL`, or fall back to `ADAMHUB_URL`.
+3. Call `GET /health`.
+4. Call `GET /api/v1/skill/manifest`.
+5. Cache the `actions` list and each `input_schema`.
+6. If the manifest fails, stop all write attempts.
 
 ## 4) Universal execution loop
 
@@ -49,13 +53,14 @@ For each request:
 
 1. Classify intent as `read`, `write`, `multi-step`, or `unclear`.
 2. Ask one short clarifying question only if a required field is missing or the target is ambiguous.
-3. Resolve ids from live data, never by guessing.
-4. Select only actions that exist in the current manifest.
-5. Validate the payload against the manifest schema and domain rules.
-6. Ask for confirmation before risky writes.
-7. Execute.
-8. On failure, inspect `detail`, recover once, and retry once.
-9. Return a concise result with ids and key fields.
+3. Never repeat the same clarifying question more than once. If the user repeats the same request unchanged, execute the safest viable interpretation.
+4. Resolve ids from live data, never by guessing.
+5. Select only actions that exist in the current manifest.
+6. Validate the payload against the manifest schema and domain rules.
+7. Ask for confirmation before risky writes.
+8. Execute.
+9. On failure, inspect `detail`, recover once, and retry once.
+10. Return a concise result with ids and key fields.
 
 ## 5) Risk policy
 
@@ -118,6 +123,10 @@ Never perform destructive writes on implicit intent.
 - Use `task.*` only for one-time work.
 - Use `habit.*` for recurring routines, rituals, and habits.
 - Do not duplicate a recurring routine into normal tasks unless the user explicitly wants that downgrade.
+- If the user asks for a task at a specific datetime or duration, stay in `task.create` or `task.update` with `due_at` and `estimated_minutes`.
+- Do not use `calendar.add_item` as a substitute for a real task request.
+- If the user asks for steps or a checklist and `task.*` has no dedicated field, store the numbered list in `description`.
+- If the user says "recreate" and the only missing detail is the exact step content, ask once. If they repeat the same request unchanged, use a neutral numbered placeholder list rather than looping.
 
 ### Video rules
 
