@@ -30,6 +30,8 @@ services:
       - .env
     environment:
       ADAMHUB_DB_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ./data:/app/data:ro
     ports:
       - "${ADAMHUB_PORT:-8000}:8000"
     restart: unless-stopped

@@ -305,6 +305,16 @@ def is_intermarche_bot_challenge(content: str) -> bool:
     )
 
 
+def is_camoufox_launch_failure(exc: Exception) -> bool:
+    lowered = str(exc).lower()
+    return (
+        "failed to launch the browser process" in lowered
+        or "browsertype.launch" in lowered
+        or "libgtk-3.so.0" in lowered
+        or "couldn't load xpcom" in lowered
+    )
+
+
 def load_intermarche_cookies() -> list[dict[str, Any]]:
     cookies_path = Path(__file__).resolve().parents[3] / "data" / "cookies_intermarche.json"
     if not cookies_path.exists():
@@ -443,86 +453,100 @@ async def search_intermarche(
 
     results: dict[str, list[dict[str, str | None]]] = {}
 
-    async with AsyncCamoufox(
-        headless=True,
-        geoip=True,
-        locale="fr-FR",
-        os="macos",
-    ) as browser:
-        context = await browser.new_context(locale="fr-FR", timezone_id="Europe/Paris")
-        if cookies:
-            await context.add_cookies(cookies)
+    try:
+        async with AsyncCamoufox(
+            headless=True,
+            geoip=True,
+            locale="fr-FR",
+            os="macos",
+        ) as browser:
+            context = await browser.new_context(locale="fr-FR", timezone_id="Europe/Paris")
+            if cookies:
+                await context.add_cookies(cookies)
 
-        page = await context.new_page()
-        await page.goto("https://www.intermarche.com/", wait_until="domcontentloaded")
-        await asyncio.sleep(2)
+            page = await context.new_page()
+            await page.goto("https://www.intermarche.com/", wait_until="domcontentloaded")
+            await asyncio.sleep(2)
 
-        try:
-            accept_button = await page.wait_for_selector("button#agree", timeout=3_000)
-            if accept_button:
-                await accept_button.click()
-        except Exception:
-            pass
+            try:
+                accept_button = await page.wait_for_selector("button#agree", timeout=3_000)
+                if accept_button:
+                    await accept_button.click()
+            except Exception:
+                pass
 
-        sort_map = {
-            "prix_croissant": "Prix croissant",
-            "prix_decroissant": "Prix décroissant",
-            "prix_kg_croissant": "Prix/kg ou prix/l croissant",
-            "prix_kg_decroissant": "Prix/kg ou prix/l décroissant",
-        }
+            sort_map = {
+                "prix_croissant": "Prix croissant",
+                "prix_decroissant": "Prix décroissant",
+                "prix_kg_croissant": "Prix/kg ou prix/l croissant",
+                "prix_kg_decroissant": "Prix/kg ou prix/l décroissant",
+            }
 
-        for query in queries:
-            encoded_query = urllib.parse.quote(query)
-            search_url = f"https://www.intermarche.com/recherche/{encoded_query}"
-            await page.goto(search_url, wait_until="domcontentloaded")
-            await asyncio.sleep(4)
+            for query in queries:
+                encoded_query = urllib.parse.quote(query)
+                search_url = f"https://www.intermarche.com/recherche/{encoded_query}"
+                await page.goto(search_url, wait_until="domcontentloaded")
+                await asyncio.sleep(4)
 
-            if promotions_only:
-                try:
-                    promo_p = page.locator('p:has-text("Promotions")')
-                    if await promo_p.count() > 0:
-                        promo_switch = promo_p.first.locator('xpath=../../..//input[@role="switch"]')
-                        if await promo_switch.count() > 0:
-                            await promo_switch.first.click(force=True)
-                            await asyncio.sleep(2)
-                except Exception:
-                    pass
+                if promotions_only:
+                    try:
+                        promo_p = page.locator('p:has-text("Promotions")')
+                        if await promo_p.count() > 0:
+                            promo_switch = promo_p.first.locator('xpath=../../..//input[@role="switch"]')
+                            if await promo_switch.count() > 0:
+                                await promo_switch.first.click(force=True)
+                                await asyncio.sleep(2)
+                    except Exception:
+                        pass
 
-            if sort_by:
-                sort_text = sort_map.get(sort_by, "Pertinence")
-                try:
-                    sort_button = page.locator("button#stime-select-button")
-                    if await sort_button.count() > 0:
-                        await sort_button.first.click()
-                        await asyncio.sleep(1)
-                        sort_option = page.locator(f'text="{sort_text}"')
-                        if await sort_option.count() > 0:
-                            await sort_option.first.click()
-                            await asyncio.sleep(2)
-                        else:
-                            await page.keyboard.press("Escape")
-                except Exception:
-                    pass
+                if sort_by:
+                    sort_text = sort_map.get(sort_by, "Pertinence")
+                    try:
+                        sort_button = page.locator("button#stime-select-button")
+                        if await sort_button.count() > 0:
+                            await sort_button.first.click()
+                            await asyncio.sleep(1)
+                            sort_option = page.locator(f'text="{sort_text}"')
+                            if await sort_option.count() > 0:
+                                await sort_option.first.click()
+                                await asyncio.sleep(2)
+                            else:
+                                await page.keyboard.press("Escape")
+                    except Exception:
+                        pass
 
-            content = await page.content()
-            dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
-            dump_path.parent.mkdir(parents=True, exist_ok=True)
-            dump_path.write_text(content, encoding="utf-8")
-            if is_intermarche_bot_challenge(content):
-                raise RuntimeError(
-                    "Intermarché blocked the current session with DataDome. "
-                    "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
-                )
-            if requires_intermarche_store_selection(content):
-                raise RuntimeError(
-                    "Intermarché requires a selected store before search results can load. "
-                    "Provide a valid `data/cookies_intermarche.json` file in the runtime image."
-                )
-            query_results = parse_intermarche_html(content, max_results=max_results)
-            await hydrate_product_categories_from_detail_pages(context, query_results)
-            results[query] = query_results
+                content = await page.content()
+                dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
+                dump_path.parent.mkdir(parents=True, exist_ok=True)
+                dump_path.write_text(content, encoding="utf-8")
+                if is_intermarche_bot_challenge(content):
+                    raise RuntimeError(
+                        "Intermarché blocked the current session with DataDome. "
+                        "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
+                    )
+                if requires_intermarche_store_selection(content):
+                    raise RuntimeError(
+                        "Intermarché requires a selected store before search results can load. "
+                        "Provide a valid `data/cookies_intermarche.json` file in the runtime image."
+                    )
+                query_results = parse_intermarche_html(content, max_results=max_results)
+                await hydrate_product_categories_from_detail_pages(context, query_results)
+                results[query] = query_results
 
-        await context.close()
+            await context.close()
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        if cookies and not sort_by and not promotions_only:
+            return await search_intermarche_via_http(queries, max_results, cookies)
+        if is_camoufox_launch_failure(exc):
+            raise RuntimeError(
+                "Camoufox could not launch in the current runtime. "
+                "Install the missing Firefox runtime libraries in the container "
+                "(for example `libgtk-3-0`) or provide `data/cookies_intermarche.json` "
+                "and retry without promotions filtering."
+            ) from exc
+        raise
 
     return results
 
