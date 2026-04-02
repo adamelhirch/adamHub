@@ -598,6 +598,8 @@ function PantryMappingPanel({
   mapping,
   query,
   setQuery,
+  promotionsOnly,
+  setPromotionsOnly,
   searchResults,
   searchLoading,
   searchError,
@@ -612,6 +614,8 @@ function PantryMappingPanel({
   mapping: SupermarketMapping | null;
   query: string;
   setQuery: (value: string) => void;
+  promotionsOnly: boolean;
+  setPromotionsOnly: (value: boolean) => void;
   searchResults: SupermarketProduct[];
   searchLoading: boolean;
   searchError: string | null;
@@ -690,6 +694,16 @@ function PantryMappingPanel({
           )}
         </div>
 
+        <label className="flex items-center gap-2 text-sm text-apple-gray-600">
+          <input
+            type="checkbox"
+            checked={promotionsOnly}
+            onChange={(e) => setPromotionsOnly(e.target.checked)}
+            className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+          />
+          Promotions uniquement
+        </label>
+
         {searchError && <p className="text-xs text-red-500">{searchError}</p>}
 
         {searchResults.length > 0 && (
@@ -754,6 +768,7 @@ export default function GroceriesPage() {
   const [imQueryHasCache, setImQueryHasCache] = useState(false);
   const [pantrySearchQueryHasCache, setPantrySearchQueryHasCache] = useState(false);
   const [mappingQueryHasCache, setMappingQueryHasCache] = useState(false);
+  const [promotionsOnly, setPromotionsOnly] = useState(false);
 
   const handleSelectProduct = (p: SupermarketProduct) => {
     setSelectedProduct(p);
@@ -1110,13 +1125,13 @@ export default function GroceriesPage() {
                           placeholder="Ex: lait, poulet, yaourt…"
                           value={imQuery}
                           onChange={(e) => setImQuery(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (imQuery.trim()) searchIntermarche(imQuery.trim()); }}}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (imQuery.trim()) searchIntermarche(imQuery.trim(), false, promotionsOnly); }}}
                           className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-400/40"
                         />
                       </div>
                       <button
                         type="button"
-                        onClick={() => { if (imQuery.trim()) searchIntermarche(imQuery.trim()); }}
+                        onClick={() => { if (imQuery.trim()) searchIntermarche(imQuery.trim(), false, promotionsOnly); }}
                         disabled={searchLoading || !imQuery.trim()}
                         className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
@@ -1126,7 +1141,7 @@ export default function GroceriesPage() {
                       {imQueryHasCache && (
                         <button
                           type="button"
-                          onClick={() => { if (imQuery.trim()) searchIntermarche(imQuery.trim(), true); }}
+                          onClick={() => { if (imQuery.trim()) searchIntermarche(imQuery.trim(), true, promotionsOnly); }}
                           disabled={searchLoading || !imQuery.trim()}
                           className="px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
@@ -1134,6 +1149,16 @@ export default function GroceriesPage() {
                         </button>
                       )}
                     </div>
+
+                    <label className="mt-2 flex items-center gap-2 text-sm text-apple-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={promotionsOnly}
+                        onChange={(e) => setPromotionsOnly(e.target.checked)}
+                        className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                      />
+                      Promotions uniquement
+                    </label>
 
                     {/* Loading hint */}
                     {searchLoading && (
@@ -1317,12 +1342,14 @@ export default function GroceriesPage() {
                   mapping={pantryMappings[mappingTarget.id] ?? null}
                   query={mappingQuery}
                   setQuery={setMappingQuery}
+                  promotionsOnly={promotionsOnly}
+                  setPromotionsOnly={setPromotionsOnly}
                   searchResults={searchResults}
                   searchLoading={searchLoading}
                   searchError={searchError}
                   onSearch={async () => {
                     if (mappingQuery.trim()) {
-                      await searchIntermarche(mappingQuery.trim());
+                      await searchIntermarche(mappingQuery.trim(), false, promotionsOnly);
                     }
                   }}
                   onClose={() => {
@@ -1347,7 +1374,7 @@ export default function GroceriesPage() {
                   canRefresh={mappingQueryHasCache}
                   onRefresh={async () => {
                     if (mappingQuery.trim()) {
-                      await searchIntermarche(mappingQuery.trim(), true);
+                      await searchIntermarche(mappingQuery.trim(), true, promotionsOnly);
                     }
                   }}
                 />
@@ -1400,7 +1427,7 @@ export default function GroceriesPage() {
                             if (e.key === 'Enter') {
                               e.preventDefault();
                               if (pantrySearchQuery.trim()) {
-                                void searchIntermarche(pantrySearchQuery.trim());
+                                void searchIntermarche(pantrySearchQuery.trim(), false, promotionsOnly);
                               }
                             }
                           }}
@@ -1411,7 +1438,7 @@ export default function GroceriesPage() {
                         type="button"
                         onClick={() => {
                           if (pantrySearchQuery.trim()) {
-                            void searchIntermarche(pantrySearchQuery.trim());
+                            void searchIntermarche(pantrySearchQuery.trim(), false, promotionsOnly);
                           }
                         }}
                         disabled={searchLoading || !pantrySearchQuery.trim()}
@@ -1425,7 +1452,7 @@ export default function GroceriesPage() {
                           type="button"
                           onClick={() => {
                             if (pantrySearchQuery.trim()) {
-                              void searchIntermarche(pantrySearchQuery.trim(), true);
+                              void searchIntermarche(pantrySearchQuery.trim(), true, promotionsOnly);
                             }
                           }}
                           disabled={searchLoading || !pantrySearchQuery.trim()}
@@ -1435,6 +1462,16 @@ export default function GroceriesPage() {
                         </button>
                       )}
                     </div>
+
+                    <label className="flex items-center gap-2 text-sm text-apple-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={promotionsOnly}
+                        onChange={(e) => setPromotionsOnly(e.target.checked)}
+                        className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                      />
+                      Promotions uniquement
+                    </label>
 
                     {searchLoading && (
                       <p className="text-xs text-apple-gray-400 animate-pulse">⏳ Recherche du produit magasin…</p>

@@ -151,7 +151,7 @@ interface GroceryStore {
   searchError: string | null;
   pantryMappings: Record<number, SupermarketMapping | null>;
 
-  searchIntermarche: (query: string, forceRefresh?: boolean) => Promise<void>;
+  searchIntermarche: (query: string, forceRefresh?: boolean, promotionsOnly?: boolean) => Promise<void>;
   getCachedProducts: (query?: string) => Promise<void>;
   hasCachedProducts: (query: string) => Promise<boolean>;
   clearSearchResults: () => void;
@@ -260,18 +260,18 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
   searchError: null,
   pantryMappings: {},
 
-  searchIntermarche: async (query: string, forceRefresh = false) => {
+  searchIntermarche: async (query: string, forceRefresh = false, promotionsOnly = false) => {
     set({ searchLoading: true, searchError: null, searchResults: [] });
     try {
-      if (!forceRefresh) {
+      if (!forceRefresh && !promotionsOnly) {
         const cached = await api.get('/supermarket/search', {
           params: {
             store: 'intermarche',
             query,
-            limit: 20,
+            limit: 30,
           },
         });
-        if (Array.isArray(cached.data) && cached.data.length > 0 && hasResolvedCategories(cached.data)) {
+        if (Array.isArray(cached.data) && cached.data.length >= 30 && hasResolvedCategories(cached.data)) {
           set({ searchResults: cached.data });
           return;
         }
@@ -282,8 +282,8 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
         {
           store: 'intermarche',
           queries: [query],
-          max_results: 10,
-          promotions_only: false,
+          max_results: 30,
+          promotions_only: promotionsOnly,
         },
         {
           timeout: 120_000,

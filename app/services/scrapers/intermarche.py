@@ -8,8 +8,10 @@ import re
 import unicodedata
 import urllib.parse
 from pathlib import Path
+from typing import Any
 
 from bs4 import BeautifulSoup
+import httpx
 
 
 CATEGORY_HINTS = {
@@ -294,12 +296,143 @@ def requires_intermarche_store_selection(content: str) -> bool:
     )
 
 
+def is_intermarche_bot_challenge(content: str) -> bool:
+    lowered = content.lower()
+    return (
+        "geo.captcha-delivery.com/interstitial" in lowered
+        or "datadome device check" in lowered
+        or "captcha-delivery.com" in lowered
+    )
+
+
+def load_intermarche_cookies() -> list[dict[str, Any]]:
+    cookies_path = Path(__file__).resolve().parents[3] / "data" / "cookies_intermarche.json"
+    if not cookies_path.exists():
+        return []
+
+    with cookies_path.open("r", encoding="utf-8") as handle:
+        raw_cookies = json.load(handle)
+
+    normalized: list[dict[str, Any]] = []
+    for raw_cookie in raw_cookies:
+        cookie: dict[str, Any] = {
+            key: raw_cookie[key]
+            for key in ("name", "value", "domain", "path", "httpOnly", "secure", "sameSite", "url")
+            if key in raw_cookie
+        }
+
+        expiration = raw_cookie.get("expires")
+        if expiration is None:
+            expiration = raw_cookie.get("expirationDate")
+        if expiration is not None:
+            cookie["expires"] = int(expiration)
+
+        same_site = cookie.get("sameSite")
+        if same_site == "lax":
+            cookie["sameSite"] = "Lax"
+        elif same_site == "strict":
+            cookie["sameSite"] = "Strict"
+        elif same_site in {"none", "no_restriction"}:
+            cookie["sameSite"] = "None"
+        elif same_site is None and "sameSite" in cookie:
+            del cookie["sameSite"]
+
+        normalized.append(cookie)
+
+    return normalized
+
+
+def build_intermarche_cookie_jar(cookies: list[dict[str, Any]]) -> httpx.Cookies:
+    jar = httpx.Cookies()
+    for cookie in cookies:
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not name or value is None:
+            continue
+        jar.set(name, value, domain=cookie.get("domain"), path=cookie.get("path", "/"))
+    return jar
+
+
+async def fetch_product_breadcrumb_category_http(client: httpx.AsyncClient, product_url: str) -> str | None:
+    response = await client.get(product_url)
+    response.raise_for_status()
+    return extract_category_from_product_breadcrumb(response.text)
+
+
+async def hydrate_product_categories_from_detail_pages_http(
+    client: httpx.AsyncClient, items: list[dict[str, str | None]]
+) -> None:
+    pending = [item for item in items if item.get("product_url") and not item.get("category")]
+    if not pending:
+        return
+
+    for item in pending:
+        try:
+            category = await fetch_product_breadcrumb_category_http(client, str(item["product_url"]))
+        except Exception:
+            continue
+        if category:
+            item["category"] = category
+
+
+async def search_intermarche_via_http(
+    queries: list[str],
+    max_results: int,
+    cookies: list[dict[str, Any]],
+) -> dict[str, list[dict[str, str | None]]]:
+    results: dict[str, list[dict[str, str | None]]] = {}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+    }
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        headers=headers,
+        cookies=build_intermarche_cookie_jar(cookies),
+        timeout=httpx.Timeout(30.0),
+    ) as client:
+        for query in queries:
+            encoded_query = urllib.parse.quote(query)
+            search_url = f"https://www.intermarche.com/recherche/{encoded_query}"
+            response = await client.get(search_url)
+            response.raise_for_status()
+
+            content = response.text
+            dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            dump_path.write_text(content, encoding="utf-8")
+
+            if is_intermarche_bot_challenge(content):
+                raise RuntimeError(
+                    "Intermarché blocked the current session with DataDome. "
+                    "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
+                )
+            if requires_intermarche_store_selection(content):
+                raise RuntimeError(
+                    "Intermarché requires a selected store before search results can load. "
+                    "Refresh `data/cookies_intermarche.json` after selecting a store."
+                )
+
+            query_results = parse_intermarche_html(content, max_results=max_results)
+            await hydrate_product_categories_from_detail_pages_http(client, query_results)
+            results[query] = query_results
+
+    return results
+
+
 async def search_intermarche(
     queries: list[str],
     max_results: int = 10,
     sort_by: str | None = None,
     promotions_only: bool = False,
 ) -> dict[str, list[dict[str, str | None]]]:
+    cookies = load_intermarche_cookies()
+    if cookies and not sort_by and not promotions_only:
+        return await search_intermarche_via_http(queries, max_results, cookies)
+
     try:
         from camoufox.async_api import AsyncCamoufox
     except ImportError as exc:
@@ -317,23 +450,8 @@ async def search_intermarche(
         os="macos",
     ) as browser:
         context = await browser.new_context(locale="fr-FR", timezone_id="Europe/Paris")
-        cookies_path = Path(__file__).resolve().parents[3] / "data" / "cookies_intermarche.json"
-        if cookies_path.exists():
-            with cookies_path.open("r", encoding="utf-8") as handle:
-                raw_cookies = json.load(handle)
-            sanitized = []
-            for cookie in raw_cookies:
-                same_site = cookie.get("sameSite")
-                if same_site == "lax":
-                    cookie["sameSite"] = "Lax"
-                elif same_site == "strict":
-                    cookie["sameSite"] = "Strict"
-                elif same_site in {"none", "no_restriction"}:
-                    cookie["sameSite"] = "None"
-                elif same_site is None and "sameSite" in cookie:
-                    del cookie["sameSite"]
-                sanitized.append(cookie)
-            await context.add_cookies(sanitized)
+        if cookies:
+            await context.add_cookies(cookies)
 
         page = await context.new_page()
         await page.goto("https://www.intermarche.com/", wait_until="domcontentloaded")
@@ -390,6 +508,11 @@ async def search_intermarche(
             dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             dump_path.write_text(content, encoding="utf-8")
+            if is_intermarche_bot_challenge(content):
+                raise RuntimeError(
+                    "Intermarché blocked the current session with DataDome. "
+                    "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
+                )
             if requires_intermarche_store_selection(content):
                 raise RuntimeError(
                     "Intermarché requires a selected store before search results can load. "

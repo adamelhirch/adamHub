@@ -306,6 +306,7 @@ export default function RecipesPage() {
   const [searchResults, setSearchResults] = useState<SupermarketSearchResult[]>([]);
   const [mapping, setMapping] = useState<SupermarketMapping | null>(null);
   const [searchQueryHasCache, setSearchQueryHasCache] = useState(false);
+  const [searchPromotionsOnly, setSearchPromotionsOnly] = useState(false);
 
   const loadRecipes = async () => {
     setLoading(true);
@@ -505,15 +506,15 @@ export default function RecipesPage() {
     if (!searchQuery.trim()) return;
     setSearchLoading(true);
     try {
-      if (!forceRefresh) {
+      if (!forceRefresh && !searchPromotionsOnly) {
         const cached = await api.get('/supermarket/search', {
           params: {
             store: 'intermarche',
             query: searchQuery.trim(),
-            limit: 20,
+            limit: 30,
           },
         });
-        if (Array.isArray(cached.data) && cached.data.length > 0 && hasResolvedCategories(cached.data)) {
+        if (Array.isArray(cached.data) && cached.data.length >= 30 && hasResolvedCategories(cached.data)) {
           setSearchResults(cached.data);
           return;
         }
@@ -522,7 +523,8 @@ export default function RecipesPage() {
       const res = await api.post('/supermarket/search', {
         store: 'intermarche',
         queries: [searchQuery.trim()],
-        max_results: 10,
+        max_results: 30,
+        promotions_only: searchPromotionsOnly,
       }, { timeout: 120_000 });
       setSearchResults(res.data);
     } finally {
@@ -1399,6 +1401,16 @@ export default function RecipesPage() {
                       </button>
                     )}
                   </div>
+
+                  <label className="flex items-center gap-2 text-sm text-apple-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={searchPromotionsOnly}
+                      onChange={(e) => setSearchPromotionsOnly(e.target.checked)}
+                      className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                    />
+                    Promotions uniquement
+                  </label>
 
                   <div className="space-y-2">
                     {searchResults.map((result) => (
