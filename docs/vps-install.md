@@ -4,7 +4,7 @@ Ce document couvre le cas vise:
 
 - AdamHUB tourne dans des conteneurs Docker sur ton VPS
 - tu veux une procedure d'installation et de mise a jour simple
-- OpenClaw peut etre branche plus tard, mais n'est pas requis pour faire tourner AdamHUB
+- un client assistant compatible peut etre branche plus tard, mais n'est pas requis pour faire tourner AdamHUB
 
 ## 1. Prerequis VPS
 
@@ -51,7 +51,7 @@ Important:
 - `ADAMHUB_API_KEY` est juste un miroir de confort pour la doc et certains outils
 - `VITE_API_URL` et `VITE_API_KEY` sont injectees au build du frontend
 - apres toute modification de `VITE_*`, il faut rebuild l'image avec `docker compose ... up -d --build`
-- OpenClaw n'a pas besoin de tourner dans le meme `docker compose`
+- le client assistant n'a pas besoin de tourner dans le meme `docker compose`
 
 Lance l'installation:
 
@@ -83,25 +83,25 @@ Donc pour une mise a jour, tu n'as pas besoin de lancer les migrations a la main
 - Skill manifest: `https://adamhub.ton-domaine.com/api/v1/skill/manifest`
 - Skill execute: `https://adamhub.ton-domaine.com/api/v1/skill/execute`
 
-## 5. OpenClaw est optionnel
+## 5. Le pack assistant est optionnel
 
-AdamHUB tourne tres bien sans OpenClaw.
+AdamHUB tourne tres bien sans client assistant.
 
-Si tu veux brancher OpenClaw plus tard, le skill maitre a donner est:
+Si tu veux brancher un client compatible plus tard, le skill maitre a donner est:
 
-- `openclaw/SKILL.md`
+- `adamhub-assistant/SKILL.md`
 
-Mais il faut fournir le dossier `openclaw/` en entier, pas seulement le fichier principal, car il depend de:
+Mais il faut fournir le dossier `adamhub-assistant/` en entier, pas seulement le fichier principal, car il depend de:
 
-- `openclaw/references/*`
-- `openclaw/skills/*`
+- `adamhub-assistant/references/*`
+- `adamhub-assistant/*/SKILL.md`
 
 En pratique:
 
-- soit tu copies le dossier `openclaw/` dans le repertoire de skills de ton instance OpenClaw
-- soit tu le montes comme volume dans le conteneur OpenClaw
+- soit tu copies le dossier `adamhub-assistant/` dans le repertoire de skills de ton runtime assistant
+- soit tu le montes comme volume dans le conteneur du runtime assistant
 
-## 6. Variables d'environnement a donner a OpenClaw
+## 6. Variables d'environnement a donner au runtime assistant
 
 Minimum:
 
@@ -111,7 +111,7 @@ ADAMHUB_URL=https://adamhub.ton-domaine.com
 ADAMHUB_API_KEY=un_secret_long_et_random
 ```
 
-Si OpenClaw tourne dans le meme reseau Docker que AdamHUB, tu peux utiliser l'URL interne:
+Si le runtime assistant tourne dans le meme reseau Docker que AdamHUB, tu peux utiliser l'URL interne:
 
 ```env
 ADAMHUB_API_URL=http://adamhub-api:8000
@@ -122,34 +122,34 @@ ADAMHUB_API_KEY=un_secret_long_et_random
 Le plus simple est:
 
 - dans `.env` de ton backend VPS: `ADAMHUB_API_KEYS=un_secret_long_et_random`
-- dans l'environnement d'OpenClaw: `ADAMHUB_API_KEY=un_secret_long_et_random`
-- mirror l'URL dans `ADAMHUB_API_URL` et `ADAMHUB_URL` si ton runtime OpenClaw n'est pas strict sur le nom exact
+- dans l'environnement du runtime assistant: `ADAMHUB_API_KEY=un_secret_long_et_random`
+- mirror l'URL dans `ADAMHUB_API_URL` et `ADAMHUB_URL` si ton runtime assistant n'est pas strict sur le nom exact
 
-Un exemple pret a copier est fourni dans `openclaw/.env.example`.
+Un exemple pret a copier est fourni dans `adamhub-assistant/.env.example`.
 
-## 7. Exemple de montage Docker pour OpenClaw
+## 7. Exemple de montage Docker pour le runtime assistant
 
-Exemple de principe seulement, a adapter au chemin de skills attendu par ton image OpenClaw:
+Exemple de principe seulement, a adapter au chemin de skills attendu par ton runtime:
 
 ```yaml
 services:
-  openclaw:
-    image: ton-image-openclaw
+  assistant:
+    image: ton-image-assistant
     environment:
       ADAMHUB_API_URL: https://adamhub.ton-domaine.com
       ADAMHUB_API_KEY: un_secret_long_et_random
     volumes:
-      - ./openclaw:/app/skills/adamhub:ro
+      - ./adamhub-assistant:/app/skills/adamhub-assistant:ro
 ```
 
 Le point important est:
 
-- `openclaw/SKILL.md` = skill maitre
-- le dossier `openclaw/` complet doit rester disponible
+- `adamhub-assistant/SKILL.md` = skill maitre
+- le dossier `adamhub-assistant/` complet doit rester disponible
 
-## 8. Verification OpenClaw
+## 8. Verification du runtime assistant
 
-OpenClaw doit pouvoir appeler:
+Le runtime assistant doit pouvoir appeler:
 
 ```bash
 curl -H "X-API-Key: un_secret_long_et_random" \
@@ -161,7 +161,7 @@ Puis:
 ```bash
 curl -H "X-API-Key: un_secret_long_et_random" \
   -H "Content-Type: application/json" \
-  -d '{"action":"task.create","input":{"title":"test depuis openclaw","priority":"medium"}}' \
+  -d '{"action":"task.create","input":{"title":"test depuis assistant","priority":"medium"}}' \
   https://adamhub.ton-domaine.com/api/v1/skill/execute
 ```
 
@@ -194,7 +194,7 @@ Mets un reverse proxy devant le port `8000` et configure:
 - `ADAMHUB_PUBLIC_BASE_URL=https://adamhub.ton-domaine.com`
 - `ADAMHUB_ALLOW_ORIGINS=...`
 
-OpenClaw peut ensuite pointer vers:
+Le runtime assistant peut ensuite pointer vers:
 
-- l'URL publique si OpenClaw est externe
-- l'URL Docker interne si OpenClaw est sur le meme hote/reseau
+- l'URL publique si le runtime assistant est externe
+- l'URL Docker interne si le runtime assistant est sur le meme hote/reseau

@@ -8,7 +8,7 @@ Ce document sert de point de reprise pour les futures modifications. Il decrit l
 
 - Backend FastAPI: `app/`
 - Frontend React/Vite: `web/`
-- Skill OpenClaw: `app/skill/actions.py` + `openclaw/`
+- Pack assistant: `app/skill/actions.py` + `adamhub-assistant/`
 - Routes REST: `110`
 - Actions skill: `99`
 - Pages front: `6`
@@ -41,7 +41,7 @@ Ce document sert de point de reprise pour les futures modifications. Il decrit l
   - synchronisations calendrier / groceries / pantry / recipes / fitness / supermarket / video
 
 - `app/skill/actions.py`
-  - catalogue des actions exposees a OpenClaw
+  - catalogue des actions exposees a l'assistant
   - mapping action -> execution
   - doit rester aligne avec les schemas et les services
 
@@ -66,18 +66,18 @@ Ce document sert de point de reprise pour les futures modifications. Il decrit l
   - stores orientes domaine
   - encapsulent les appels API et le state front
 
-### IA / OpenClaw
+### IA / assistant
 
-- `openclaw/SKILL.md`
+- `adamhub-assistant/SKILL.md`
   - skill maitre
 
-- `openclaw/references/`
+- `adamhub-assistant/references/`
   - catalogue d'actions
   - exemples HTTP
   - playbooks multi-etapes
 
-- `openclaw/skills/`
-  - skills specialises par domaine
+- `adamhub-assistant/`
+  - skill maitre + skills domaine a plat
 
 ### Tests
 
@@ -197,7 +197,7 @@ Invariants critiques:
 
 ### Video intake
 
-But: donner a OpenClaw transcript + metadata pour YouTube / Instagram / TikTok.
+But: donner a l'assistant transcript + metadata pour YouTube / Instagram / TikTok.
 
 Backend:
 
@@ -277,7 +277,7 @@ Pour toute extension UI sur ces domaines:
 
 1. ajouter/etendre le store front
 2. ajouter la page ou integrer dans une page existante
-3. si OpenClaw doit l'utiliser, verifier aussi `app/skill/actions.py` + `openclaw/`
+3. si l'assistant doit l'utiliser, verifier aussi `app/skill/actions.py` + `adamhub-assistant/`
 
 ## 4. Invariants transverses a ne pas casser
 
@@ -302,10 +302,10 @@ Pour toute extension UI sur ces domaines:
 - un grocery checke peut creer/mettre a jour un pantry item
 - une recette ou un repas ne retire du stock qu'au moment d'une confirmation explicite
 
-### Skill OpenClaw
+### Pack assistant
 
 - toute nouvelle capacite critique pour l'agent doit etre exposee dans `app/skill/actions.py`
-- le skill doc (`openclaw/`) doit rester coherent avec le manifest
+- le pack doc (`adamhub-assistant/`) doit rester coherent avec le manifest
 - les ids ne doivent jamais etre inventes
 
 ## 5. Comment modifier proprement le projet
@@ -319,7 +319,7 @@ Pour toute extension UI sur ces domaines:
 5. agregation: `app/api/router.py`
 6. tests backend
 7. si UI: `web/src/store/` + `web/src/pages/`
-8. si IA: `app/skill/actions.py` + `openclaw/`
+8. si IA: `app/skill/actions.py` + `adamhub-assistant/`
 
 ### Ajouter une nouvelle enseigne supermarche
 
@@ -388,6 +388,6 @@ PY
 1. lire ce document
 2. lire `docs/phase2_1_matrix.md`
 3. verifier les tests du domaine cible
-4. verifier si OpenClaw depend du domaine
+4. verifier si l'assistant depend du domaine
 5. modifier backend avant frontend si le contrat change
 6. finir par le skill et la doc

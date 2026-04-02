@@ -1,6 +1,6 @@
-# AdamHUB Master Skill for OpenClaw
+# AdamHUB Assistant Master Skill
 
-Use this as the primary skill when OpenClaw must manage AdamHUB as one coherent personal-life system.
+Use this as the primary skill when an AI assistant must manage AdamHUB as one coherent personal-life system.
 
 The source of truth is always the live manifest returned by:
 
@@ -22,9 +22,9 @@ As of `2026-03-29`, the skill surface exposes `99` actions.
 Runtime URL rules:
 
 - Resolve the base URL from `ADAMHUB_API_URL` first, then fall back to `ADAMHUB_URL` if needed.
-- If OpenClaw is outside the AdamHUB Docker network, use the public AdamHUB URL in `ADAMHUB_API_URL`.
-- If OpenClaw runs in the same Docker network, `ADAMHUB_API_URL=http://adamhub-api:8000` is valid.
-- Never use `127.0.0.1` unless OpenClaw and AdamHUB run in the exact same container namespace.
+- If the assistant runtime is outside the AdamHUB Docker network, use the public AdamHUB URL in `ADAMHUB_API_URL`.
+- If the assistant runtime runs in the same Docker network, `ADAMHUB_API_URL=http://adamhub-api:8000` is valid.
+- Never use `127.0.0.1` unless the assistant runtime and AdamHUB run in the exact same container namespace.
 - If either `ADAMHUB_API_URL` or `ADAMHUB_URL` is already present with `ADAMHUB_API_KEY`, do not ask the user which variables are needed. Test the service first.
 
 ## 2) Core objective
@@ -132,7 +132,7 @@ Never perform destructive writes on implicit intent.
 ### Video rules
 
 - `video.fetch` returns transcript + metadata only.
-- OpenClaw is responsible for recipe extraction from the transcript.
+- The assistant is responsible for recipe extraction from the transcript.
 
 ## 8) Field normalization
 

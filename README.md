@@ -4,7 +4,7 @@ AdamHUB is a personal operations hub with:
 
 - one FastAPI backend (`app/`)
 - one React/Vite frontend (`web/`)
-- one OpenClaw-compatible skill surface (`/api/v1/skill/*` + `openclaw/`)
+- one assistant skill surface (`/api/v1/skill/*` + `adamhub-assistant/`)
 
 It is designed to keep daily planning, groceries, pantry, recipes, fitness, money, and AI orchestration in the same system.
 
@@ -57,7 +57,7 @@ REST modules available even when the UI is partial or missing:
 - Meal plans and direct `recipe.confirm_cooked` consume pantry only when the meal/recipe is actually confirmed as cooked.
 - Calendar is the shared planning layer. Tasks, meals, subscriptions, events, fitness sessions, and manual items are validated against overlap rules.
 - Calendar also supports public signed `ICS/webcal` feeds. External calendar apps subscribe to AdamHUB feeds directly; no Google OAuth is required.
-- Video ingestion returns transcript + source metadata only. Recipe extraction logic is intentionally delegated to OpenClaw.
+- Video ingestion returns transcript + source metadata only. Recipe extraction logic is intentionally delegated to the assistant client.
 
 ## Repo map
 
@@ -68,7 +68,7 @@ REST modules available even when the UI is partial or missing:
 - `app/skill/actions.py`: skill manifest + execution backend
 - `web/src/pages/`: main app screens
 - `web/src/store/`: frontend domain stores
-- `openclaw/`: OpenClaw master skill, references, and specialized skills
+- `adamhub-assistant/`: assistant pack, references, and domain skills
 - `tests/`: backend tests for domain flows and invariants
 - `docs/`: project-level documentation for future modifications
 
@@ -134,7 +134,7 @@ The response includes:
 Production note:
 
 - backend secret list: `ADAMHUB_API_KEYS`
-- OpenClaw client secret: `ADAMHUB_API_KEY`
+- assistant client secret: `ADAMHUB_API_KEY`
 - in practice, use the same secret value on both sides
 
 ## Testing
@@ -165,7 +165,7 @@ Before changing a domain, read:
 
 - `docs/project-tour.md`
 - `docs/phase2_1_matrix.md`
-- `openclaw/SKILL.md` if the change should also be exposed to AI
+- `adamhub-assistant/SKILL.md` if the change should also be exposed to AI
 
 Keep these invariants in mind:
 
@@ -173,13 +173,13 @@ Keep these invariants in mind:
 - do not bypass overlap validation for calendar-linked domains
 - do not create fake store metadata; use supermarket search first
 - pantry should only move because of explicit stock actions, checked groceries, or cooked recipes/meal plans
-- if a backend capability becomes important to OpenClaw, update both `app/skill/actions.py` and `openclaw/`
+- if a backend capability becomes important to the assistant, update both `app/skill/actions.py` and `adamhub-assistant/`
 
 ## Documentation index
 
 - [Project tour](docs/project-tour.md)
 - [Coverage matrix](docs/phase2_1_matrix.md)
-- [VPS install + OpenClaw hookup](docs/vps-install.md)
-- [OpenClaw master skill](openclaw/SKILL.md)
-- [OpenClaw env example](openclaw/.env.example)
-- [OpenClaw action catalog](openclaw/references/action-catalog.md)
+- [VPS install + assistant hookup](docs/vps-install.md)
+- [Assistant master skill](adamhub-assistant/SKILL.md)
+- [Assistant env example](adamhub-assistant/.env.example)
+- [Assistant action catalog](adamhub-assistant/references/action-catalog.md)

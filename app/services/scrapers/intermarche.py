@@ -284,6 +284,16 @@ def parse_intermarche_html(content: str, max_results: int = 10) -> list[dict[str
     return results
 
 
+def requires_intermarche_store_selection(content: str) -> bool:
+    soup = BeautifulSoup(content, "html.parser")
+    page_text = soup.get_text(" ", strip=True).lower()
+    return (
+        "sélectionner un magasin" in page_text
+        or "selectionner un magasin" in page_text
+        or "storelocatore.switchbtn.add-list" in page_text
+    )
+
+
 async def search_intermarche(
     queries: list[str],
     max_results: int = 10,
@@ -293,7 +303,10 @@ async def search_intermarche(
     try:
         from camoufox.async_api import AsyncCamoufox
     except ImportError as exc:
-        raise RuntimeError("Camoufox is required for live Intermarché scraping") from exc
+        raise RuntimeError(
+            "Camoufox is required for live Intermarché scraping. "
+            "Install the `camoufox[geoip]` package and run `python -m camoufox fetch`."
+        ) from exc
 
     results: dict[str, list[dict[str, str | None]]] = {}
 
@@ -377,6 +390,11 @@ async def search_intermarche(
             dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             dump_path.write_text(content, encoding="utf-8")
+            if requires_intermarche_store_selection(content):
+                raise RuntimeError(
+                    "Intermarché requires a selected store before search results can load. "
+                    "Provide a valid `data/cookies_intermarche.json` file in the runtime image."
+                )
             query_results = parse_intermarche_html(content, max_results=max_results)
             await hydrate_product_categories_from_detail_pages(context, query_results)
             results[query] = query_results

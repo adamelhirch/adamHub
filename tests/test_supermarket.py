@@ -15,6 +15,7 @@ from app.services.scrapers.intermarche import (
     extract_category_from_product_breadcrumb,
     infer_category_from_name,
     parse_intermarche_html,
+    requires_intermarche_store_selection,
 )
 
 
@@ -65,6 +66,21 @@ def test_parse_intermarche_html_uses_embedded_category_filters():
 
     assert len(results) == 1
     assert results[0]["category"] == "Pommes"
+
+
+def test_requires_intermarche_store_selection_detects_modal_copy():
+    html = """
+    <html>
+      <body>
+        <div role="dialog">
+          <h1>Sélectionner un magasin</h1>
+          <button aria-label="storeLocatore.switchBtn.add-list">Liste</button>
+        </div>
+      </body>
+    </html>
+    """
+
+    assert requires_intermarche_store_selection(html) is True
 
 
 def test_extract_category_from_tracking_code_uses_subfamily_label():

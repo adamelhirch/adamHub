@@ -29,8 +29,10 @@ RUN apt-get update \
 COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
 COPY alembic ./alembic
+COPY data/cookies_intermarche.json ./data/cookies_intermarche.json
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && python -m camoufox fetch
 
 COPY --from=web-builder /web/dist ./web/dist
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh

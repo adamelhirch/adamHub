@@ -7,9 +7,9 @@ All examples assume:
 
 Use:
 
-- a public AdamHUB URL if OpenClaw is external
-- `http://adamhub-api:8000` only if OpenClaw shares the same Docker network
-- never `127.0.0.1` for a remote OpenClaw instance
+- a public AdamHUB URL if the assistant runtime is external
+- `http://adamhub-api:8000` only if the assistant runtime shares the same Docker network
+- never `127.0.0.1` for a remote assistant runtime
 - prefer `ADAMHUB_API_URL`; `ADAMHUB_URL` is only a compatibility fallback
 
 ## Health

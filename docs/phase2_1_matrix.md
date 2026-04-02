@@ -6,17 +6,17 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 
 - exposes en REST
 - cables dans le frontend officiel
-- exposes a OpenClaw via le skill
+- exposes au pack assistant via le skill
 
 ## Snapshot
 
 - REST FastAPI: `110` routes `/api/v1/*`
-- Skill OpenClaw: `99` actions
+- Pack assistant: `99` actions
 - Frontend officiel: `6` pages principales
 
 ## Matrice par domaine
 
-| Domaine | Prefix REST | Front officiel | Skill OpenClaw | Fichiers principaux | Notes |
+| Domaine | Prefix REST | Front officiel | Pack assistant | Fichiers principaux | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Auth | `/auth` | Non | Non | `app/api/auth.py` | Sert surtout a verifier la cle API |
 | Tasks | `/tasks` | Oui | Oui | `app/api/tasks.py`, `web/src/pages/TasksPage.tsx`, `web/src/store/taskStore.ts` | Alimente aussi le calendrier |
@@ -48,7 +48,7 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 | `/recipes` | Recipes + Meal plans + Supermarket | `recipes`, `meal-plans`, `supermarket` |
 | `/fitness` | Fitness | `fitness` |
 
-## Skill OpenClaw: couverture utile
+## Pack assistant: couverture utile
 
 ### Bien couverts
 
