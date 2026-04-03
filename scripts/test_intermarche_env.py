@@ -94,6 +94,14 @@ def parse_args() -> argparse.Namespace:
         help="Temps d'attente apres chargement de la page navigateur.",
     )
     parser.add_argument(
+        "--proxy-url",
+        default=(
+            os.environ.get("ADAMHUB_INTERMARCHE_PROXY_URL", "").strip()
+            or os.environ.get("INTERMARCHE_PROXY_URL", "").strip()
+        ),
+        help="Proxy URL optionnel, ex: http://user:pass@host:port",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT,
@@ -265,6 +273,23 @@ def build_playwright_cookies(raw_cookies: list[dict[str, Any]], base_url: str) -
     return cookies
 
 
+def build_browser_proxy_config(proxy_url: str) -> dict[str, str]:
+    parsed = urllib.parse.urlsplit(proxy_url)
+    if not parsed.scheme or not parsed.hostname:
+        raise ValueError("Invalid proxy URL.")
+
+    server = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port:
+        server += f":{parsed.port}"
+
+    proxy: dict[str, str] = {"server": server}
+    if parsed.username:
+        proxy["username"] = urllib.parse.unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = urllib.parse.unquote(parsed.password)
+    return proxy
+
+
 def make_request(
     url: str,
     timeout: int,
@@ -272,10 +297,13 @@ def make_request(
     body: bytes | None = None,
     method: str | None = None,
     cookies: list[dict[str, Any]] | None = None,
+    proxy_url: str | None = None,
 ) -> tuple[int, str]:
     request = urllib.request.Request(url=url, data=body, headers=headers or {}, method=method)
     context = ssl.create_default_context()
     handlers: list[Any] = [urllib.request.HTTPSHandler(context=context)]
+    if proxy_url:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
     if cookies:
         handlers.append(urllib.request.HTTPCookieProcessor(build_cookie_jar(cookies)))
     opener = urllib.request.build_opener(*handlers)
@@ -303,6 +331,7 @@ def run_direct_intermarche_test(args: argparse.Namespace, cookies: list[dict[str
         },
         method="GET",
         cookies=cookies,
+        proxy_url=args.proxy_url or None,
     )
 
     datadome = detect_datadome(body)
@@ -343,6 +372,7 @@ async def run_browser_test_with_playwright(
     cookies: list[dict[str, Any]],
     timeout_ms: int,
     wait_ms: int,
+    proxy_url: str | None,
 ) -> tuple[bool, str]:
     try:
         from playwright.async_api import Error as PlaywrightError
@@ -353,7 +383,10 @@ async def run_browser_test_with_playwright(
     try:
         async with async_playwright() as pw:
             browser_type = getattr(pw, engine)
-            browser = await browser_type.launch(headless=True)
+            launch_kwargs: dict[str, Any] = {"headless": True}
+            if proxy_url:
+                launch_kwargs["proxy"] = build_browser_proxy_config(proxy_url)
+            browser = await browser_type.launch(**launch_kwargs)
             context = await browser.new_context(
                 locale="fr-FR",
                 timezone_id="Europe/Paris",
@@ -380,6 +413,7 @@ async def run_browser_test_with_camoufox(
     cookies: list[dict[str, Any]],
     timeout_ms: int,
     wait_ms: int,
+    proxy_url: str | None,
 ) -> tuple[bool, str]:
     try:
         from camoufox.async_api import AsyncCamoufox
@@ -387,12 +421,15 @@ async def run_browser_test_with_camoufox(
         return False, f"module manquant: {exc}"
 
     try:
-        async with AsyncCamoufox(
-            headless=True,
-            geoip=True,
-            locale="fr-FR",
-            os="macos",
-        ) as browser:
+        launch_kwargs: dict[str, Any] = {
+            "headless": True,
+            "geoip": True,
+            "locale": "fr-FR",
+            "os": "macos",
+        }
+        if proxy_url:
+            launch_kwargs["proxy"] = build_browser_proxy_config(proxy_url)
+        async with AsyncCamoufox(**launch_kwargs) as browser:
             context = await browser.new_context(locale="fr-FR", timezone_id="Europe/Paris")
             if cookies:
                 await context.add_cookies(build_playwright_cookies(cookies, url))
@@ -423,6 +460,7 @@ async def run_browser_tests(args: argparse.Namespace, cookies: list[dict[str, An
             cookies=cookies,
             timeout_ms=timeout_ms,
             wait_ms=args.browser_wait_ms,
+            proxy_url=args.proxy_url or None,
         )
         print_result("browser_chromium", ok, detail)
 
@@ -432,6 +470,7 @@ async def run_browser_tests(args: argparse.Namespace, cookies: list[dict[str, An
             cookies=cookies,
             timeout_ms=timeout_ms,
             wait_ms=args.browser_wait_ms,
+            proxy_url=args.proxy_url or None,
         )
         print_result("browser_camoufox", ok, detail)
 

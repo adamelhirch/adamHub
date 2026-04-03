@@ -34,6 +34,31 @@ CATEGORY_HINTS = {
 }
 
 
+def get_intermarche_proxy_url() -> str | None:
+    for key in ("ADAMHUB_INTERMARCHE_PROXY_URL", "INTERMARCHE_PROXY_URL"):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def build_browser_proxy_config(proxy_url: str) -> dict[str, str]:
+    parsed = urllib.parse.urlsplit(proxy_url)
+    if not parsed.scheme or not parsed.hostname:
+        raise ValueError("Invalid Intermarche proxy URL.")
+
+    server = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port:
+        server += f":{parsed.port}"
+
+    proxy: dict[str, str] = {"server": server}
+    if parsed.username:
+        proxy["username"] = urllib.parse.unquote(parsed.username)
+    if parsed.password:
+        proxy["password"] = urllib.parse.unquote(parsed.password)
+    return proxy
+
+
 def extract_category_from_tracking_code(tracking_code: str | None) -> str | None:
     if not tracking_code:
         return None
@@ -391,6 +416,7 @@ async def search_intermarche_via_http(
     cookies: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, str | None]]]:
     results: dict[str, list[dict[str, str | None]]] = {}
+    proxy_url = get_intermarche_proxy_url()
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -402,7 +428,9 @@ async def search_intermarche_via_http(
         follow_redirects=True,
         headers=headers,
         cookies=build_intermarche_cookie_jar(cookies),
+        proxy=proxy_url,
         timeout=httpx.Timeout(30.0),
+        trust_env=not proxy_url,
     ) as client:
         for query in queries:
             encoded_query = urllib.parse.quote(query)
@@ -444,6 +472,7 @@ async def search_intermarche(
     promotions_only: bool = False,
 ) -> dict[str, list[dict[str, str | None]]]:
     cookies = load_intermarche_cookies()
+    proxy_url = get_intermarche_proxy_url()
     initial_http_error: Exception | None = None
     if cookies and not sort_by and not promotions_only:
         try:
@@ -462,11 +491,16 @@ async def search_intermarche(
     results: dict[str, list[dict[str, str | None]]] = {}
 
     try:
+        launch_options: dict[str, Any] = {
+            "headless": True,
+            "geoip": True,
+            "locale": "fr-FR",
+            "os": "macos",
+        }
+        if proxy_url:
+            launch_options["proxy"] = build_browser_proxy_config(proxy_url)
         async with AsyncCamoufox(
-            headless=True,
-            geoip=True,
-            locale="fr-FR",
-            os="macos",
+            **launch_options,
         ) as browser:
             context = await browser.new_context(locale="fr-FR", timezone_id="Europe/Paris")
             if cookies:
