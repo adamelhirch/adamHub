@@ -217,7 +217,7 @@ async def fetch_product_breadcrumb_category(page, product_url: str) -> str | Non
 
 
 async def hydrate_product_categories_from_detail_pages(context, items: list[dict[str, str | None]]) -> None:
-    pending = [item for item in items if item.get("product_url")]
+    pending = [item for item in items if item.get("product_url") and not item.get("category")]
     if not pending:
         return
 
