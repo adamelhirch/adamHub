@@ -38,12 +38,19 @@ def get_intermarche_proxy_url() -> str | None:
     for key in ("ADAMHUB_INTERMARCHE_PROXY_URL", "INTERMARCHE_PROXY_URL"):
         value = (os.environ.get(key) or "").strip()
         if value:
-            return value
+            return normalize_proxy_url(value)
     return None
 
 
+def normalize_proxy_url(proxy_url: str) -> str:
+    normalized = proxy_url.strip()
+    if "://" not in normalized:
+        normalized = f"http://{normalized}"
+    return normalized
+
+
 def build_browser_proxy_config(proxy_url: str) -> dict[str, str]:
-    parsed = urllib.parse.urlsplit(proxy_url)
+    parsed = urllib.parse.urlsplit(normalize_proxy_url(proxy_url))
     if not parsed.scheme or not parsed.hostname:
         raise ValueError("Invalid Intermarche proxy URL.")
 

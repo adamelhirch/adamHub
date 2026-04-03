@@ -273,8 +273,15 @@ def build_playwright_cookies(raw_cookies: list[dict[str, Any]], base_url: str) -
     return cookies
 
 
+def normalize_proxy_url(proxy_url: str) -> str:
+    normalized = proxy_url.strip()
+    if "://" not in normalized:
+        normalized = f"http://{normalized}"
+    return normalized
+
+
 def build_browser_proxy_config(proxy_url: str) -> dict[str, str]:
-    parsed = urllib.parse.urlsplit(proxy_url)
+    parsed = urllib.parse.urlsplit(normalize_proxy_url(proxy_url))
     if not parsed.scheme or not parsed.hostname:
         raise ValueError("Invalid proxy URL.")
 
@@ -303,7 +310,8 @@ def make_request(
     context = ssl.create_default_context()
     handlers: list[Any] = [urllib.request.HTTPSHandler(context=context)]
     if proxy_url:
-        handlers.append(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url}))
+        normalized_proxy_url = normalize_proxy_url(proxy_url)
+        handlers.append(urllib.request.ProxyHandler({"http": normalized_proxy_url, "https": normalized_proxy_url}))
     if cookies:
         handlers.append(urllib.request.HTTPCookieProcessor(build_cookie_jar(cookies)))
     opener = urllib.request.build_opener(*handlers)
