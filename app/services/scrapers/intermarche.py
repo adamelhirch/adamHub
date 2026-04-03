@@ -408,13 +408,17 @@ async def search_intermarche_via_http(
             encoded_query = urllib.parse.quote(query)
             search_url = f"https://www.intermarche.com/recherche/{encoded_query}"
             response = await client.get(search_url)
-            response.raise_for_status()
-
             content = response.text
             dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             dump_path.write_text(content, encoding="utf-8")
 
+            if response.status_code in {401, 403}:
+                raise RuntimeError(
+                    "Intermarché rejected the current HTTP session. "
+                    "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
+                )
+            response.raise_for_status()
             if is_intermarche_bot_challenge(content):
                 raise RuntimeError(
                     "Intermarché blocked the current session with DataDome. "
@@ -440,8 +444,12 @@ async def search_intermarche(
     promotions_only: bool = False,
 ) -> dict[str, list[dict[str, str | None]]]:
     cookies = load_intermarche_cookies()
+    initial_http_error: Exception | None = None
     if cookies and not sort_by and not promotions_only:
-        return await search_intermarche_via_http(queries, max_results, cookies)
+        try:
+            return await search_intermarche_via_http(queries, max_results, cookies)
+        except Exception as exc:
+            initial_http_error = exc
 
     try:
         from camoufox.async_api import AsyncCamoufox
@@ -537,6 +545,11 @@ async def search_intermarche(
     except RuntimeError:
         raise
     except Exception as exc:
+        if initial_http_error is not None:
+            raise RuntimeError(
+                "Intermarché blocked both the cookie-based HTTP fallback and the browser session. "
+                "Refresh `data/cookies_intermarche.json` from a working browser session and retry."
+            ) from exc
         if cookies and not sort_by and not promotions_only:
             return await search_intermarche_via_http(queries, max_results, cookies)
         if is_camoufox_launch_failure(exc):

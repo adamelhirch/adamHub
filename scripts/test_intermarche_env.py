@@ -306,11 +306,13 @@ def run_direct_intermarche_test(args: argparse.Namespace, cookies: list[dict[str
     )
 
     datadome = detect_datadome(body)
+    blocked = status in {401, 403}
     store_selection = detect_store_selection(body)
     product_count = count_product_cards(body)
-    ok = status == 200 and not datadome and not store_selection and product_count > 0
+    ok = status == 200 and not blocked and not datadome and not store_selection and product_count > 0
     detail = (
         f"status={status} products={product_count} "
+        f"blocked={'yes' if blocked else 'no'} "
         f"datadome={'yes' if datadome else 'no'} "
         f"store_selection={'yes' if store_selection else 'no'} "
         f"url={url}"
@@ -321,11 +323,13 @@ def run_direct_intermarche_test(args: argparse.Namespace, cookies: list[dict[str
 
 def summarize_page_result(url: str, content: str, *, status: int | None = None) -> tuple[bool, str]:
     datadome = detect_datadome(content)
+    blocked = status in {401, 403}
     store_selection = detect_store_selection(content)
     product_count = count_product_cards(content)
-    ok = (status in {None, 200}) and not datadome and not store_selection and product_count > 0
+    ok = (status in {None, 200}) and not blocked and not datadome and not store_selection and product_count > 0
     detail = (
         f"status={status if status is not None else 'n/a'} products={product_count} "
+        f"blocked={'yes' if blocked else 'no'} "
         f"datadome={'yes' if datadome else 'no'} "
         f"store_selection={'yes' if store_selection else 'no'} "
         f"url={url}"
