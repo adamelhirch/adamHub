@@ -219,7 +219,7 @@ def test_upsert_search_cache_deduplicates_recent_entries(test_engine):
 
 
 def test_supermarket_search_and_mapping_endpoints(client, auth_headers, monkeypatch):
-    async def fake_fetch_search_results(store, queries, max_results=10, promotions_only=False):
+    async def fake_fetch_search_results(store, queries, max_results=10, promotions_only=False, sort_by=None, session=None, user_id=None):
         assert store == SupermarketStore.INTERMARCHE
         assert queries == ["lait"]
         return [

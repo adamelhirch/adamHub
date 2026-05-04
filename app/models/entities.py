@@ -33,6 +33,8 @@ class AccountType(str, Enum):
 
 class SupermarketStore(str, Enum):
     INTERMARCHE = "intermarche"
+    UBEREATS = "ubereats"
+    CARREFOUR = "carrefour"
 
 
 class SupermarketTargetType(str, Enum):
@@ -495,6 +497,59 @@ class SupermarketMapping(SQLModel, table=True):
     image_url: str | None = None
     last_verified_at: datetime = Field(default_factory=utcnow)
     active: bool = Field(default=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SupermarketStoreSelection(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    store: SupermarketStore = Field(index=True, unique=True)
+    external_store_id: str
+    store_label: str
+    location_label: str | None = None
+    raw_payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class User(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    email: str = Field(index=True, unique=True)
+    password_hash: str
+    display_name: str
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SupermarketConnection(SQLModel, table=True):
+    """A user-owned cookie set for a given supermarket store.
+
+    Multiple connections can coexist per store (e.g. user + spouse). One can be
+    flagged is_active=true and is the default consumer of scrapers.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    store: SupermarketStore = Field(index=True)
+    label: str
+    cookies_encrypted: str  # Fernet-encrypted JSON list of cookie dicts
+    is_active: bool = Field(default=False, index=True)
+    last_used_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class UbereatsAddress(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    label: str
+    formatted_address: str
+    subtitle: str | None = None
+    latitude: float
+    longitude: float
+    reference: str | None = None
+    reference_type: str = Field(default="GOOGLE_PLACES")
+    is_active: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

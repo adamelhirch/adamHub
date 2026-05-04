@@ -35,6 +35,7 @@ from app.models import (
     SavingsGoal,
     Subscription,
     SubscriptionInterval,
+    SupermarketSearchCache,
     SupermarketStore,
     Task,
     TaskStatus,
@@ -119,7 +120,39 @@ from app.services.fitness import (
     coerce_fitness_exercises,
 )
 from app.services.grocery_pantry import sync_checked_grocery_item_to_pantry
-from app.services.scraper_service import fetch_search_results, upsert_search_cache
+from app.services.connections import (
+    activate_connection as activate_supermarket_connection,
+    delete_connection as delete_supermarket_connection,
+    list_connections as list_supermarket_connections,
+    upsert_connection as upsert_supermarket_connection,
+    decrypt_cookies as decrypt_connection_cookies,
+)
+from app.services.scraper_service import (
+    fetch_search_results,
+    get_selected_store as get_selected_supermarket_store,
+    upsert_search_cache,
+    upsert_selected_store,
+)
+from app.services.geocoder import search_addresses as ubereats_geocode
+from app.services.ubereats_addresses import (
+    activate_address as activate_ubereats_address,
+    create_address as create_ubereats_address,
+    delete_address as delete_ubereats_address,
+    list_addresses as list_ubereats_addresses,
+)
+from app.services.ubereats_cart import (
+    add_item_to_cart as add_to_ubereats_cart,
+    fetch_cart_summary as fetch_ubereats_cart_summary,
+)
+from app.services.scrapers.ubereats import (
+    list_grocery_stores as list_ubereats_grocery_stores,
+)
+from app.services.ubereats_orders import (
+    UbereatsOrderError,
+    extract_order_uuid,
+    import_order_to_pantry as import_ubereats_order_to_pantry,
+    list_past_orders as list_ubereats_past_orders,
+)
 from app.services.supermarket_registry import list_store_definitions
 from app.services.video_intake import extract_video_source
 
@@ -144,7 +177,29 @@ ACTION_CATALOG = [
     {"action": "fitness.update_measurement", "description": "Update a fitness measurement", "input_schema": {"measurement_id": "int", "recorded_at": "datetime?", "body_weight_kg": "float?", "body_fat_pct": "float?", "resting_hr": "int?", "sleep_hours": "float?", "steps": "int?", "note": "string?"}},
     {"action": "fitness.delete_measurement", "description": "Delete a fitness measurement", "input_schema": {"measurement_id": "int"}},
     {"action": "supermarket.list_stores", "description": "List supported supermarket stores and capabilities", "input_schema": {}},
-    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results", "input_schema": {"store": "intermarche?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}},
+    # ── Multi-account connections (cookies stored encrypted in DB) ──────────
+    {"action": "supermarket.list_connections", "description": "List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count. Multiple connections per store are allowed (e.g. user + spouse).", "input_schema": {"store": "intermarche|carrefour|ubereats?"}},
+    {"action": "supermarket.import_connection", "description": "Save a fresh cookie set for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store.", "input_schema": {"store": "intermarche|carrefour|ubereats", "label": "string", "cookies": "object[]", "activate": "bool?", "connection_id": "int?"}},
+    {"action": "supermarket.activate_connection", "description": "Switch the active connection for a store (search/cart/orders will use this account next).", "input_schema": {"connection_id": "int"}},
+    {"action": "supermarket.delete_connection", "description": "Delete a saved supermarket connection.", "input_schema": {"connection_id": "int"}},
+    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter) or 'carrefour' (Drive JSON API, requires data/cookies_carrefour.json). For Uber Eats use the dedicated ubereats.search_products action which supports sort and store selection.", "input_schema": {"store": "intermarche|carrefour?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}},
+    # ── Uber Eats: address & store setup ─────────────────────────────────────
+    {"action": "ubereats.list_addresses", "description": "List saved Uber Eats delivery addresses (the active one is_active=true).", "input_schema": {}},
+    {"action": "ubereats.geocode_address", "description": "Search a free-text address via OpenStreetMap and return picker candidates with lat/lng. Use this before ubereats.save_address when the user gives a textual address.", "input_schema": {"query": "string", "limit": "int?"}},
+    {"action": "ubereats.save_address", "description": "Save a delivery address (label + lat/lng + formatted_address). Set activate=true to also write the uev2.loc cookie and refresh the active store list.", "input_schema": {"label": "string", "formatted_address": "string", "subtitle": "string?", "latitude": "float", "longitude": "float", "reference": "string?", "reference_type": "string?", "activate": "bool?"}},
+    {"action": "ubereats.activate_address", "description": "Switch the active Uber Eats delivery address by id. Updates the uev2.loc cookie. Call ubereats.list_stores afterwards.", "input_schema": {"address_id": "int"}},
+    {"action": "ubereats.delete_address", "description": "Delete a saved Uber Eats delivery address.", "input_schema": {"address_id": "int"}},
+    {"action": "ubereats.list_stores", "description": "List grocery stores deliverable to the currently-active address (filtered by known FR brand keywords).", "input_schema": {"limit": "int?"}},
+    {"action": "ubereats.set_selected_store", "description": "Persist the chosen Uber Eats grocery store. Subsequent ubereats.search_products / add_to_cart calls operate on this store.", "input_schema": {"external_store_id": "string", "store_label": "string", "location_label": "string?"}},
+    {"action": "ubereats.get_selected_store", "description": "Return the currently-selected Uber Eats store (or null if none).", "input_schema": {}},
+    # ── Uber Eats: search & cart ─────────────────────────────────────────────
+    {"action": "ubereats.search_products", "description": "Search inside the selected Uber Eats store. Returns up to ~70 products with cache_id, price_text, image, and the UUIDs needed for cart automation. Use sort_by='price_asc' or 'price_desc' to mirror the website filters.", "input_schema": {"query": "string", "max_results": "int?", "sort_by": "price_asc|price_desc?"}},
+    {"action": "ubereats.add_to_cart", "description": "Push one search result into the actual Uber Eats cart and mirror it in the local grocery list (deduplicated by external_id). Pass the cache_id returned by ubereats.search_products. Re-adding the same product increments the quantity.", "input_schema": {"cache_id": "int", "quantity": "int?"}},
+    {"action": "ubereats.list_carts", "description": "Read all active Uber Eats carts (one per store) with their items, quantities and prices. Use include_details=true to fetch item-level data.", "input_schema": {"include_details": "bool?", "store_uuid": "string?"}},
+    # ── Uber Eats: orders → pantry ───────────────────────────────────────────
+    {"action": "ubereats.list_past_orders", "description": "List the user's recent Uber Eats orders (history) with store, completion date, item count.", "input_schema": {"limit": "int?"}},
+    {"action": "ubereats.import_order_to_pantry", "description": "Import the items of a delivered or active Uber Eats order into the pantry. Accepts a tracking URL (e.g. https://www.ubereats.com/fr/orders/<uuid>) or just the UUID. Items are deduplicated by external_id (incremented if already present). Substitutions are silently reflected (final delivered items, not original cart). Fails with a clear message if the UUID belongs to an order placed by a different account (third-party tracking link) — in that case use ubereats.import_third_party_order instead.", "input_schema": {"tracking_url_or_uuid": "string"}},
+    {"action": "ubereats.import_third_party_order", "description": "Import items into the pantry FROM A LIST PARSED MANUALLY (typically from screenshots of a friend's Uber Eats tracking page that the user just shared). When the user mentions a friend ordered for them, ASK FOR SCREENSHOTS of the tracking page, READ THEM YOURSELF using your vision capability, then call this action with the extracted items. Each item needs at least name and quantity; price_text is optional but useful.", "input_schema": {"store_label": "string", "items": "[{name: string, quantity: float?, price_text: string?, packaging: string?, category: string?, image_url: string?}]", "completed_at": "datetime?"}},
     {"action": "grocery.add_item", "description": "Add an item to grocery list", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "image_url": "string?", "store_label": "string?", "external_id": "string?", "packaging": "string?", "price_text": "string?", "product_url": "string?", "priority": "int?", "note": "string?"}},
     {"action": "grocery.list_items", "description": "List grocery items", "input_schema": {"checked": "bool?", "limit": "int?"}},
     {"action": "grocery.update_item", "description": "Update a grocery item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "checked": "bool?", "priority": "int?", "note": "string?"}},
@@ -658,8 +713,79 @@ def execute_action(action: str, payload: dict, session) -> dict:
             ]
         }
 
+    if action == "supermarket.list_connections":
+        store_key = payload.get("store")
+        store_enum = SupermarketStore(store_key.lower()) if store_key else None
+        rows = list_supermarket_connections(session, store_enum)
+
+        def _read(row):
+            try:
+                count = len(decrypt_connection_cookies(row))
+            except Exception:
+                count = 0
+            return {
+                "id": row.id,
+                "store": row.store.value,
+                "label": row.label,
+                "is_active": row.is_active,
+                "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
+                "created_at": row.created_at.isoformat(),
+                "updated_at": row.updated_at.isoformat(),
+                "cookies_count": count,
+            }
+
+        return {"connections": [_read(r) for r in rows]}
+
+    if action == "supermarket.import_connection":
+        store_enum = SupermarketStore(str(payload.get("store") or "").lower())
+        cookies = payload.get("cookies") or []
+        if not isinstance(cookies, list) or not cookies:
+            raise ValueError("cookies must be a non-empty list")
+        label = (payload.get("label") or "").strip() or f"{store_enum.value}-connection"
+        connection = upsert_supermarket_connection(
+            session,
+            store=store_enum,
+            label=label,
+            cookies=cookies,
+            activate=_as_bool(payload.get("activate"), default=True),
+            connection_id=payload.get("connection_id"),
+        )
+        return {
+            "connection": {
+                "id": connection.id,
+                "store": connection.store.value,
+                "label": connection.label,
+                "is_active": connection.is_active,
+                "cookies_count": len(cookies),
+            }
+        }
+
+    if action == "supermarket.activate_connection":
+        connection_id = int(payload.get("connection_id", 0))
+        if not connection_id:
+            raise ValueError("connection_id is required")
+        connection = activate_supermarket_connection(session, connection_id)
+        if connection is None:
+            raise ValueError("Connection not found")
+        return {"connection": {"id": connection.id, "store": connection.store.value, "is_active": True}}
+
+    if action == "supermarket.delete_connection":
+        connection_id = int(payload.get("connection_id", 0))
+        if not connection_id:
+            raise ValueError("connection_id is required")
+        connection = delete_supermarket_connection(session, connection_id)
+        if connection is None:
+            raise ValueError("Connection not found")
+        return {"deleted": True, "id": connection_id}
+
     if action == "supermarket.search":
-        store = payload.get("store") or "intermarche"
+        store_key = (payload.get("store") or "intermarche").lower()
+        if store_key not in ("intermarche", "carrefour"):
+            raise ValueError(
+                "supermarket.search supports 'intermarche' or 'carrefour'. "
+                "For Uber Eats use ubereats.search_products."
+            )
+        store_enum = SupermarketStore(store_key)
         queries = payload.get("queries")
         if isinstance(queries, str):
             queries = [queries]
@@ -667,18 +793,281 @@ def execute_action(action: str, payload: dict, session) -> dict:
             raise ValueError("queries must be a non-empty list")
         max_results = _clamp_int(payload.get("max_results"), default=10, minimum=1, maximum=30)
         promotions_only = _as_bool(payload.get("promotions_only"), default=False)
-        if store != "intermarche":
-            raise ValueError("Unsupported supermarket store")
         results = asyncio.run(
             fetch_search_results(
-                store=SupermarketStore.INTERMARCHE,
+                store=store_enum,
                 queries=[str(query).strip() for query in queries if str(query).strip()],
                 max_results=max_results,
                 promotions_only=promotions_only,
+                session=session,
             )
         )
-        saved = upsert_search_cache(session, SupermarketStore.INTERMARCHE, results)
+        saved = upsert_search_cache(session, store_enum, results)
         return {"results": [row.model_dump(mode="json") for row in saved]}
+
+    # ── Uber Eats: addresses ────────────────────────────────────────────────
+    if action == "ubereats.list_addresses":
+        rows = list_ubereats_addresses(session)
+        return {"addresses": [row.model_dump(mode="json") for row in rows]}
+
+    if action == "ubereats.geocode_address":
+        query = (payload.get("query") or "").strip()
+        if not query:
+            raise ValueError("query is required")
+        limit = _clamp_int(payload.get("limit"), default=6, minimum=1, maximum=10)
+        results = asyncio.run(ubereats_geocode(query, limit=limit))
+        return {"results": results}
+
+    if action == "ubereats.save_address":
+        label = (payload.get("label") or "").strip()
+        formatted = (payload.get("formatted_address") or "").strip()
+        if not label or not formatted:
+            raise ValueError("label and formatted_address are required")
+        latitude = float(payload["latitude"])
+        longitude = float(payload["longitude"])
+        address = create_ubereats_address(
+            session,
+            label=label,
+            formatted_address=formatted,
+            subtitle=payload.get("subtitle"),
+            latitude=latitude,
+            longitude=longitude,
+            reference=payload.get("reference"),
+            reference_type=payload.get("reference_type") or "OSM_NOMINATIM",
+        )
+        if _as_bool(payload.get("activate"), default=False):
+            activated = asyncio.run(activate_ubereats_address(session, address.id))
+            if activated is not None:
+                address = activated
+        return {"address": address.model_dump(mode="json")}
+
+    if action == "ubereats.activate_address":
+        address_id = int(payload.get("address_id", 0))
+        if not address_id:
+            raise ValueError("address_id is required")
+        address = asyncio.run(activate_ubereats_address(session, address_id))
+        if address is None:
+            raise ValueError("Address not found")
+        return {"address": address.model_dump(mode="json")}
+
+    if action == "ubereats.delete_address":
+        address_id = int(payload.get("address_id", 0))
+        if not address_id:
+            raise ValueError("address_id is required")
+        address = delete_ubereats_address(session, address_id)
+        if address is None:
+            raise ValueError("Address not found")
+        return {"deleted": True, "id": address_id}
+
+    # ── Uber Eats: stores ────────────────────────────────────────────────────
+    if action == "ubereats.list_stores":
+        limit = _clamp_int(payload.get("limit"), default=25, minimum=1, maximum=50)
+        stores = asyncio.run(list_ubereats_grocery_stores(max_results=limit))
+        return {"stores": stores}
+
+    if action == "ubereats.set_selected_store":
+        external_id = (payload.get("external_store_id") or "").strip()
+        store_label = (payload.get("store_label") or "").strip()
+        if not external_id or not store_label:
+            raise ValueError("external_store_id and store_label are required")
+        selection = upsert_selected_store(
+            session,
+            SupermarketStore.UBEREATS,
+            external_store_id=external_id,
+            store_label=store_label,
+            location_label=payload.get("location_label"),
+        )
+        return {"selection": selection.model_dump(mode="json")}
+
+    if action == "ubereats.get_selected_store":
+        selection = get_selected_supermarket_store(session, SupermarketStore.UBEREATS)
+        return {"selection": selection.model_dump(mode="json") if selection else None}
+
+    # ── Uber Eats: search & cart ────────────────────────────────────────────
+    if action == "ubereats.search_products":
+        query = (payload.get("query") or "").strip()
+        if not query:
+            raise ValueError("query is required")
+        max_results = _clamp_int(payload.get("max_results"), default=50, minimum=1, maximum=200)
+        sort_by = payload.get("sort_by")
+        if sort_by not in (None, "price_asc", "price_desc", "recommended"):
+            raise ValueError("sort_by must be 'price_asc', 'price_desc', 'recommended', or null")
+        if sort_by == "recommended":
+            sort_by = None
+        results = asyncio.run(
+            fetch_search_results(
+                store=SupermarketStore.UBEREATS,
+                queries=[query],
+                max_results=max_results,
+                sort_by=sort_by,
+                session=session,
+            )
+        )
+        saved = upsert_search_cache(session, SupermarketStore.UBEREATS, results)
+        return {
+            "results": [
+                {
+                    "cache_id": row.id,
+                    "name": row.name,
+                    "category": row.category,
+                    "packaging": row.packaging,
+                    "price_text": row.price_text,
+                    "price_amount": row.price_amount,
+                    "image_url": row.image_url,
+                    "external_id": row.external_id,
+                    "store": row.store.value if hasattr(row.store, "value") else str(row.store),
+                }
+                for row in saved
+            ]
+        }
+
+    if action == "ubereats.add_to_cart":
+        cache_id = int(payload.get("cache_id", 0))
+        if not cache_id:
+            raise ValueError("cache_id is required")
+        quantity = _clamp_int(payload.get("quantity"), default=1, minimum=1, maximum=99)
+
+        cache_row = session.get(SupermarketSearchCache, cache_id)
+        if cache_row is None or cache_row.store != SupermarketStore.UBEREATS:
+            raise ValueError("Cached Uber Eats product not found for cache_id")
+        raw = cache_row.payload_json or {}
+        item_uuid = raw.get("id")
+        section_uuid = raw.get("section_uuid")
+        subsection_uuid = raw.get("subsection_uuid")
+        store_uuid = raw.get("store_uuid")
+        if not (item_uuid and section_uuid and subsection_uuid and store_uuid):
+            raise ValueError("Cached payload is missing Uber Eats UUIDs — re-run the search")
+
+        price_cents = raw.get("price_cents")
+        if not isinstance(price_cents, int) or price_cents <= 0:
+            if cache_row.price_amount and cache_row.price_amount > 0:
+                price_cents = int(round(cache_row.price_amount * 100))
+            else:
+                raise ValueError("Cached product has no resolvable price — re-run the search")
+
+        cart = asyncio.run(
+            add_to_ubereats_cart(
+                store_uuid=store_uuid,
+                item_uuid=item_uuid,
+                section_uuid=section_uuid,
+                subsection_uuid=subsection_uuid,
+                title=cache_row.name,
+                price_cents=price_cents,
+                image_url=cache_row.image_url,
+                quantity=quantity,
+            )
+        )
+
+        # Mirror to grocery list (same logic as the REST endpoint).
+        existing_grocery: GroceryItem | None = None
+        if cache_row.external_id:
+            stmt = select(GroceryItem).where(GroceryItem.external_id == cache_row.external_id)
+            existing_grocery = session.exec(stmt).first()
+        if existing_grocery is not None:
+            existing_grocery.quantity = (existing_grocery.quantity or 0) + quantity
+            existing_grocery.checked = False
+            existing_grocery.updated_at = now
+            session.add(existing_grocery)
+        else:
+            note_parts = ["Uber Eats", cache_row.price_text, cache_row.packaging]
+            note = " · ".join(p for p in note_parts if p) or None
+            session.add(
+                GroceryItem(
+                    name=cache_row.name,
+                    quantity=quantity,
+                    unit="item",
+                    category=cache_row.category,
+                    image_url=cache_row.image_url,
+                    store_label="Uber Eats",
+                    external_id=cache_row.external_id,
+                    packaging=cache_row.packaging,
+                    price_text=cache_row.price_text,
+                    product_url=cache_row.product_url,
+                    priority=3,
+                    note=note,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        session.commit()
+        return {"cart": cart}
+
+    if action == "ubereats.list_carts":
+        include_details = _as_bool(payload.get("include_details"), default=True)
+        store_uuid = payload.get("store_uuid")
+        if not store_uuid:
+            sel = get_selected_supermarket_store(session, SupermarketStore.UBEREATS)
+            store_uuid = sel.external_store_id if sel else None
+        summary = asyncio.run(
+            fetch_ubereats_cart_summary(store_uuid, include_details=include_details)
+        )
+        return summary
+
+    # ── Uber Eats: orders ───────────────────────────────────────────────────
+    if action == "ubereats.list_past_orders":
+        limit = _clamp_int(payload.get("limit"), default=10, minimum=1, maximum=50)
+        orders = asyncio.run(list_ubereats_past_orders(limit=limit))
+        return {"orders": orders}
+
+    if action == "ubereats.import_order_to_pantry":
+        raw_input = (payload.get("tracking_url_or_uuid") or "").strip()
+        order_uuid = extract_order_uuid(raw_input)
+        if not order_uuid:
+            raise ValueError("Could not extract an order UUID from the input")
+        try:
+            result = asyncio.run(import_ubereats_order_to_pantry(session, order_uuid))
+        except UbereatsOrderError as exc:
+            raise ValueError(str(exc)) from exc
+        return result
+
+    if action == "ubereats.import_third_party_order":
+        store_label = (payload.get("store_label") or "Uber Eats").strip() or "Uber Eats"
+        items_raw = payload.get("items")
+        if not isinstance(items_raw, list) or not items_raw:
+            raise ValueError("items must be a non-empty list of {name, quantity, ...}")
+
+        completed_at = _parse_datetime(payload.get("completed_at"), "completed_at")
+        note_suffix = ""
+        if completed_at is not None:
+            note_suffix = f" — {completed_at.date().isoformat()}"
+
+        created_count = 0
+        serialized: list[dict] = []
+        for raw_item in items_raw:
+            if not isinstance(raw_item, dict):
+                continue
+            name = (raw_item.get("name") or "").strip()
+            if not name:
+                continue
+            quantity = float(raw_item.get("quantity") or 1)
+            pantry = PantryItem(
+                name=name,
+                quantity=quantity,
+                unit="item",
+                category=raw_item.get("category"),
+                image_url=raw_item.get("image_url"),
+                store_label=store_label,
+                packaging=raw_item.get("packaging"),
+                price_text=raw_item.get("price_text"),
+                note=f"Importé depuis {store_label}{note_suffix}",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(pantry)
+            session.commit()
+            session.refresh(pantry)
+            created_count += 1
+            serialized.append({
+                "id": pantry.id,
+                "name": pantry.name,
+                "quantity": pantry.quantity,
+                "price_text": pantry.price_text,
+            })
+        return {
+            "store_label": store_label,
+            "items_imported": created_count,
+            "items": serialized,
+        }
 
     if action == "grocery.list_items":
         limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)

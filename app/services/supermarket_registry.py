@@ -21,7 +21,29 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         key=SupermarketStore.INTERMARCHE,
         label="Intermarché",
         scraper_name="intermarche",
-        notes="Only active store in v1. Add new stores here when their scraper and mappings are ready.",
+        notes="Live HTML scraping with optional Camoufox fallback.",
+    ),
+    SupermarketStoreDefinition(
+        key=SupermarketStore.UBEREATS,
+        label="Uber Eats",
+        scraper_name="ubereats",
+        supports_mapping=False,
+        supports_cart_automation=True,
+        notes=(
+            "Internal JSON API scraping. Requires data/cookies_ubereats.json and "
+            "a selected store (POST /supermarket/ubereats/selected-store)."
+        ),
+    ),
+    SupermarketStoreDefinition(
+        key=SupermarketStore.CARREFOUR,
+        label="Carrefour",
+        scraper_name="carrefour",
+        supports_mapping=False,
+        notes=(
+            "Carrefour Drive search via /api/marketing/search. Requires "
+            "data/cookies_carrefour.json from a logged-in browser session "
+            "with a Drive store selected (prices are store-specific)."
+        ),
     ),
 )
 
