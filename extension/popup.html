@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>AdamHUB Connect</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>AdamHUB Connect</h1>
+      <span id="account-badge" class="account-badge hidden"></span>
+    </header>
+
+    <section id="status" class="status hidden"></section>
+
+    <section id="auth-prompt" class="auth-prompt hidden">
+      <p>Connecte-toi sur le hub pour activer la synchro :</p>
+      <button id="open-hub" type="button">Ouvrir AdamHUB</button>
+    </section>
+
+    <ul id="store-list">
+      <li data-store="carrefour">
+        <div>
+          <strong>Carrefour</strong>
+          <span class="meta" id="meta-carrefour">non connecté</span>
+        </div>
+        <button data-action="connect" data-store="carrefour" type="button">Connecter</button>
+      </li>
+      <li data-store="intermarche">
+        <div>
+          <strong>Intermarché</strong>
+          <span class="meta" id="meta-intermarche">non connecté</span>
+        </div>
+        <button data-action="connect" data-store="intermarche" type="button">Connecter</button>
+      </li>
+      <li data-store="ubereats">
+        <div>
+          <strong>Uber Eats</strong>
+          <span class="meta" id="meta-ubereats">non connecté</span>
+        </div>
+        <button data-action="connect" data-store="ubereats" type="button">Connecter</button>
+      </li>
+    </ul>
+
+    <footer>
+      <small>v0.2.0 · sideload — auth via le hub.</small>
+    </footer>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

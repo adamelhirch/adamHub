@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     linear_api_token: str | None = None
     linear_team_id: str | None = None
 
+    # Cookies-at-rest encryption. Generate with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Falls back to a development-only key if unset.
+    cookie_encryption_key: str | None = None
+
+    # JWT for user auth. Pick a long random secret in prod.
+    jwt_secret: str | None = None
+    jwt_algorithm: str = "HS256"
+    jwt_expires_minutes: int = 60 * 24 * 30  # 30 days
+
 
 @lru_cache
 def get_settings() -> Settings:

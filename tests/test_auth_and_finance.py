@@ -7,7 +7,7 @@ def test_auth_check_ok(client, auth_headers):
 def test_auth_check_missing_key_returns_401(client):
     response = client.get("/api/v1/auth/check")
     assert response.status_code == 401
-    assert response.json()["detail"] == "Missing API key"
+    assert response.json()["detail"] in {"Missing API key", "Missing API key or Bearer token"}
 
 
 def test_finance_summary_and_analytics_alias(client, auth_headers):

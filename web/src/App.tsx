@@ -3,7 +3,10 @@ import {
   Routes,
   Route,
   NavLink,
+  Navigate,
+  useLocation,
 } from "react-router-dom";
+import type { ReactNode } from "react";
 import {
   Calendar,
   CreditCard,
@@ -12,6 +15,7 @@ import {
   Activity,
   CheckSquare,
   ArrowUpRight,
+  LogOut,
 } from "lucide-react";
 import CalendarPage from "./pages/CalendarPage";
 import FitnessPage from "./pages/FitnessPage";
@@ -19,6 +23,9 @@ import TasksPage from "./pages/TasksPage";
 import FinancesPage from "./pages/FinancesPage";
 import GroceriesPage from "./pages/GroceriesPage";
 import RecipesPage from "./pages/RecipesPage";
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
+import { AuthProvider, useAuth } from "./lib/auth";
 
 const navItems = [
   { name: "Calendar", path: "/", icon: Calendar },
@@ -122,27 +129,92 @@ function NavigationBar() {
             );
           })}
         </nav>
+        <UserFooter />
       </div>
     </>
+  );
+}
+
+function UserFooter() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+  return (
+    <div className="mt-auto flex items-center gap-3 rounded-2xl border border-apple-gray-100 bg-white/80 px-3 py-2.5">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[linear-gradient(135deg,#0A84FF,#6366F1)] text-white text-xs font-bold uppercase">
+        {user.display_name.slice(0, 1)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-black truncate">{user.display_name}</p>
+        <p className="text-[11px] text-apple-gray-500 truncate">{user.email}</p>
+      </div>
+      <button
+        onClick={() => {
+          logout();
+          window.location.href = "/login";
+        }}
+        title="Se déconnecter"
+        className="rounded-lg p-1.5 text-apple-gray-400 hover:bg-red-50 hover:text-red-500"
+      >
+        <LogOut className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center text-sm text-apple-gray-400">
+        Chargement…
+      </div>
+    );
+  }
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+  return <>{children}</>;
+}
+
+function AppShell() {
+  return (
+    <div className="relative isolate flex h-screen w-full overflow-hidden bg-[#eef2f8] text-black">
+      <NavigationBar />
+      <main className="relative z-10 min-w-0 flex-1 overflow-hidden pt-0 md:pb-0 md:pt-0">
+        <Routes>
+          <Route path="/" element={<CalendarPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/finances" element={<FinancesPage />} />
+          <Route path="/groceries" element={<GroceriesPage />} />
+          <Route path="/recipes" element={<RecipesPage />} />
+          <Route path="/fitness" element={<FitnessPage />} />
+        </Routes>
+      </main>
+    </div>
   );
 }
 
 export default function App() {
   return (
     <Router>
-      <div className="relative isolate flex h-screen w-full overflow-hidden bg-[#eef2f8] text-black">
-        <NavigationBar />
-        <main className="relative z-10 min-w-0 flex-1 overflow-hidden pt-0 md:pb-0 md:pt-0">
-          <Routes>
-            <Route path="/" element={<CalendarPage />} />
-            <Route path="/tasks" element={<TasksPage />} />
-            <Route path="/finances" element={<FinancesPage />} />
-            <Route path="/groceries" element={<GroceriesPage />} />
-            <Route path="/recipes" element={<RecipesPage />} />
-            <Route path="/fitness" element={<FitnessPage />} />
-          </Routes>
-        </main>
-      </div>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/*"
+            element={
+              <RequireAuth>
+                <AppShell />
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </AuthProvider>
     </Router>
   );
 }
+
+// Re-export the LogOut icon usage to keep TS quiet (used in NavigationBar by future iteration).
+export { LogOut };

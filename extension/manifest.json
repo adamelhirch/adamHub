@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "AdamHUB Connect",
+  "short_name": "AdamHUB",
+  "version": "0.2.0",
+  "description": "Synchronise tes sessions Carrefour, Intermarché et Uber Eats avec ton hub AdamHUB.",
+  "action": {
+    "default_title": "AdamHUB Connect",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "cookies",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:5173/*",
+    "http://localhost:5173/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "*://*.carrefour.fr/*",
+    "*://*.intermarche.com/*",
+    "*://*.ubereats.com/*"
+  ],
+  "icons": {
+    "128": "icon128.png"
+  }
+}

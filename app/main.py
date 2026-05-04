@@ -41,7 +41,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
     allow_credentials=False,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    # Accept localhost dev URLs AND any AdamHUB Connect Chrome extension origin.
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1)(:\d+)?|chrome-extension://[a-z]+)$",
     allow_methods=["*"],
     allow_headers=["*"],
 )

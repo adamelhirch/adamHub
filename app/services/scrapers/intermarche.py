@@ -477,8 +477,10 @@ async def search_intermarche(
     max_results: int = 10,
     sort_by: str | None = None,
     promotions_only: bool = False,
+    cookies: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[dict[str, str | None]]]:
-    cookies = load_intermarche_cookies()
+    if cookies is None:
+        cookies = load_intermarche_cookies()
     proxy_url = get_intermarche_proxy_url()
     initial_http_error: Exception | None = None
     if cookies and not sort_by and not promotions_only:
