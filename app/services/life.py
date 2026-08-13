@@ -151,18 +151,31 @@ def build_subscription_projection(session: Session, currency: str = "EUR") -> Su
     )
 
 
-def build_pantry_overview(session: Session, days: int = 7) -> PantryOverview:
+def build_pantry_overview(
+    session: Session, days: int = 7, *, user_id: int | None = None
+) -> PantryOverview:
     today = date.today()
     until = today + timedelta(days=days)
 
-    total_items = session.exec(select(func.count()).select_from(PantryItem)).one()
+    def _scoped(statement):
+        if user_id is not None:
+            statement = statement.where(PantryItem.user_id == user_id)
+        return statement
+
+    total_items = session.exec(_scoped(select(func.count()).select_from(PantryItem))).one()
     low_stock_items = session.exec(
-        select(func.count()).select_from(PantryItem).where(PantryItem.quantity <= PantryItem.min_quantity)
+        _scoped(
+            select(func.count())
+            .select_from(PantryItem)
+            .where(PantryItem.quantity <= PantryItem.min_quantity)
+        )
     ).one()
     expiring_soon = session.exec(
-        select(func.count())
-        .select_from(PantryItem)
-        .where(PantryItem.expires_at.is_not(None), PantryItem.expires_at <= until)
+        _scoped(
+            select(func.count())
+            .select_from(PantryItem)
+            .where(PantryItem.expires_at.is_not(None), PantryItem.expires_at <= until)
+        )
     ).one()
 
     return PantryOverview(

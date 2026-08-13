@@ -142,7 +142,13 @@ def extract_delivered_items(order: dict[str, Any]) -> list[dict[str, Any]]:
     return delivered
 
 
-def _upsert_pantry_item(session: Session, item: dict[str, Any], store_label: str) -> tuple[PantryItem, bool]:
+def _upsert_pantry_item(
+    session: Session,
+    item: dict[str, Any],
+    store_label: str,
+    *,
+    user_id: int | None = None,
+) -> tuple[PantryItem, bool]:
     """Create a PantryItem or increment quantity if one with the same external_id exists.
     Returns (item, created) where `created` is True for fresh rows.
     """
@@ -150,6 +156,8 @@ def _upsert_pantry_item(session: Session, item: dict[str, Any], store_label: str
     existing: PantryItem | None = None
     if item.get("external_id"):
         statement = select(PantryItem).where(PantryItem.external_id == item["external_id"])
+        if user_id is not None:
+            statement = statement.where(PantryItem.user_id == user_id)
         existing = session.exec(statement).first()
 
     quantity = float(item.get("quantity") or 0)
@@ -175,6 +183,7 @@ def _upsert_pantry_item(session: Session, item: dict[str, Any], store_label: str
         note=f"Importé depuis {store_label}",
         created_at=now,
         updated_at=now,
+        user_id=user_id,
     )
     session.add(pantry)
     return pantry, True
@@ -184,6 +193,8 @@ async def import_order_to_pantry(
     session: Session,
     order_uuid: str,
     cookies: list[dict[str, Any]] | None = None,
+    *,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     order = await get_order(order_uuid, cookies=cookies)
     if order is None:
@@ -209,7 +220,9 @@ async def import_order_to_pantry(
     updated_count = 0
     serialized: list[dict[str, Any]] = []
     for item in items:
-        pantry, created = _upsert_pantry_item(session, item, store_label=store_label)
+        pantry, created = _upsert_pantry_item(
+            session, item, store_label=store_label, user_id=user_id
+        )
         if created:
             created_count += 1
         else:

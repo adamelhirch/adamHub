@@ -114,12 +114,14 @@ def upsert_connection(
     return connection
 
 
-def activate_connection(session: Session, connection_id: int) -> SupermarketConnection | None:
+def activate_connection(
+    session: Session, connection_id: int, *, user_id: int | None = None
+) -> SupermarketConnection | None:
     connection = get_connection(session, connection_id)
     if connection is None:
         return None
     now = datetime.now(UTC)
-    _deactivate_others(session, connection.store, exclude_id=connection.id, now=now)
+    _deactivate_others(session, connection.store, exclude_id=connection.id, now=now, user_id=user_id)
     connection.is_active = True
     connection.updated_at = now
     session.add(connection)
@@ -128,7 +130,10 @@ def activate_connection(session: Session, connection_id: int) -> SupermarketConn
     return connection
 
 
-def delete_connection(session: Session, connection_id: int) -> SupermarketConnection | None:
+def delete_connection(
+    session: Session, connection_id: int, *, user_id: int | None = None
+) -> SupermarketConnection | None:
+    del user_id  # reserved for ownership checks performed by the caller
     connection = get_connection(session, connection_id)
     if connection is None:
         return None
