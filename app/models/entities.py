@@ -204,6 +204,9 @@ class GroceryPantrySync(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     grocery_item_id: int = Field(foreign_key="groceryitem.id", index=True)
     pantry_item_id: int = Field(foreign_key="pantryitem.id", index=True)
+    # Quantity added to the pantry item (in the pantry item's unit) when the
+    # grocery item was checked. Used to reverse the restock on uncheck.
+    added_quantity: float = 0
     created_at: datetime = Field(default_factory=utcnow)
 
 
