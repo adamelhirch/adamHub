@@ -100,11 +100,14 @@ from app.services.linear_hub import (
 )
 from app.services.meal_planning import (
     build_meal_plan_read,
-    compute_recipe_missing_ingredients,
-    consume_recipe_ingredients,
     confirm_meal_plan_cooked,
+    confirm_recipe_cooked,
+    exclude_recipe_confirm_marker_plans,
+    reset_meal_plan_cook_confirmation,
+    resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
+    unconfirm_recipe_cooked,
 )
 from app.services.calendar_hub import (
     apply_task_update,
@@ -208,11 +211,12 @@ ACTION_CATALOG = [
     {"action": "grocery.check_item", "description": "Mark grocery item checked or unchecked", "input_schema": {"item_id": "int", "checked": "bool?"}},
     {"action": "grocery.delete_item", "description": "Delete a grocery item", "input_schema": {"item_id": "int"}},
     {"action": "video.fetch", "description": "Fetch transcript and description from a YouTube, Instagram, or TikTok URL", "input_schema": {"url": "string"}},
-    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
+    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}},
     {"action": "recipe.list", "description": "List recipes", "input_schema": {"limit": "int?"}},
     {"action": "recipe.get", "description": "Get one recipe by id", "input_schema": {"recipe_id": "int"}},
-    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
-    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}},
+    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}},
+    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients (idempotent; undo with recipe.unconfirm_cooked)", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}},
+    {"action": "recipe.unconfirm_cooked", "description": "Undo a recipe-level cooked confirmation and restore pantry stock", "input_schema": {"recipe_id": "int"}},
     {"action": "recipe.delete", "description": "Delete a recipe and its dependent recipe ingredients / meal plans", "input_schema": {"recipe_id": "int"}},
     {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
     {"action": "meal_plan.log_cooked", "description": "Log a recipe as cooked without pre-planning", "input_schema": {"recipe_id": "int", "cooked_at": "datetime?", "servings_override": "int?", "note": "string?"}},
@@ -1110,7 +1114,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         session.refresh(recipe)
 
         for ing in data.ingredients:
-            ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+            ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
             session.add(ingredient)
         session.commit()
 
@@ -1139,7 +1143,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                 session.delete(row)
             session.commit()
             for ing in ingredients:
-                ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+                ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
                 session.add(ingredient)
             recipe.updated_at = now
             session.add(recipe)
@@ -1167,15 +1171,31 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not recipe:
             raise ValueError("recipe_id not found")
         servings_override = _clamp_int(payload.get("servings_override"), default=None, minimum=1, maximum=100) if payload.get("servings_override") is not None else None
-        missing = compute_recipe_missing_ingredients(session, recipe, servings_override)
-        consumption = consume_recipe_ingredients(session, recipe, servings_override)
+        result = confirm_recipe_cooked(session, recipe, servings_override, payload.get("note"))
         return {
             "recipe_id": recipe.id,
             "recipe_name": recipe.name,
-            "cooked_at": now,
-            "note": payload.get("note"),
-            "missing_ingredients": [item.model_dump(mode="json") for item in missing],
-            "pantry_consumption": consumption,
+            "cooked_at": result.get("confirmed_at"),
+            "note": result.get("note"),
+            "missing_ingredients": [item.model_dump(mode="json") for item in result.get("missing_ingredients", [])],
+            "pantry_consumption": result.get("pantry_consumption", []),
+            "meal_plan_id": result.get("meal_plan_id"),
+            "already_confirmed": bool(result.get("already_confirmed")),
+        }
+
+    if action == "recipe.unconfirm_cooked":
+        recipe_id = int(payload.get("recipe_id", 0))
+        recipe = session.get(Recipe, recipe_id)
+        if not recipe:
+            raise ValueError("recipe_id not found")
+        result = unconfirm_recipe_cooked(session, recipe)
+        return {
+            "recipe_id": recipe.id,
+            "recipe_name": recipe.name,
+            "already_unconfirmed": bool(result.get("already_unconfirmed")),
+            "previously_confirmed_at": result.get("previously_confirmed_at"),
+            "note": result.get("note"),
+            "pantry_restore": result.get("pantry_restore", []),
         }
 
     if action == "recipe.delete":
@@ -1224,7 +1244,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.list":
         limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=400)
-        statement = select(MealPlan).order_by(MealPlan.planned_at.asc()).limit(limit)
+        statement = exclude_recipe_confirm_marker_plans(select(MealPlan)).order_by(MealPlan.planned_at.asc()).limit(limit)
         if payload.get("date_from"):
             date_from = _parse_date(payload.get("date_from"), "date_from")
             statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
@@ -1263,11 +1283,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if plan.planned_for is None:
             plan.planned_for = plan.planned_at.date()
         if reset_cook_confirmation:
-            confirmation = session.exec(
-                select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
-            ).first()
-            if confirmation:
-                session.delete(confirmation)
+            reset_meal_plan_cook_confirmation(session, plan)
         plan.updated_at = now
         session.add(plan)
         session.commit()

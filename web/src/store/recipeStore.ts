@@ -71,14 +71,9 @@ export type RecipeIngredientInput = {
   quantity: number;
   unit: string;
   note: string | null;
-  store: string | null;
-  store_label: string | null;
-  external_id: string | null;
   category: string | null;
-  packaging: string | null;
-  price_text: string | null;
-  product_url: string | null;
-  image_url: string | null;
+  /** SupermarketSearchCache id; store metadata is resolved server-side from it. */
+  cache_id: number | null;
 };
 
 export type RecipeInput = {

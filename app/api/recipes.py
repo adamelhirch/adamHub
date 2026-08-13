@@ -1,18 +1,36 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
-from sqlmodel import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session, select
 
 from app.api._crud import get_or_404
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import MealPlan, MealPlanCookConfirmation, Recipe, RecipeIngredient
-from app.schemas import RecipeCookRequest, RecipeCookResult, RecipeCreate, RecipeRead, RecipeUpdate
+from app.schemas import (
+    RecipeCookRequest,
+    RecipeCookResult,
+    RecipeCreate,
+    RecipeRead,
+    RecipeUncookResult,
+    RecipeUpdate,
+)
 from app.services.calendar_hub import sync_generated_calendar_items
 from app.services.life import build_recipe_read
-from app.services.meal_planning import compute_recipe_missing_ingredients, consume_recipe_ingredients
+from app.services.meal_planning import (
+    confirm_recipe_cooked as confirm_recipe_cooked_service,
+    resolve_recipe_ingredient_fields,
+    unconfirm_recipe_cooked as unconfirm_recipe_cooked_service,
+)
 
 router = APIRouter(prefix="/recipes", tags=["recipes"], dependencies=[Depends(require_api_key)])
+
+
+def _ingredient_fields(session: Session, ingredient):
+    try:
+        return resolve_recipe_ingredient_fields(session, ingredient)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("", response_model=RecipeRead)
@@ -38,7 +56,7 @@ def create_recipe(payload: RecipeCreate, session: SessionDep) -> RecipeRead:
     session.refresh(recipe)
 
     for ingredient in payload.ingredients:
-        row = RecipeIngredient(recipe_id=recipe.id, **ingredient.model_dump())
+        row = RecipeIngredient(recipe_id=recipe.id, **_ingredient_fields(session, ingredient))
         session.add(row)
 
     recipe.updated_at = datetime.now(timezone.utc)
@@ -68,7 +86,7 @@ def update_recipe(recipe_id: int, payload: RecipeUpdate, session: SessionDep) ->
             session.delete(existing)
         session.commit()
         for ingredient in ingredients:
-            row = RecipeIngredient(recipe_id=recipe.id, **ingredient.model_dump())
+            row = RecipeIngredient(recipe_id=recipe.id, **_ingredient_fields(session, ingredient))
             session.add(row)
         recipe.updated_at = datetime.now(timezone.utc)
         session.add(recipe)
@@ -100,17 +118,25 @@ def confirm_recipe_cooked(
 
     servings_override = payload.servings_override if payload else None
     note = payload.note if payload else None
-    missing = compute_recipe_missing_ingredients(session, recipe, servings_override)
-    consumption = consume_recipe_ingredients(session, recipe, servings_override)
+    result = confirm_recipe_cooked_service(session, recipe, servings_override, note)
 
     return RecipeCookResult(
         recipe_id=recipe.id,
         recipe_name=recipe.name,
-        cooked_at=datetime.now(timezone.utc),
-        note=note,
-        missing_ingredients=missing,
-        pantry_consumption=consumption,
+        cooked_at=result["confirmed_at"],
+        note=result["note"],
+        missing_ingredients=result["missing_ingredients"],
+        pantry_consumption=result["pantry_consumption"],
+        meal_plan_id=result["meal_plan_id"],
+        already_confirmed=result["already_confirmed"],
     )
+
+
+@router.post("/{recipe_id}/unconfirm-cooked", response_model=RecipeUncookResult)
+def unconfirm_recipe_cooked(recipe_id: int, session: SessionDep) -> RecipeUncookResult:
+    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
+    result = unconfirm_recipe_cooked_service(session, recipe)
+    return RecipeUncookResult.model_validate(result)
 
 
 @router.delete("/{recipe_id}")

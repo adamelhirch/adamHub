@@ -286,14 +286,15 @@ class RecipeIngredientIn(BaseModel):
     quantity: float = 1
     unit: str = "item"
     note: str | None = None
-    store: SupermarketStore | None = None
-    store_label: str | None = None
-    external_id: str | None = None
     category: str | None = None
-    packaging: str | None = None
-    price_text: str | None = None
-    product_url: str | None = None
-    image_url: str | None = None
+    cache_id: int | None = Field(
+        default=None,
+        description=(
+            "SupermarketSearchCache id. When set, store metadata (store, store_label, "
+            "external_id, packaging, price_text, product_url, image_url) is resolved "
+            "server-side from that cache row; client-supplied store fields are never trusted."
+        ),
+    )
 
 
 class RecipeIngredientRead(BaseModel):
@@ -590,6 +591,17 @@ class RecipeCookResult(BaseModel):
     note: str | None = None
     missing_ingredients: list[MissingIngredientRead]
     pantry_consumption: list[MealIngredientConsumptionRead]
+    meal_plan_id: int
+    already_confirmed: bool = False
+
+
+class RecipeUncookResult(BaseModel):
+    recipe_id: int
+    recipe_name: str
+    already_unconfirmed: bool
+    previously_confirmed_at: datetime | None = None
+    note: str | None = None
+    pantry_restore: list[MealIngredientRestoreRead]
 
 
 class RecipeRead(BaseModel):

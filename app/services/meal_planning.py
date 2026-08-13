@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.models import (
@@ -11,8 +13,10 @@ from app.models import (
     PantryItem,
     Recipe,
     RecipeIngredient,
+    SupermarketSearchCache,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
+from app.services.supermarket_registry import get_store_definition
 
 _UNIT_BASE: dict[str, tuple[str, float]] = {
     "kg": ("g", 1000.0),
@@ -20,6 +24,18 @@ _UNIT_BASE: dict[str, tuple[str, float]] = {
     "l": ("ml", 1000.0),
     "ml": ("ml", 1.0),
 }
+
+
+@dataclass
+class ConsumptionResult:
+    """Outcome of consuming a recipe's ingredients from the pantry.
+
+    summary: per-ingredient aggregates (name/unit/required/consumed/missing).
+    lots: per-pantry-item consumption records used to reverse stock exactly on unconfirm.
+    """
+
+    summary: list[dict] = field(default_factory=list)
+    lots: list[dict] = field(default_factory=list)
 
 
 def _normalize_name(value: str) -> str:
@@ -170,10 +186,11 @@ def consume_recipe_ingredients(
     session: Session,
     recipe: Recipe,
     servings_override: int | None = None,
-) -> list[dict]:
+) -> ConsumptionResult:
     pantry_items = session.exec(select(PantryItem)).all()
     now = datetime.now(timezone.utc)
-    consumption: list[dict] = []
+    summary: list[dict] = []
+    lots: list[dict] = []
 
     for ingredient, needed_qty_raw, needed_base, base_unit in _scaled_recipe_ingredients(
         session, recipe, servings_override
@@ -207,10 +224,18 @@ def consume_recipe_ingredients(
 
             consumed_base += consume_base
             remaining -= consume_base
+            lots.append(
+                {
+                    "name": ingredient.name,
+                    "unit": ingredient.unit or "item",
+                    "pantry_item_id": item.id,
+                    "consumed_quantity": round(max(0.0, _from_base(consume_base, ingredient.unit or "item")), 3),
+                }
+            )
 
         consumed_raw = _from_base(consumed_base, ingredient.unit or "item")
         missing_raw = _from_base(max(0.0, remaining), ingredient.unit or "item")
-        consumption.append(
+        summary.append(
             {
                 "name": ingredient.name,
                 "unit": ingredient.unit or "item",
@@ -221,7 +246,7 @@ def consume_recipe_ingredients(
         )
 
     session.commit()
-    return consumption
+    return ConsumptionResult(summary=summary, lots=lots)
 
 
 def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
@@ -280,12 +305,14 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
     ).first()
     if existing:
+        stored = existing.pantry_consumption or []
+        summary = stored.get("summary") if isinstance(stored, dict) else stored
         return {
             "meal_plan_id": meal_plan.id,
             "already_confirmed": True,
             "confirmed_at": existing.confirmed_at,
             "note": existing.note,
-            "pantry_consumption": existing.pantry_consumption or [],
+            "pantry_consumption": summary or [],
         }
 
     recipe = session.get(Recipe, meal_plan.recipe_id)
@@ -299,7 +326,7 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         meal_plan_id=meal_plan.id,
         confirmed_at=now,
         note=note,
-        pantry_consumption=consumption,
+        pantry_consumption={"summary": consumption.summary, "lots": consumption.lots},
     )
     session.add(confirmation)
     meal_plan.updated_at = now
@@ -312,7 +339,74 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         "already_confirmed": False,
         "confirmed_at": confirmation.confirmed_at,
         "note": confirmation.note,
-        "pantry_consumption": consumption,
+        "pantry_consumption": consumption.summary,
+    }
+
+
+def _restore_consumption_lot(
+    session: Session,
+    pantry_items: list[PantryItem],
+    row: dict,
+    meal_plan_id: int,
+    now: datetime,
+) -> dict | None:
+    """Restore one consumption lot back into the exact pantry row that was consumed.
+
+    Falls back to a name/unit heuristic (and finally to creating a fresh pantry row)
+    for legacy confirmation records that predate per-lot tracking.
+    """
+    name = str(row.get("name") or "").strip()
+    unit = str(row.get("unit") or "item")
+    consumed_quantity = float(row.get("consumed_quantity") or 0.0)
+    if not name or consumed_quantity <= 0:
+        return None
+
+    target: PantryItem | None = None
+    pantry_item_id = row.get("pantry_item_id")
+    if pantry_item_id is not None:
+        target = next((item for item in pantry_items if item.id == pantry_item_id), None)
+
+    if target is None:
+        consumed_base, base_unit = _to_base(consumed_quantity, unit)
+        normalized_name = _normalize_name(name)
+        matching = [
+            item
+            for item in pantry_items
+            if _normalize_name(item.name) == normalized_name
+            and _unit_meta(item.unit or "item")[0] == base_unit
+        ]
+        matching.sort(key=lambda x: x.updated_at, reverse=True)
+        target = matching[0] if matching else None
+
+    if target:
+        restore_in_item_unit = _from_base(_to_base(consumed_quantity, unit)[0], target.unit or "item")
+        target.quantity = round((target.quantity or 0.0) + restore_in_item_unit, 3)
+        target.updated_at = now
+        session.add(target)
+        return {
+            "name": name,
+            "unit": target.unit or "item",
+            "restored_quantity": round(max(0.0, restore_in_item_unit), 3),
+            "pantry_item_id": target.id,
+        }
+
+    created = PantryItem(
+        name=name,
+        quantity=round(max(0.0, consumed_quantity), 3),
+        unit=unit or "item",
+        category="meal-plan",
+        min_quantity=0,
+        note=f"rollback meal #{meal_plan_id}",
+        updated_at=now,
+    )
+    session.add(created)
+    session.flush()
+    pantry_items.append(created)
+    return {
+        "name": name,
+        "unit": created.unit,
+        "restored_quantity": round(max(0.0, consumed_quantity), 3),
+        "pantry_item_id": created.id,
     }
 
 
@@ -331,60 +425,17 @@ def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
 
     now = datetime.now(timezone.utc)
     pantry_items = session.exec(select(PantryItem)).all()
+    stored = confirmation.pantry_consumption or []
+    if isinstance(stored, dict):
+        lots = stored.get("lots") or []
+    else:
+        lots = stored
+
     restored: list[dict] = []
-    for row in confirmation.pantry_consumption or []:
-        name = str(row.get("name") or "").strip()
-        unit = str(row.get("unit") or "item")
-        consumed_quantity = float(row.get("consumed_quantity") or 0.0)
-        if not name or consumed_quantity <= 0:
-            continue
-
-        consumed_base, base_unit = _to_base(consumed_quantity, unit)
-        normalized_name = _normalize_name(name)
-        matching = [
-            item
-            for item in pantry_items
-            if _normalize_name(item.name) == normalized_name
-            and _unit_meta(item.unit or "item")[0] == base_unit
-        ]
-        matching.sort(key=lambda x: x.updated_at, reverse=True)
-        target = matching[0] if matching else None
-
-        if target:
-            restore_in_item_unit = _from_base(consumed_base, target.unit or "item")
-            target.quantity = round((target.quantity or 0.0) + restore_in_item_unit, 3)
-            target.updated_at = now
-            session.add(target)
-            restored.append(
-                {
-                    "name": name,
-                    "unit": target.unit or "item",
-                    "restored_quantity": round(max(0.0, restore_in_item_unit), 3),
-                    "pantry_item_id": target.id,
-                }
-            )
-            continue
-
-        created = PantryItem(
-            name=name,
-            quantity=round(max(0.0, consumed_quantity), 3),
-            unit=unit or "item",
-            category="meal-plan",
-            min_quantity=0,
-            note=f"rollback meal #{meal_plan.id}",
-            updated_at=now,
-        )
-        session.add(created)
-        session.flush()
-        pantry_items.append(created)
-        restored.append(
-            {
-                "name": name,
-                "unit": created.unit,
-                "restored_quantity": round(max(0.0, consumed_quantity), 3),
-                "pantry_item_id": created.id,
-            }
-        )
+    for row in lots:
+        entry = _restore_consumption_lot(session, pantry_items, row, meal_plan.id, now)
+        if entry:
+            restored.append(entry)
 
     previous_confirmed_at = confirmation.confirmed_at
     previous_note = confirmation.note
@@ -400,3 +451,156 @@ def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
         "note": previous_note,
         "pantry_restore": restored,
     }
+
+
+def reset_meal_plan_cook_confirmation(session: Session, meal_plan: MealPlan) -> dict | None:
+    """Undo a meal plan's cook confirmation (restoring pantry stock) if one exists.
+
+    Returns the unconfirm result dict when a confirmation was present, else None.
+    Used when editing a confirmed meal plan invalidates its confirmation.
+    """
+    confirmation = session.exec(
+        select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
+    ).first()
+    if not confirmation:
+        return None
+    return unconfirm_meal_plan_cooked(session, meal_plan)
+
+
+# Marker used to link a recipe-level "confirm cooked" to an ad-hoc MealPlan that
+# carries the MealPlanCookConfirmation record (same record type as the meal-plan flow).
+RECIPE_CONFIRM_MARKER = "recipe.confirm_cooked"
+
+
+def exclude_recipe_confirm_marker_plans(statement):
+    """Filter recipe.confirm_cooked carrier plans out of a MealPlan select.
+
+    Marker rows only exist to carry a MealPlanCookConfirmation for recipe-level
+    confirmations; they must never surface in meal-plan listings or calendar
+    projections. ``MealPlan.note`` is nullable, so NULL notes are kept explicitly
+    (a plain ``note != marker`` comparison would silently drop them).
+    """
+    return statement.where(
+        or_(MealPlan.note.is_(None), MealPlan.note != RECIPE_CONFIRM_MARKER)
+    )
+
+
+def _recipe_confirmation_plan(session: Session, recipe: Recipe) -> MealPlan | None:
+    return session.exec(
+        select(MealPlan).where(
+            MealPlan.recipe_id == recipe.id,
+            MealPlan.note == RECIPE_CONFIRM_MARKER,
+        )
+    ).first()
+
+
+def confirm_recipe_cooked(
+    session: Session,
+    recipe: Recipe,
+    servings_override: int | None = None,
+    note: str | None = None,
+) -> dict:
+    """Confirm a recipe cooked without an explicit meal plan.
+
+    Mirrors the meal-plan flow by reusing MealPlanCookConfirmation: an ad-hoc
+    MealPlan (note = RECIPE_CONFIRM_MARKER) carries the confirmation record, so
+    confirm is idempotent and can be reversed via unconfirm_recipe_cooked.
+    """
+    plan = _recipe_confirmation_plan(session, recipe)
+    if plan is None:
+        now = datetime.now(timezone.utc)
+        plan = MealPlan(
+            planned_at=now,
+            planned_for=now.date(),
+            recipe_id=recipe.id,
+            servings_override=servings_override,
+            note=RECIPE_CONFIRM_MARKER,
+            auto_add_missing_ingredients=False,
+        )
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+    else:
+        # Reused from a previous confirm/unconfirm cycle: refresh its timestamp so
+        # planned_at tracks the current cook rather than the very first one.
+        existing = session.exec(
+            select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
+        ).first()
+        if existing is None:
+            now = datetime.now(timezone.utc)
+            plan.planned_at = now
+            plan.planned_for = now.date()
+            plan.updated_at = now
+            session.add(plan)
+            session.commit()
+
+    missing = compute_recipe_missing_ingredients(session, recipe, plan.servings_override)
+    result = confirm_meal_plan_cooked(session, plan, note=note)
+    result["recipe_id"] = recipe.id
+    result["recipe_name"] = recipe.name
+    result["meal_plan_id"] = plan.id
+    result["missing_ingredients"] = missing
+    return result
+
+
+def unconfirm_recipe_cooked(session: Session, recipe: Recipe) -> dict:
+    """Undo a recipe-level cooked confirmation and restore pantry stock."""
+    plan = _recipe_confirmation_plan(session, recipe)
+    if plan is None:
+        return {
+            "recipe_id": recipe.id,
+            "recipe_name": recipe.name,
+            "already_unconfirmed": True,
+            "previously_confirmed_at": None,
+            "note": None,
+            "pantry_restore": [],
+        }
+    result = unconfirm_meal_plan_cooked(session, plan)
+    result["recipe_id"] = recipe.id
+    result["recipe_name"] = recipe.name
+    return result
+
+
+def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
+    """Return the fields to persist on a RecipeIngredient for validated input.
+
+    Store metadata is never taken from the client: it is resolved server-side from
+    the SupermarketSearchCache row referenced by ``cache_id`` (the same mechanism
+    used by create_or_replace_mapping). Client-supplied store fields are ignored.
+    """
+    fields: dict = {
+        "name": ingredient_in.name,
+        "quantity": ingredient_in.quantity,
+        "unit": ingredient_in.unit,
+        "note": ingredient_in.note,
+        "category": ingredient_in.category,
+        "store": None,
+        "store_label": None,
+        "external_id": None,
+        "packaging": None,
+        "price_text": None,
+        "product_url": None,
+        "image_url": None,
+    }
+    cache_id = getattr(ingredient_in, "cache_id", None)
+    if cache_id is None:
+        return fields
+
+    cache_row = session.get(SupermarketSearchCache, cache_id)
+    if cache_row is None:
+        raise ValueError(f"cache_id {cache_id} does not reference a known supermarket search result")
+
+    definition = get_store_definition(cache_row.store)
+    fields.update(
+        {
+            "store": cache_row.store,
+            "store_label": definition.label if definition else cache_row.store.value,
+            "external_id": cache_row.external_id,
+            "category": cache_row.category or fields["category"],
+            "packaging": cache_row.packaging,
+            "price_text": cache_row.price_text,
+            "product_url": cache_row.product_url,
+            "image_url": cache_row.image_url,
+        }
+    )
+    return fields
