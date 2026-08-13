@@ -4,14 +4,19 @@ Use for shopping list, pantry-aware restocking, and store-backed grocery creatio
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `supermarket.list_stores`
+- `supermarket.list_connections`
+- `supermarket.import_connection`
+- `supermarket.activate_connection`
+- `supermarket.delete_connection`
 - `supermarket.search`
 - `grocery.add_item`
 - `grocery.list_items`
 - `grocery.update_item`
 - `grocery.check_item`
 - `grocery.delete_item`
-- `pantry.overview`
+<!-- END GENERATED: action-list -->
 
 ## Decision rules
 
@@ -20,6 +25,7 @@ Use for shopping list, pantry-aware restocking, and store-backed grocery creatio
 - If there is no good store result, create a generic grocery item instead.
 - Use `grocery.check_item` only when the purchase is actually done.
 - Remember that checked groceries can sync into pantry.
+- See pantry state with `pantry.overview` (owned by the pantry skill) before restocking decisions.
 
 ## Safety
 

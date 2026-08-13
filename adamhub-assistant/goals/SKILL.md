@@ -4,6 +4,7 @@ Use for goals and milestones.
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `goal.create`
 - `goal.list`
 - `goal.get`
@@ -11,6 +12,7 @@ Use for goals and milestones.
 - `goal.add_milestone`
 - `goal.list_milestones`
 - `goal.update_milestone`
+<!-- END GENERATED: action-list -->
 
 ## Rules
 

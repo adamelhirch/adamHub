@@ -6,10 +6,12 @@ If the user is describing something recurring like a routine, a ritual, or a hab
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `task.create`
 - `task.list`
 - `task.update`
 - `task.complete`
+<!-- END GENERATED: action-list -->
 
 ## Minimal decision rules
 

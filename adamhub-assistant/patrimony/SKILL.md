@@ -4,6 +4,7 @@ Use for net-worth review, account tracking, and savings goals.
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `patrimony.overview`
 - `patrimony.list_accounts`
 - `patrimony.add_account`
@@ -13,6 +14,7 @@ Use for net-worth review, account tracking, and savings goals.
 - `patrimony.add_goal`
 - `patrimony.update_goal`
 - `patrimony.delete_goal`
+<!-- END GENERATED: action-list -->
 
 ## Rules
 

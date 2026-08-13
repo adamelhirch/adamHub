@@ -4,12 +4,14 @@ Use for calendar planning and agenda.
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `event.create`
 - `event.list`
 - `event.upcoming`
 - `event.get`
 - `event.update`
 - `event.delete`
+<!-- END GENERATED: action-list -->
 
 ## Rules
 
