@@ -183,6 +183,7 @@ class Budget(SQLModel, table=True):
 
 class GroceryItem(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     quantity: float = 1
     unit: str = "item"
@@ -212,6 +213,7 @@ class GroceryPantrySync(SQLModel, table=True):
 
 class Recipe(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     description: str | None = None
     instructions: str
@@ -249,6 +251,7 @@ class RecipeIngredient(SQLModel, table=True):
 
 class MealPlan(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     planned_at: datetime = Field(default_factory=utcnow)
     # Legacy fields kept nullable for backward compatibility with old clients/data.
     planned_for: date | None = None
@@ -379,6 +382,7 @@ class Subscription(SQLModel, table=True):
 
 class PantryItem(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     quantity: float = 0
     unit: str = "item"
