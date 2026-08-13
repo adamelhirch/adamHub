@@ -15,13 +15,14 @@ from app.schemas import (
     PantryOverview,
 )
 from app.services.life import build_pantry_overview
+from app.services.grocery_pantry import resolve_store_metadata
 
 router = APIRouter(prefix="/pantry", tags=["pantry"], dependencies=[Depends(require_api_key)])
 
 
 @router.post("/items", response_model=PantryItemRead)
 def create_pantry_item(payload: PantryItemCreate, session: SessionDep) -> PantryItemRead:
-    item = create(session, PantryItem(**payload.model_dump()))
+    item = create(session, PantryItem(**resolve_store_metadata(session, payload.model_dump())))
     return PantryItemRead.model_validate(item, from_attributes=True)
 
 
@@ -48,6 +49,8 @@ def update_pantry_item(item_id: int, payload: PantryItemUpdate, session: Session
     item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    if "cache_id" in updates:
+        updates = resolve_store_metadata(session, updates)
     apply_updates(item, updates, touch=True)
     item = save(session, item)
     return PantryItemRead.model_validate(item, from_attributes=True)

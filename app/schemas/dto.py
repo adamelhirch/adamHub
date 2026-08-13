@@ -228,7 +228,7 @@ class FinanceMonthSummary(BaseModel):
 
 class GroceryItemCreate(BaseModel):
     name: str
-    quantity: float = 1
+    quantity: float = Field(default=1, ge=0)
     unit: str = "item"
     category: str | None = None
     image_url: str | None = None
@@ -237,13 +237,17 @@ class GroceryItemCreate(BaseModel):
     packaging: str | None = None
     price_text: str | None = None
     product_url: str | None = None
+    # When set, store metadata (store_label/external_id/price_text/product_url)
+    # is resolved server-side from this SupermarketSearchCache row and any
+    # client-supplied value for those fields is ignored.
+    cache_id: int | None = None
     priority: int = 3
     note: str | None = None
 
 
 class GroceryItemUpdate(BaseModel):
     name: str | None = None
-    quantity: float | None = None
+    quantity: float | None = Field(default=None, ge=0)
     unit: str | None = None
     category: str | None = None
     image_url: str | None = None
@@ -252,6 +256,7 @@ class GroceryItemUpdate(BaseModel):
     packaging: str | None = None
     price_text: str | None = None
     product_url: str | None = None
+    cache_id: int | None = None
     checked: bool | None = None
     priority: int | None = None
     note: str | None = None
@@ -1151,7 +1156,7 @@ class SubscriptionProjection(BaseModel):
 
 class PantryItemCreate(BaseModel):
     name: str
-    quantity: float = 0
+    quantity: float = Field(default=0, ge=0)
     unit: str = "item"
     category: str | None = None
     image_url: str | None = None
@@ -1160,7 +1165,8 @@ class PantryItemCreate(BaseModel):
     packaging: str | None = None
     price_text: str | None = None
     product_url: str | None = None
-    min_quantity: float = 0
+    cache_id: int | None = None
+    min_quantity: float = Field(default=0, ge=0)
     expires_at: date | None = None
     location: str | None = None
     note: str | None = None
@@ -1168,7 +1174,7 @@ class PantryItemCreate(BaseModel):
 
 class PantryItemUpdate(BaseModel):
     name: str | None = None
-    quantity: float | None = None
+    quantity: float | None = Field(default=None, ge=0)
     unit: str | None = None
     category: str | None = None
     image_url: str | None = None
@@ -1177,7 +1183,8 @@ class PantryItemUpdate(BaseModel):
     packaging: str | None = None
     price_text: str | None = None
     product_url: str | None = None
-    min_quantity: float | None = None
+    cache_id: int | None = None
+    min_quantity: float | None = Field(default=None, ge=0)
     expires_at: date | None = None
     location: str | None = None
     note: str | None = None
