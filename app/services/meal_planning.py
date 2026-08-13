@@ -12,8 +12,10 @@ from app.models import (
     PantryItem,
     Recipe,
     RecipeIngredient,
+    SupermarketSearchCache,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
+from app.services.supermarket_registry import get_store_definition
 
 _UNIT_BASE: dict[str, tuple[str, float]] = {
     "kg": ("g", 1000.0),
@@ -530,3 +532,48 @@ def unconfirm_recipe_cooked(session: Session, recipe: Recipe) -> dict:
     result["recipe_id"] = recipe.id
     result["recipe_name"] = recipe.name
     return result
+
+
+def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
+    """Return the fields to persist on a RecipeIngredient for validated input.
+
+    Store metadata is never taken from the client: it is resolved server-side from
+    the SupermarketSearchCache row referenced by ``cache_id`` (the same mechanism
+    used by create_or_replace_mapping). Client-supplied store fields are ignored.
+    """
+    fields: dict = {
+        "name": ingredient_in.name,
+        "quantity": ingredient_in.quantity,
+        "unit": ingredient_in.unit,
+        "note": ingredient_in.note,
+        "category": ingredient_in.category,
+        "store": None,
+        "store_label": None,
+        "external_id": None,
+        "packaging": None,
+        "price_text": None,
+        "product_url": None,
+        "image_url": None,
+    }
+    cache_id = getattr(ingredient_in, "cache_id", None)
+    if cache_id is None:
+        return fields
+
+    cache_row = session.get(SupermarketSearchCache, cache_id)
+    if cache_row is None:
+        raise ValueError(f"cache_id {cache_id} does not reference a known supermarket search result")
+
+    definition = get_store_definition(cache_row.store)
+    fields.update(
+        {
+            "store": cache_row.store,
+            "store_label": definition.label if definition else cache_row.store.value,
+            "external_id": cache_row.external_id,
+            "category": cache_row.category or fields["category"],
+            "packaging": cache_row.packaging,
+            "price_text": cache_row.price_text,
+            "product_url": cache_row.product_url,
+            "image_url": cache_row.image_url,
+        }
+    )
+    return fields

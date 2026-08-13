@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
-from sqlmodel import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session, select
 
 from app.api._crud import get_or_404
 from app.api.deps import SessionDep
@@ -19,10 +19,18 @@ from app.services.calendar_hub import sync_generated_calendar_items
 from app.services.life import build_recipe_read
 from app.services.meal_planning import (
     confirm_recipe_cooked as confirm_recipe_cooked_service,
+    resolve_recipe_ingredient_fields,
     unconfirm_recipe_cooked as unconfirm_recipe_cooked_service,
 )
 
 router = APIRouter(prefix="/recipes", tags=["recipes"], dependencies=[Depends(require_api_key)])
+
+
+def _ingredient_fields(session: Session, ingredient):
+    try:
+        return resolve_recipe_ingredient_fields(session, ingredient)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("", response_model=RecipeRead)
@@ -48,7 +56,7 @@ def create_recipe(payload: RecipeCreate, session: SessionDep) -> RecipeRead:
     session.refresh(recipe)
 
     for ingredient in payload.ingredients:
-        row = RecipeIngredient(recipe_id=recipe.id, **ingredient.model_dump())
+        row = RecipeIngredient(recipe_id=recipe.id, **_ingredient_fields(session, ingredient))
         session.add(row)
 
     recipe.updated_at = datetime.now(timezone.utc)
@@ -78,7 +86,7 @@ def update_recipe(recipe_id: int, payload: RecipeUpdate, session: SessionDep) ->
             session.delete(existing)
         session.commit()
         for ingredient in ingredients:
-            row = RecipeIngredient(recipe_id=recipe.id, **ingredient.model_dump())
+            row = RecipeIngredient(recipe_id=recipe.id, **_ingredient_fields(session, ingredient))
             session.add(row)
         recipe.updated_at = datetime.now(timezone.utc)
         session.add(recipe)

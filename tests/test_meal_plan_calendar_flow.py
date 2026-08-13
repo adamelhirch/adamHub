@@ -276,7 +276,32 @@ def test_skill_recipe_confirm_unconfirm_cooked(client, auth_headers):
     assert _pantry_qty(client, auth_headers, "Riz") == 4.0
 
 
-def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers):
+def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers, test_engine):
+    from app.models import SupermarketSearchCache, SupermarketStore
+    from app.services.scraper_service import upsert_search_cache
+
+    cache = upsert_search_cache(
+        Session(test_engine),
+        SupermarketStore.INTERMARCHE,
+        [
+            {
+                "store": SupermarketStore.INTERMARCHE,
+                "query": "poulet",
+                "external_id": "chicken-001",
+                "name": "Aiguillettes de poulet",
+                "brand": "Le Gaulois",
+                "category": "Volaille",
+                "packaging": "la barquette de 500 g",
+                "price_amount": 4.89,
+                "price_text": "4,89 €",
+                "image_url": "https://img.test/chicken-001.png",
+                "product_url": "https://shop.test/chicken-001",
+                "payload_json": {},
+            }
+        ],
+    )[0]
+    assert isinstance(cache, SupermarketSearchCache)
+
     recipe = client.post(
         "/api/v1/recipes",
         headers=auth_headers,
@@ -289,14 +314,16 @@ def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers)
                     "name": "Aiguillettes de poulet",
                     "quantity": 1,
                     "unit": "item",
-                    "store": "intermarche",
-                    "store_label": "Intermarché",
-                    "external_id": "chicken-001",
-                    "category": "Volaille",
-                    "packaging": "la barquette de 500 g",
-                    "price_text": "4,89 €",
-                    "product_url": "https://shop.test/chicken-001",
-                    "image_url": "https://img.test/chicken-001.png",
+                    "cache_id": cache.id,
+                    # Fabricated store metadata must be ignored in favour of the
+                    # server-side cache resolution.
+                    "store": "carrefour",
+                    "store_label": "Fabricated",
+                    "external_id": "fabricated-999",
+                    "packaging": "fabricated packaging",
+                    "price_text": "999,99 €",
+                    "product_url": "https://evil.test/fake",
+                    "image_url": "https://evil.test/fake.png",
                 }
             ],
         },
@@ -306,7 +333,12 @@ def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers)
     ingredient = recipe.json()["ingredients"][0]
     assert ingredient["store"] == "intermarche"
     assert ingredient["store_label"] == "Intermarché"
+    assert ingredient["external_id"] == "chicken-001"
+    assert ingredient["packaging"] == "la barquette de 500 g"
     assert ingredient["price_text"] == "4,89 €"
+    assert ingredient["product_url"] == "https://shop.test/chicken-001"
+    assert ingredient["image_url"] == "https://img.test/chicken-001.png"
+    assert ingredient["category"] == "Volaille"
 
     meal_plan_id = _create_meal_plan(client, auth_headers, recipe_id)
 
@@ -322,3 +354,44 @@ def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers)
     assert grocery["packaging"] == "la barquette de 500 g"
     assert grocery["price_text"] == "4,89 €"
     assert grocery["product_url"] == "https://shop.test/chicken-001"
+
+
+def test_recipe_ingredient_rejects_unknown_cache_id(client, auth_headers):
+    recipe = client.post(
+        "/api/v1/recipes",
+        headers=auth_headers,
+        json={
+            "name": "Recette",
+            "instructions": "Cuire",
+            "ingredients": [{"name": "Lait", "quantity": 1, "unit": "L", "cache_id": 999999}],
+        },
+    )
+    assert recipe.status_code == 400
+
+
+def test_recipe_ingredient_store_metadata_dropped_without_cache_id(client, auth_headers):
+    recipe = client.post(
+        "/api/v1/recipes",
+        headers=auth_headers,
+        json={
+            "name": "Recette simple",
+            "instructions": "Cuire",
+            "ingredients": [
+                {
+                    "name": "Lait",
+                    "quantity": 1,
+                    "unit": "L",
+                    "store": "intermarche",
+                    "store_label": "Fabricated",
+                    "external_id": "fake-123",
+                    "price_text": "1,99 €",
+                }
+            ],
+        },
+    )
+    assert recipe.status_code == 200
+    ingredient = recipe.json()["ingredients"][0]
+    assert ingredient["store"] is None
+    assert ingredient["store_label"] is None
+    assert ingredient["external_id"] is None
+    assert ingredient["price_text"] is None

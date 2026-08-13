@@ -281,14 +281,15 @@ class RecipeIngredientIn(BaseModel):
     quantity: float = 1
     unit: str = "item"
     note: str | None = None
-    store: SupermarketStore | None = None
-    store_label: str | None = None
-    external_id: str | None = None
     category: str | None = None
-    packaging: str | None = None
-    price_text: str | None = None
-    product_url: str | None = None
-    image_url: str | None = None
+    cache_id: int | None = Field(
+        default=None,
+        description=(
+            "SupermarketSearchCache id. When set, store metadata (store, store_label, "
+            "external_id, packaging, price_text, product_url, image_url) is resolved "
+            "server-side from that cache row; client-supplied store fields are never trusted."
+        ),
+    )
 
 
 class RecipeIngredientRead(BaseModel):

@@ -103,6 +103,7 @@ from app.services.meal_planning import (
     confirm_meal_plan_cooked,
     confirm_recipe_cooked,
     reset_meal_plan_cook_confirmation,
+    resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
     unconfirm_recipe_cooked,
@@ -209,10 +210,10 @@ ACTION_CATALOG = [
     {"action": "grocery.check_item", "description": "Mark grocery item checked or unchecked", "input_schema": {"item_id": "int", "checked": "bool?"}},
     {"action": "grocery.delete_item", "description": "Delete a grocery item", "input_schema": {"item_id": "int"}},
     {"action": "video.fetch", "description": "Fetch transcript and description from a YouTube, Instagram, or TikTok URL", "input_schema": {"url": "string"}},
-    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
+    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}},
     {"action": "recipe.list", "description": "List recipes", "input_schema": {"limit": "int?"}},
     {"action": "recipe.get", "description": "Get one recipe by id", "input_schema": {"recipe_id": "int"}},
-    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
+    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}},
     {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients (idempotent; undo with recipe.unconfirm_cooked)", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}},
     {"action": "recipe.unconfirm_cooked", "description": "Undo a recipe-level cooked confirmation and restore pantry stock", "input_schema": {"recipe_id": "int"}},
     {"action": "recipe.delete", "description": "Delete a recipe and its dependent recipe ingredients / meal plans", "input_schema": {"recipe_id": "int"}},
@@ -1112,7 +1113,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         session.refresh(recipe)
 
         for ing in data.ingredients:
-            ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+            ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
             session.add(ingredient)
         session.commit()
 
@@ -1141,7 +1142,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                 session.delete(row)
             session.commit()
             for ing in ingredients:
-                ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+                ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
                 session.add(ingredient)
             recipe.updated_at = now
             session.add(recipe)
