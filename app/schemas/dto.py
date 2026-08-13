@@ -508,11 +508,13 @@ class UbereatsStoreSelectionRead(BaseModel):
 
 
 class SupermarketMappingCreate(BaseModel):
-    cache_id: int | None = None
+    cache_id: int
     store: SupermarketStore = SupermarketStore.INTERMARCHE
-    external_id: str
-    store_label: str
-    name_snapshot: str
+    # Snapshot fields are resolved server-side from the cache row; kept optional
+    # for backward compatibility with clients that still send them.
+    external_id: str | None = None
+    store_label: str | None = None
+    name_snapshot: str | None = None
     category_snapshot: str | None = None
     packaging_snapshot: str | None = None
     price_snapshot: str | None = None
