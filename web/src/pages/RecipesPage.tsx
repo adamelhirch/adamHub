@@ -2,44 +2,8 @@ import { useEffect, useState } from 'react';
 import { CalendarClock, ChefHat, CheckCircle2, Clock, ExternalLink, Link2, Loader2, Plus, Search, Store, Trash2, Unlink, X } from 'lucide-react';
 import api from '../lib/api';
 import ComposerSheet from '../components/ComposerSheet';
-
-type RecipeIngredient = {
-  id: number;
-  recipe_id: number;
-  name: string;
-  quantity: number;
-  unit: string;
-  note: string | null;
-  store: string | null;
-  store_label: string | null;
-  external_id: string | null;
-  category: string | null;
-  packaging: string | null;
-  price_text: string | null;
-  product_url: string | null;
-  image_url: string | null;
-};
-
-type Recipe = {
-  id: number;
-  name: string;
-  description: string | null;
-  instructions: string;
-  steps: string[];
-  utensils: string[];
-  prep_minutes: number;
-  cook_minutes: number;
-  servings: number;
-  tags: string[];
-  source_url: string | null;
-  source_platform: string | null;
-  source_title: string | null;
-  source_description: string | null;
-  source_transcript: string | null;
-  ingredients: RecipeIngredient[];
-  created_at: string;
-  updated_at: string;
-};
+import { useRecipeStore } from '../store/recipeStore';
+import type { Recipe, RecipeIngredient, MealPlan } from '../store/recipeStore';
 
 type SupermarketSearchResult = {
   cache_id: number;
@@ -67,33 +31,6 @@ type SupermarketMapping = {
   product_url: string | null;
   image_url: string | null;
   active: boolean;
-};
-
-type MissingIngredient = {
-  name: string;
-  needed_quantity: number;
-  available_quantity: number;
-  missing_quantity: number;
-  unit: string;
-};
-
-type MealPlan = {
-  id: number;
-  planned_at: string;
-  planned_for: string | null;
-  slot: 'breakfast' | 'lunch' | 'dinner' | null;
-  recipe_id: number;
-  recipe_name: string;
-  servings_override: number | null;
-  note: string | null;
-  auto_add_missing_ingredients: boolean;
-  synced_grocery_at: string | null;
-  cooked: boolean;
-  cooked_at: string | null;
-  cooked_note: string | null;
-  missing_ingredients: MissingIngredient[];
-  created_at: string;
-  updated_at: string;
 };
 
 function hasResolvedCategories(results: SupermarketSearchResult[]): boolean {
@@ -279,10 +216,24 @@ function buildIngredientPayload(draft: RecipeIngredientDraft) {
 }
 
 export default function RecipesPage() {
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [mealPlans, setMealPlans] = useState<MealPlan[]>([]);
-  const [mealPlansLoading, setMealPlansLoading] = useState(true);
+  const {
+    recipes,
+    recipesLoading: loading,
+    fetchRecipes,
+    createRecipe,
+    updateRecipe,
+    deleteRecipe: deleteRecipeAction,
+    confirmRecipeCooked: confirmRecipeCookedAction,
+    mealPlans,
+    mealPlansLoading,
+    fetchMealPlans,
+    createMealPlan,
+    updateMealPlan,
+    deleteMealPlan: deleteMealPlanAction,
+    syncMealPlanGroceries: syncMealPlanGroceriesAction,
+    confirmMealPlanCooked: confirmMealPlanCookedAction,
+    unconfirmMealPlanCooked: unconfirmMealPlanCookedAction,
+  } = useRecipeStore();
   const [recipeForm, setRecipeForm] = useState<RecipeFormState>(EMPTY_RECIPE_FORM);
   const [stepDrafts, setStepDrafts] = useState<RecipeTextDraft[]>([createTextDraft()]);
   const [utensilDrafts, setUtensilDrafts] = useState<RecipeTextDraft[]>([createTextDraft()]);
@@ -308,30 +259,10 @@ export default function RecipesPage() {
   const [searchQueryHasCache, setSearchQueryHasCache] = useState(false);
   const [searchPromotionsOnly, setSearchPromotionsOnly] = useState(false);
 
-  const loadRecipes = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/recipes');
-      setRecipes(res.data);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadMealPlans = async () => {
-    setMealPlansLoading(true);
-    try {
-      const res = await api.get('/meal-plans', { params: { limit: 100 } });
-      setMealPlans(res.data);
-    } finally {
-      setMealPlansLoading(false);
-    }
-  };
-
   useEffect(() => {
-    void loadRecipes();
-    void loadMealPlans();
-  }, []);
+    void fetchRecipes();
+    void fetchMealPlans();
+  }, [fetchRecipes, fetchMealPlans]);
 
   const resetIngredientSelection = () => {
     setActiveIngredient(null);
@@ -576,12 +507,7 @@ export default function RecipesPage() {
     setRecipeError(null);
     setRecipeFeedback(null);
     try {
-      const res = await api.post(`/recipes/${recipe.id}/confirm-cooked`, {});
-      const payload = res.data as {
-        recipe_name: string;
-        missing_ingredients: Array<{ name: string; missing_quantity: number }>;
-        pantry_consumption: Array<{ name: string; consumed_quantity: number }>;
-      };
+      const payload = await confirmRecipeCookedAction(recipe.id);
       const consumedCount = payload.pantry_consumption.reduce((sum, item) => sum + (item.consumed_quantity > 0 ? 1 : 0), 0);
       const missingCount = payload.missing_ingredients.filter((item) => item.missing_quantity > 0).length;
       setRecipeFeedback(
@@ -631,14 +557,13 @@ export default function RecipesPage() {
     setRecipeSaving(true);
     try {
       if (editingRecipeId !== null) {
-        await api.patch(`/recipes/${editingRecipeId}`, payload);
+        await updateRecipe(editingRecipeId, payload);
         setRecipeFeedback('Recette modifiée.');
       } else {
-        await api.post('/recipes', payload);
+        await createRecipe(payload);
         setRecipeFeedback('Recette créée.');
       }
       resetRecipeEditor();
-      await loadRecipes();
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible d’enregistrer la recette.');
     } finally {
@@ -654,11 +579,10 @@ export default function RecipesPage() {
     setRecipeError(null);
     setRecipeFeedback(null);
     try {
-      await api.delete(`/recipes/${recipe.id}`);
+      await deleteRecipeAction(recipe.id);
       if (editingRecipeId === recipe.id) {
         resetRecipeEditor();
       }
-      await loadRecipes();
       setRecipeFeedback('Recette supprimée.');
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible de supprimer la recette.');
@@ -694,14 +618,13 @@ export default function RecipesPage() {
     setMealPlanSaving(true);
     try {
       if (editingMealPlanId !== null) {
-        await api.patch(`/meal-plans/${editingMealPlanId}`, payload);
+        await updateMealPlan(editingMealPlanId, payload);
         setRecipeFeedback('Planification modifiée.');
       } else {
-        await api.post('/meal-plans', payload);
+        await createMealPlan(payload);
         setRecipeFeedback('Planification créée.');
       }
       resetMealPlanEditor();
-      await Promise.all([loadMealPlans(), loadRecipes()]);
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible d’enregistrer la planification.');
     } finally {
@@ -714,10 +637,9 @@ export default function RecipesPage() {
     setRecipeError(null);
     setRecipeFeedback(null);
     try {
-      const res = await api.post(`/meal-plans/${mealPlan.id}/sync-groceries`);
-      const created = res.data?.created_grocery_items ?? 0;
+      const res = await syncMealPlanGroceriesAction(mealPlan.id);
+      const created = res?.created_grocery_items ?? 0;
       setRecipeFeedback(`${mealPlan.recipe_name}: ${created} article(s) ajouté(s) aux courses.`);
-      await loadMealPlans();
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible de synchroniser les courses.');
     } finally {
@@ -730,11 +652,9 @@ export default function RecipesPage() {
     setRecipeError(null);
     setRecipeFeedback(null);
     try {
-      const res = await api.post(`/meal-plans/${mealPlan.id}/confirm-cooked`, {});
-      const payload = res.data as { pantry_consumption: Array<{ consumed_quantity: number }> };
+      const payload = await confirmMealPlanCookedAction(mealPlan.id);
       const consumedCount = payload.pantry_consumption.reduce((sum, row) => sum + (row.consumed_quantity > 0 ? 1 : 0), 0);
       setRecipeFeedback(`${mealPlan.recipe_name}: cuisiné. ${consumedCount} ingrédient(s) consommé(s).`);
-      await loadMealPlans();
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible de confirmer la cuisson.');
     } finally {
@@ -747,11 +667,9 @@ export default function RecipesPage() {
     setRecipeError(null);
     setRecipeFeedback(null);
     try {
-      const res = await api.post(`/meal-plans/${mealPlan.id}/unconfirm-cooked`);
-      const payload = res.data as { pantry_restore: Array<{ restored_quantity: number }> };
+      const payload = await unconfirmMealPlanCookedAction(mealPlan.id);
       const restoredCount = payload.pantry_restore.reduce((sum, row) => sum + (row.restored_quantity > 0 ? 1 : 0), 0);
       setRecipeFeedback(`${mealPlan.recipe_name}: confirmation annulée. ${restoredCount} ingrédient(s) restauré(s).`);
-      await loadMealPlans();
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible d’annuler la cuisson.');
     } finally {
@@ -767,12 +685,11 @@ export default function RecipesPage() {
     setRecipeError(null);
     setRecipeFeedback(null);
     try {
-      await api.delete(`/meal-plans/${mealPlan.id}`);
+      await deleteMealPlanAction(mealPlan.id);
       if (editingMealPlanId === mealPlan.id) {
         resetMealPlanEditor();
       }
       setRecipeFeedback('Planification supprimée.');
-      await loadMealPlans();
     } catch (error) {
       setRecipeError(error instanceof Error ? error.message : 'Impossible de supprimer la planification.');
     } finally {

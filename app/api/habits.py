@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
+from app.api._crud import create, get_or_404
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import Habit, HabitFrequency, HabitLog
@@ -93,14 +94,9 @@ def update_habit(habit_id: int, payload: HabitUpdate, session: SessionDep) -> Ha
 
 @router.post("/{habit_id}/logs", response_model=HabitLogRead)
 def log_habit(habit_id: int, payload: HabitLogCreate, session: SessionDep) -> HabitLogRead:
-    habit = session.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+    habit = get_or_404(session, Habit, habit_id, detail="Habit not found")
 
-    log = HabitLog(habit_id=habit_id, **payload.model_dump())
-    session.add(log)
-    session.commit()
-    session.refresh(log)
+    log = create(session, HabitLog(habit_id=habit_id, **payload.model_dump()))
 
     update_habit_streak(session, habit_id)
 
@@ -117,9 +113,7 @@ def list_habit_logs(
     session: SessionDep,
     limit: int = Query(default=100, ge=1, le=500),
 ) -> list[HabitLogRead]:
-    habit = session.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+    get_or_404(session, Habit, habit_id, detail="Habit not found")
 
     logs = session.exec(
         select(HabitLog)

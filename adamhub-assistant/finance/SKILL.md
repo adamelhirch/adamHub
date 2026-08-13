@@ -4,11 +4,13 @@ Use for transaction logging, budget setup, and month summaries.
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `finance.add_transaction`
 - `finance.list_transactions`
 - `finance.create_budget`
 - `finance.list_budgets`
 - `finance.month_summary`
+<!-- END GENERATED: action-list -->
 
 ## Decision rules
 

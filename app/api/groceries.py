@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlmodel import select
 
+from app.api._crud import apply_updates, create, delete, get_or_404, save
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import GroceryItem, GroceryPantrySync
@@ -14,10 +13,7 @@ router = APIRouter(prefix="/groceries", tags=["groceries"], dependencies=[Depend
 
 @router.post("", response_model=GroceryItemRead)
 def create_grocery_item(payload: GroceryItemCreate, session: SessionDep) -> GroceryItemRead:
-    item = GroceryItem(**payload.model_dump())
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    item = create(session, GroceryItem(**payload.model_dump()))
     return GroceryItemRead.model_validate(item, from_attributes=True)
 
 
@@ -37,18 +33,11 @@ def list_grocery_items(
 
 @router.patch("/{item_id}", response_model=GroceryItemRead)
 def update_grocery_item(item_id: int, payload: GroceryItemUpdate, session: SessionDep) -> GroceryItemRead:
-    item = session.get(GroceryItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Grocery item not found")
+    item = get_or_404(session, GroceryItem, item_id, detail="Grocery item not found")
 
     was_checked = item.checked
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(item, key, value)
-
-    item.updated_at = datetime.now(timezone.utc)
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    apply_updates(item, payload.model_dump(exclude_unset=True), touch=True)
+    item = save(session, item)
 
     if not was_checked and item.checked:
         sync_checked_grocery_item_to_pantry(session, item)
@@ -58,9 +47,7 @@ def update_grocery_item(item_id: int, payload: GroceryItemUpdate, session: Sessi
 
 @router.delete("/{item_id}")
 def delete_grocery_item(item_id: int, session: SessionDep) -> dict:
-    item = session.get(GroceryItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Grocery item not found")
+    item = get_or_404(session, GroceryItem, item_id, detail="Grocery item not found")
 
     # Keep sync table consistent (important with PostgreSQL FK checks).
     sync_rows = session.exec(
@@ -72,6 +59,5 @@ def delete_grocery_item(item_id: int, session: SessionDep) -> dict:
         # Flush these deletes first to satisfy FK constraints on PostgreSQL.
         session.commit()
 
-    session.delete(item)
-    session.commit()
+    delete(session, item)
     return {"ok": True, "deleted_id": item_id}

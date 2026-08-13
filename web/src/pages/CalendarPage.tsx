@@ -49,6 +49,9 @@ import DraggableCalendarItem, {
 import CalendarFeedPanel from "../components/CalendarFeedPanel";
 import { useTaskStore } from "../store/taskStore";
 import type { TaskItem as Task, TaskScheduleMode } from "../store/taskStore";
+import { useCalendarStore } from "../store/calendarStore";
+import { useFitnessStore } from "../store/fitnessStore";
+import { useRecipeStore } from "../store/recipeStore";
 
 export type { Task };
 
@@ -790,7 +793,14 @@ function TaskEditorModal({
 export default function CalendarPage() {
   const { tasks, fetchTasks, updateTask, deleteTask, toggleTask } =
     useTaskStore();
-  const [calendarItems, setCalendarItems] = useState<CalendarItem[]>([]);
+  const {
+    items: calendarItems,
+    fetchItems: fetchCalendarItems,
+    updateItem: updateCalendarItemStore,
+    deleteItem: deleteCalendarItemStore,
+  } = useCalendarStore();
+  const { updateSession: updateFitnessSession } = useFitnessStore();
+  const { updateMealPlan } = useRecipeStore();
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [activeCalendarItem, setActiveCalendarItem] =
     useState<CalendarItem | null>(null);
@@ -827,21 +837,13 @@ export default function CalendarPage() {
   const calendarWindow = getCalendarWindow(currentDate, view);
 
   const loadCalendarItems = useCallback(async () => {
-    try {
-      const response = await api.get("/calendar/items", {
-        params: {
-          from_at: calendarWindow.fromAt,
-          to_at: calendarWindow.toAt,
-          include_completed: true,
-          limit: 1000,
-        },
-      });
-      setCalendarItems(response.data);
-    } catch (error) {
-      console.error("Failed to load calendar items", error);
-      setCalendarItems([]);
-    }
-  }, [calendarWindow.fromAt, calendarWindow.toAt]);
+    await fetchCalendarItems({
+      from_at: calendarWindow.fromAt,
+      to_at: calendarWindow.toAt,
+      include_completed: true,
+      limit: 1000,
+    });
+  }, [calendarWindow.fromAt, calendarWindow.toAt, fetchCalendarItems]);
 
   useEffect(() => {
     fetchTasks();
@@ -1168,21 +1170,21 @@ export default function CalendarPage() {
               }
               break;
             case "manual":
-              await api.patch(`/calendar/items/${item.id}`, {
+              await updateCalendarItemStore(item.id, {
                 start_at: startAt.toISOString(), // Assuming parseLocalDateTime adds 'Z' making it UTC
                 end_at: endAt.toISOString(),
               });
               break;
             case "meal_plan":
               if (item.source_ref_id !== null) {
-                await api.patch(`/meal-plans/${item.source_ref_id}`, {
+                await updateMealPlan(item.source_ref_id, {
                   planned_at: startAt.toISOString(),
                 });
               }
               break;
             case "fitness_session":
               if (item.source_ref_id !== null) {
-                await api.patch(`/fitness/sessions/${item.source_ref_id}`, {
+                await updateFitnessSession(item.source_ref_id, {
                   planned_at: startAt.toISOString(),
                   duration_minutes: duration,
                 });
@@ -1223,6 +1225,9 @@ export default function CalendarPage() {
       fetchTasks,
       hasScheduleOverlap,
       loadCalendarItems,
+      updateCalendarItemStore,
+      updateFitnessSession,
+      updateMealPlan,
     ],
   );
 
@@ -1407,8 +1412,7 @@ export default function CalendarPage() {
 
   const deleteCalendarItem = async (itemId: number) => {
     try {
-      await api.delete(`/calendar/items/${itemId}`);
-      await loadCalendarItems();
+      await deleteCalendarItemStore(itemId);
       closeCalendarItemEditor();
     } catch (err) {
       console.error("Failed to delete item", err);

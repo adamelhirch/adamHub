@@ -4,6 +4,7 @@ Use for workout planning, session execution tracking, and body measurements.
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `fitness.overview`
 - `fitness.list_sessions`
 - `fitness.create_session`
@@ -14,6 +15,7 @@ Use for workout planning, session execution tracking, and body measurements.
 - `fitness.add_measurement`
 - `fitness.update_measurement`
 - `fitness.delete_measurement`
+<!-- END GENERATED: action-list -->
 
 ## Rules
 

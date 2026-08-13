@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from sqlmodel import select
 
+from app.api._crud import apply_updates, create, delete, save
 from app.models import (
     Account,
     Budget,
@@ -106,6 +107,7 @@ from app.services.meal_planning import (
     unconfirm_meal_plan_cooked,
 )
 from app.services.calendar_hub import (
+    apply_task_update,
     build_calendar_item_read,
     list_due_reminders,
     sync_generated_calendar_items,
@@ -374,9 +376,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         data = TaskCreate.model_validate(payload)
         task = Task(**data.model_dump())
         validate_task_schedule_free(session, task)
-        session.add(task)
-        session.commit()
-        session.refresh(task)
+        task = create(session, task)
         return {"task": task.model_dump(mode="json")}
 
     if action == "task.list":
@@ -403,34 +403,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No task fields to update")
 
-        if "due_at" in updates and "schedule_mode" not in updates:
-            updates["schedule_mode"] = (
-                TaskScheduleMode.ONCE if updates["due_at"] is not None else TaskScheduleMode.NONE
-            )
-
-        if "schedule_mode" in updates:
-            mode = updates["schedule_mode"]
-            if mode == TaskScheduleMode.NONE:
-                updates["due_at"] = None
-                updates["schedule_time"] = None
-                updates["schedule_weekday"] = None
-            elif mode == TaskScheduleMode.ONCE:
-                updates["schedule_time"] = None
-                updates["schedule_weekday"] = None
-            elif mode == TaskScheduleMode.DAILY:
-                updates["due_at"] = None
-                updates["schedule_weekday"] = None
-            elif mode == TaskScheduleMode.WEEKLY:
-                updates["due_at"] = None
-
-        for key, value in updates.items():
-            setattr(task, key, value)
-
-        if task.schedule_mode == TaskScheduleMode.NONE and task.due_at is not None:
-            task.schedule_mode = TaskScheduleMode.ONCE
-
-        if task.schedule_mode == TaskScheduleMode.ONCE and task.due_at is None:
-            task.schedule_mode = TaskScheduleMode.NONE
+        apply_task_update(task, updates)
 
         validate_task_schedule_free(session, task, ignore_task_id=task.id)
         task.updated_at = now
@@ -447,9 +420,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             raise ValueError("task_id not found")
         task.status = TaskStatus.DONE
         task.updated_at = now
-        session.add(task)
-        session.commit()
-        session.refresh(task)
+        task = save(session, task)
         return {"task": task.model_dump(mode="json")}
 
     if action == "finance.add_transaction":
@@ -457,9 +428,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         tx = FinanceTransaction(**data.model_dump())
         if tx.occurred_at is None:
             tx.occurred_at = now
-        session.add(tx)
-        session.commit()
-        session.refresh(tx)
+        tx = create(session, tx)
         return {"transaction": tx.model_dump(mode="json")}
 
     if action == "finance.list_transactions":
@@ -490,10 +459,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         data = BudgetCreate.model_validate(payload)
         if len(data.month) != 7 or data.month[4] != "-":
             raise ValueError("month must be in format YYYY-MM")
-        budget = Budget(**data.model_dump())
-        session.add(budget)
-        session.commit()
-        session.refresh(budget)
+        budget = create(session, Budget(**data.model_dump()))
         return {"budget": budget.model_dump(mode="json")}
 
     if action == "finance.list_budgets":
@@ -620,8 +586,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         row = session.get(FitnessSession, session_id)
         if not row:
             raise ValueError("session_id not found")
-        session.delete(row)
-        session.commit()
+        delete(session, row)
         return {"ok": True, "deleted_id": session_id}
 
     if action == "fitness.list_measurements":
@@ -648,9 +613,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             steps=data.steps,
             note=data.note.strip() if data.note else None,
         )
-        session.add(row)
-        session.commit()
-        session.refresh(row)
+        row = create(session, row)
         return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
 
     if action == "fitness.update_measurement":
@@ -671,13 +634,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if "recorded_at" in updates and updates["recorded_at"] is not None:
             updates["recorded_at"] = _ensure_utc(updates["recorded_at"])
 
-        for key, value in updates.items():
-            setattr(row, key, value)
-
-        row.updated_at = now
-        session.add(row)
-        session.commit()
-        session.refresh(row)
+        apply_updates(row, updates, touch=True)
+        row = save(session, row)
         return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
 
     if action == "fitness.delete_measurement":
@@ -685,16 +643,12 @@ def execute_action(action: str, payload: dict, session) -> dict:
         row = session.get(FitnessMeasurement, measurement_id)
         if not row:
             raise ValueError("measurement_id not found")
-        session.delete(row)
-        session.commit()
+        delete(session, row)
         return {"ok": True, "deleted_id": measurement_id}
 
     if action == "grocery.add_item":
         data = GroceryItemCreate.model_validate(payload)
-        item = GroceryItem(**data.model_dump())
-        session.add(item)
-        session.commit()
-        session.refresh(item)
+        item = create(session, GroceryItem(**data.model_dump()))
         return {"item": item.model_dump(mode="json")}
 
     if action == "supermarket.list_stores":
@@ -1090,13 +1044,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No grocery fields to update")
 
-        for key, value in updates.items():
-            setattr(item, key, value)
-        item.updated_at = now
-
-        session.add(item)
-        session.commit()
-        session.refresh(item)
+        apply_updates(item, updates, touch=True)
+        item = save(session, item)
         pantry_sync = None
         if not was_checked and item.checked:
             pantry_sync = sync_checked_grocery_item_to_pantry(session, item)
@@ -1111,9 +1060,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         was_checked = item.checked
         item.checked = checked
         item.updated_at = now
-        session.add(item)
-        session.commit()
-        session.refresh(item)
+        item = save(session, item)
         pantry_sync = None
         if not was_checked and item.checked:
             pantry_sync = sync_checked_grocery_item_to_pantry(session, item)
@@ -1131,8 +1078,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             session.delete(row)
         if sync_rows:
             session.commit()
-        session.delete(item)
-        session.commit()
+        delete(session, item)
         return {"ok": True, "deleted_id": item_id}
 
     if action == "video.fetch":
@@ -1547,14 +1493,14 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not habit:
             raise ValueError("habit_id not found")
 
-        log = HabitLog(
-            habit_id=habit_id,
-            value=int(payload.get("value", 1)),
-            note=payload.get("note"),
+        log = create(
+            session,
+            HabitLog(
+                habit_id=habit_id,
+                value=int(payload.get("value", 1)),
+                note=payload.get("note"),
+            ),
         )
-        session.add(log)
-        session.commit()
-        session.refresh(log)
 
         streak = update_habit_streak(session, habit_id)
         return {"log": log.model_dump(mode="json"), "streak": streak}
@@ -1576,10 +1522,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "goal.create":
         data = GoalCreate.model_validate(payload)
-        goal = Goal(**data.model_dump())
-        session.add(goal)
-        session.commit()
-        session.refresh(goal)
+        goal = create(session, Goal(**data.model_dump()))
         return {"goal": goal.model_dump(mode="json")}
 
     if action == "goal.list":
@@ -1608,13 +1551,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No goal fields to update")
 
-        for key, value in updates.items():
-            setattr(goal, key, value)
-        goal.updated_at = now
-
-        session.add(goal)
-        session.commit()
-        session.refresh(goal)
+        apply_updates(goal, updates, touch=True)
+        goal = save(session, goal)
         return {"goal": goal.model_dump(mode="json")}
 
     if action == "goal.add_milestone":
@@ -1624,10 +1562,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             raise ValueError("goal_id not found")
 
         data = GoalMilestoneCreate.model_validate({k: v for k, v in payload.items() if k != "goal_id"})
-        milestone = GoalMilestone(goal_id=goal_id, **data.model_dump())
-        session.add(milestone)
-        session.commit()
-        session.refresh(milestone)
+        milestone = create(session, GoalMilestone(goal_id=goal_id, **data.model_dump()))
         return {"milestone": milestone.model_dump(mode="json")}
 
     if action == "goal.list_milestones":
@@ -1663,16 +1598,13 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No milestone fields to update")
 
-        for key, value in updates.items():
-            setattr(milestone, key, value)
+        apply_updates(milestone, updates)
         if patch.completed is True and milestone.completed_at is None:
             milestone.completed_at = now
         if patch.completed is False:
             milestone.completed_at = None
 
-        session.add(milestone)
-        session.commit()
-        session.refresh(milestone)
+        milestone = save(session, milestone)
         return {"milestone": milestone.model_dump(mode="json")}
 
     if action == "event.create":
@@ -1740,8 +1672,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         event = session.get(CalendarEvent, event_id)
         if not event:
             raise ValueError("event_id not found")
-        session.delete(event)
-        session.commit()
+        delete(session, event)
         return {"ok": True, "deleted_id": event_id}
 
     if action == "subscription.create":
@@ -1825,10 +1756,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "patrimony.add_account":
         data = AccountCreate.model_validate(payload)
-        row = Account(**data.model_dump())
-        session.add(row)
-        session.commit()
-        session.refresh(row)
+        row = create(session, Account(**data.model_dump()))
         return {"account": _build_account_read_payload(row)}
 
     if action == "patrimony.update_account":
@@ -1842,12 +1770,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         updates = patch.model_dump(exclude_unset=True)
         if not updates:
             raise ValueError("No patrimony account fields to update")
-        for key, value in updates.items():
-            setattr(row, key, value)
-        row.updated_at = now
-        session.add(row)
-        session.commit()
-        session.refresh(row)
+        apply_updates(row, updates, touch=True)
+        row = save(session, row)
         return {"account": _build_account_read_payload(row)}
 
     if action == "patrimony.delete_account":
@@ -1855,8 +1779,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         row = session.get(Account, account_id)
         if not row:
             raise ValueError("account_id not found")
-        session.delete(row)
-        session.commit()
+        delete(session, row)
         return {"ok": True, "deleted_id": account_id}
 
     if action == "patrimony.list_goals":
@@ -1874,10 +1797,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "patrimony.add_goal":
         data = SavingsGoalCreate.model_validate(payload)
-        row = SavingsGoal(**data.model_dump())
-        session.add(row)
-        session.commit()
-        session.refresh(row)
+        row = create(session, SavingsGoal(**data.model_dump()))
         accounts_by_id = {
             account.id: account
             for account in session.exec(select(Account)).all()
@@ -1896,12 +1816,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         updates = patch.model_dump(exclude_unset=True)
         if not updates:
             raise ValueError("No patrimony goal fields to update")
-        for key, value in updates.items():
-            setattr(row, key, value)
-        row.updated_at = now
-        session.add(row)
-        session.commit()
-        session.refresh(row)
+        apply_updates(row, updates, touch=True)
+        row = save(session, row)
         accounts_by_id = {
             account.id: account
             for account in session.exec(select(Account)).all()
@@ -1914,16 +1830,12 @@ def execute_action(action: str, payload: dict, session) -> dict:
         row = session.get(SavingsGoal, goal_id)
         if not row:
             raise ValueError("goal_id not found")
-        session.delete(row)
-        session.commit()
+        delete(session, row)
         return {"ok": True, "deleted_id": goal_id}
 
     if action == "pantry.add_item":
         data = PantryItemCreate.model_validate(payload)
-        item = PantryItem(**data.model_dump())
-        session.add(item)
-        session.commit()
-        session.refresh(item)
+        item = create(session, PantryItem(**data.model_dump()))
         return {"item": item.model_dump(mode="json")}
 
     if action == "pantry.list_items":
@@ -1953,13 +1865,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No pantry fields to update")
 
-        for key, value in updates.items():
-            setattr(item, key, value)
-        item.updated_at = now
-
-        session.add(item)
-        session.commit()
-        session.refresh(item)
+        apply_updates(item, updates, touch=True)
+        item = save(session, item)
         return {"item": item.model_dump(mode="json")}
 
     if action == "pantry.consume_item":
@@ -1974,9 +1881,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
         item.quantity = max(0.0, item.quantity - amount)
         item.updated_at = now
-        session.add(item)
-        session.commit()
-        session.refresh(item)
+        item = save(session, item)
         return {"item": item.model_dump(mode="json")}
 
     if action == "pantry.delete_item":
@@ -1991,8 +1896,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             session.delete(row)
         if sync_rows:
             session.commit()
-        session.delete(item)
-        session.commit()
+        delete(session, item)
         return {"ok": True, "deleted_id": item_id}
 
     if action == "pantry.overview":
@@ -2002,10 +1906,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "note.create":
         data = NoteCreate.model_validate(payload)
-        note = Note(**data.model_dump())
-        session.add(note)
-        session.commit()
-        session.refresh(note)
+        note = create(session, Note(**data.model_dump()))
         return {"note": note.model_dump(mode="json")}
 
     if action == "note.list":
@@ -2045,12 +1946,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not updates:
             raise ValueError("No note fields to update")
 
-        for key, value in updates.items():
-            setattr(note, key, value)
-        note.updated_at = now
-        session.add(note)
-        session.commit()
-        session.refresh(note)
+        apply_updates(note, updates, touch=True)
+        note = save(session, note)
         return {"note": note.model_dump(mode="json")}
 
     if action == "note.delete":
@@ -2059,8 +1956,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not note:
             raise ValueError("note_id not found")
 
-        session.delete(note)
-        session.commit()
+        delete(session, note)
         return {"ok": True, "deleted_id": note_id}
 
     if action == "note.journal":

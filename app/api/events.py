@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
+from app.api._crud import delete, get_or_404
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import CalendarEvent, CalendarSource, EventType
@@ -75,9 +76,7 @@ def list_upcoming_events(
 
 @router.get("/{event_id}", response_model=EventRead)
 def get_event(event_id: int, session: SessionDep) -> EventRead:
-    event = session.get(CalendarEvent, event_id)
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
+    event = get_or_404(session, CalendarEvent, event_id, detail="Event not found")
     return EventRead.model_validate(event, from_attributes=True)
 
 
@@ -113,10 +112,6 @@ def update_event(event_id: int, payload: EventUpdate, session: SessionDep) -> Ev
 
 @router.delete("/{event_id}")
 def delete_event(event_id: int, session: SessionDep) -> dict:
-    event = session.get(CalendarEvent, event_id)
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-
-    session.delete(event)
-    session.commit()
+    event = get_or_404(session, CalendarEvent, event_id, detail="Event not found")
+    delete(session, event)
     return {"ok": True, "deleted_id": event_id}

@@ -4,6 +4,7 @@ Use for recipe storage, transcript-to-recipe drafting, and pantry-aware cooking 
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `video.fetch`
 - `recipe.add`
 - `recipe.list`
@@ -12,9 +13,14 @@ Use for recipe storage, transcript-to-recipe drafting, and pantry-aware cooking 
 - `recipe.confirm_cooked`
 - `recipe.delete`
 - `meal_plan.add`
+- `meal_plan.log_cooked`
+- `meal_plan.list`
+- `meal_plan.update`
+- `meal_plan.delete`
+- `meal_plan.sync_groceries`
 - `meal_plan.confirm_cooked`
 - `meal_plan.unconfirm_cooked`
-- `supermarket.search`
+<!-- END GENERATED: action-list -->
 
 ## Decision rules
 
@@ -22,7 +28,7 @@ Use for recipe storage, transcript-to-recipe drafting, and pantry-aware cooking 
 - Read full details with `recipe.get`.
 - Edit an existing recipe with `recipe.update`.
 - If transcript input is available, call `video.fetch` first, then structure the recipe yourself.
-- If the user wants ingredients tied to a store product, call `supermarket.search` first.
+- If the user wants ingredients tied to a store product, call `supermarket.search` first (owned by the groceries skill).
 - Use `meal_plan.add` for future cooking.
 - Use `recipe.confirm_cooked` only when the recipe was actually cooked without a meal plan.
 - Use `meal_plan.confirm_cooked` when the cooked recipe came from a planned slot.
