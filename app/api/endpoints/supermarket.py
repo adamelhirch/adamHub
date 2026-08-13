@@ -184,11 +184,15 @@ def import_connection_endpoint(
 def activate_connection_endpoint(
     connection_id: int, session: SessionDep, user: OptionalUser
 ) -> SupermarketConnectionRead:
+    # Check ownership BEFORE mutating: activating deactivates every other active
+    # connection for that store, so a cross-user 403 must not leave side effects.
+    if user:
+        existing = session.get(SupermarketConnection, connection_id)
+        if existing and existing.user_id and existing.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Cette connexion appartient à un autre compte")
     connection = activate_supermarket_connection(session, connection_id)
     if connection is None:
         raise HTTPException(status_code=404, detail="Connection not found")
-    if user and connection.user_id and connection.user_id != user.id:
-        raise HTTPException(status_code=403, detail="Cette connexion appartient à un autre compte")
     return _connection_to_read(connection)
 
 
