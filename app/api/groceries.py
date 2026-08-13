@@ -6,14 +6,18 @@ from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import GroceryItem, GroceryPantrySync
 from app.schemas import GroceryItemCreate, GroceryItemRead, GroceryItemUpdate
-from app.services.grocery_pantry import sync_checked_grocery_item_to_pantry
+from app.services.grocery_pantry import (
+    resolve_store_metadata,
+    sync_checked_grocery_item_to_pantry,
+    unsync_checked_grocery_item_from_pantry,
+)
 
 router = APIRouter(prefix="/groceries", tags=["groceries"], dependencies=[Depends(require_api_key)])
 
 
 @router.post("", response_model=GroceryItemRead)
 def create_grocery_item(payload: GroceryItemCreate, session: SessionDep) -> GroceryItemRead:
-    item = create(session, GroceryItem(**payload.model_dump()))
+    item = create(session, GroceryItem(**resolve_store_metadata(session, payload.model_dump())))
     return GroceryItemRead.model_validate(item, from_attributes=True)
 
 
@@ -36,11 +40,16 @@ def update_grocery_item(item_id: int, payload: GroceryItemUpdate, session: Sessi
     item = get_or_404(session, GroceryItem, item_id, detail="Grocery item not found")
 
     was_checked = item.checked
-    apply_updates(item, payload.model_dump(exclude_unset=True), touch=True)
+    updates = payload.model_dump(exclude_unset=True)
+    if "cache_id" in updates:
+        updates = resolve_store_metadata(session, updates)
+    apply_updates(item, updates, touch=True)
     item = save(session, item)
 
     if not was_checked and item.checked:
         sync_checked_grocery_item_to_pantry(session, item)
+    elif was_checked and not item.checked:
+        unsync_checked_grocery_item_from_pantry(session, item)
 
     return GroceryItemRead.model_validate(item, from_attributes=True)
 
