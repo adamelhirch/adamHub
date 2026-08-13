@@ -103,6 +103,7 @@ from app.services.meal_planning import (
     compute_recipe_missing_ingredients,
     consume_recipe_ingredients,
     confirm_meal_plan_cooked,
+    reset_meal_plan_cook_confirmation,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
 )
@@ -1263,11 +1264,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if plan.planned_for is None:
             plan.planned_for = plan.planned_at.date()
         if reset_cook_confirmation:
-            confirmation = session.exec(
-                select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
-            ).first()
-            if confirmation:
-                session.delete(confirmation)
+            reset_meal_plan_cook_confirmation(session, plan)
         plan.updated_at = now
         session.add(plan)
         session.commit()

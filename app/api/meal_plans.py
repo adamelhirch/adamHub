@@ -18,6 +18,7 @@ from app.schemas import (
 from app.services.meal_planning import (
     build_meal_plan_read,
     confirm_meal_plan_cooked,
+    reset_meal_plan_cook_confirmation,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
 )
@@ -142,11 +143,7 @@ def update_meal_plan(meal_plan_id: int, payload: MealPlanUpdate, session: Sessio
         meal_plan.planned_for = meal_plan.planned_at.date()
 
     if reset_cook_confirmation:
-        confirmation = session.exec(
-            select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
-        ).first()
-        if confirmation:
-            session.delete(confirmation)
+        reset_meal_plan_cook_confirmation(session, meal_plan)
 
     meal_plan.updated_at = datetime.now(timezone.utc)
     session.add(meal_plan)

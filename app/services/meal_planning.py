@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
@@ -20,6 +21,18 @@ _UNIT_BASE: dict[str, tuple[str, float]] = {
     "l": ("ml", 1000.0),
     "ml": ("ml", 1.0),
 }
+
+
+@dataclass
+class ConsumptionResult:
+    """Outcome of consuming a recipe's ingredients from the pantry.
+
+    summary: per-ingredient aggregates (name/unit/required/consumed/missing).
+    lots: per-pantry-item consumption records used to reverse stock exactly on unconfirm.
+    """
+
+    summary: list[dict] = field(default_factory=list)
+    lots: list[dict] = field(default_factory=list)
 
 
 def _normalize_name(value: str) -> str:
@@ -170,10 +183,11 @@ def consume_recipe_ingredients(
     session: Session,
     recipe: Recipe,
     servings_override: int | None = None,
-) -> list[dict]:
+) -> ConsumptionResult:
     pantry_items = session.exec(select(PantryItem)).all()
     now = datetime.now(timezone.utc)
-    consumption: list[dict] = []
+    summary: list[dict] = []
+    lots: list[dict] = []
 
     for ingredient, needed_qty_raw, needed_base, base_unit in _scaled_recipe_ingredients(
         session, recipe, servings_override
@@ -207,10 +221,18 @@ def consume_recipe_ingredients(
 
             consumed_base += consume_base
             remaining -= consume_base
+            lots.append(
+                {
+                    "name": ingredient.name,
+                    "unit": ingredient.unit or "item",
+                    "pantry_item_id": item.id,
+                    "consumed_quantity": round(max(0.0, _from_base(consume_base, ingredient.unit or "item")), 3),
+                }
+            )
 
         consumed_raw = _from_base(consumed_base, ingredient.unit or "item")
         missing_raw = _from_base(max(0.0, remaining), ingredient.unit or "item")
-        consumption.append(
+        summary.append(
             {
                 "name": ingredient.name,
                 "unit": ingredient.unit or "item",
@@ -221,7 +243,7 @@ def consume_recipe_ingredients(
         )
 
     session.commit()
-    return consumption
+    return ConsumptionResult(summary=summary, lots=lots)
 
 
 def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
@@ -280,12 +302,14 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
     ).first()
     if existing:
+        stored = existing.pantry_consumption or []
+        summary = stored.get("summary") if isinstance(stored, dict) else stored
         return {
             "meal_plan_id": meal_plan.id,
             "already_confirmed": True,
             "confirmed_at": existing.confirmed_at,
             "note": existing.note,
-            "pantry_consumption": existing.pantry_consumption or [],
+            "pantry_consumption": summary or [],
         }
 
     recipe = session.get(Recipe, meal_plan.recipe_id)
@@ -299,7 +323,7 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         meal_plan_id=meal_plan.id,
         confirmed_at=now,
         note=note,
-        pantry_consumption=consumption,
+        pantry_consumption={"summary": consumption.summary, "lots": consumption.lots},
     )
     session.add(confirmation)
     meal_plan.updated_at = now
@@ -312,7 +336,74 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         "already_confirmed": False,
         "confirmed_at": confirmation.confirmed_at,
         "note": confirmation.note,
-        "pantry_consumption": consumption,
+        "pantry_consumption": consumption.summary,
+    }
+
+
+def _restore_consumption_lot(
+    session: Session,
+    pantry_items: list[PantryItem],
+    row: dict,
+    meal_plan_id: int,
+    now: datetime,
+) -> dict | None:
+    """Restore one consumption lot back into the exact pantry row that was consumed.
+
+    Falls back to a name/unit heuristic (and finally to creating a fresh pantry row)
+    for legacy confirmation records that predate per-lot tracking.
+    """
+    name = str(row.get("name") or "").strip()
+    unit = str(row.get("unit") or "item")
+    consumed_quantity = float(row.get("consumed_quantity") or 0.0)
+    if not name or consumed_quantity <= 0:
+        return None
+
+    target: PantryItem | None = None
+    pantry_item_id = row.get("pantry_item_id")
+    if pantry_item_id is not None:
+        target = next((item for item in pantry_items if item.id == pantry_item_id), None)
+
+    if target is None:
+        consumed_base, base_unit = _to_base(consumed_quantity, unit)
+        normalized_name = _normalize_name(name)
+        matching = [
+            item
+            for item in pantry_items
+            if _normalize_name(item.name) == normalized_name
+            and _unit_meta(item.unit or "item")[0] == base_unit
+        ]
+        matching.sort(key=lambda x: x.updated_at, reverse=True)
+        target = matching[0] if matching else None
+
+    if target:
+        restore_in_item_unit = _from_base(_to_base(consumed_quantity, unit)[0], target.unit or "item")
+        target.quantity = round((target.quantity or 0.0) + restore_in_item_unit, 3)
+        target.updated_at = now
+        session.add(target)
+        return {
+            "name": name,
+            "unit": target.unit or "item",
+            "restored_quantity": round(max(0.0, restore_in_item_unit), 3),
+            "pantry_item_id": target.id,
+        }
+
+    created = PantryItem(
+        name=name,
+        quantity=round(max(0.0, consumed_quantity), 3),
+        unit=unit or "item",
+        category="meal-plan",
+        min_quantity=0,
+        note=f"rollback meal #{meal_plan_id}",
+        updated_at=now,
+    )
+    session.add(created)
+    session.flush()
+    pantry_items.append(created)
+    return {
+        "name": name,
+        "unit": created.unit,
+        "restored_quantity": round(max(0.0, consumed_quantity), 3),
+        "pantry_item_id": created.id,
     }
 
 
@@ -331,60 +422,17 @@ def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
 
     now = datetime.now(timezone.utc)
     pantry_items = session.exec(select(PantryItem)).all()
+    stored = confirmation.pantry_consumption or []
+    if isinstance(stored, dict):
+        lots = stored.get("lots") or []
+    else:
+        lots = stored
+
     restored: list[dict] = []
-    for row in confirmation.pantry_consumption or []:
-        name = str(row.get("name") or "").strip()
-        unit = str(row.get("unit") or "item")
-        consumed_quantity = float(row.get("consumed_quantity") or 0.0)
-        if not name or consumed_quantity <= 0:
-            continue
-
-        consumed_base, base_unit = _to_base(consumed_quantity, unit)
-        normalized_name = _normalize_name(name)
-        matching = [
-            item
-            for item in pantry_items
-            if _normalize_name(item.name) == normalized_name
-            and _unit_meta(item.unit or "item")[0] == base_unit
-        ]
-        matching.sort(key=lambda x: x.updated_at, reverse=True)
-        target = matching[0] if matching else None
-
-        if target:
-            restore_in_item_unit = _from_base(consumed_base, target.unit or "item")
-            target.quantity = round((target.quantity or 0.0) + restore_in_item_unit, 3)
-            target.updated_at = now
-            session.add(target)
-            restored.append(
-                {
-                    "name": name,
-                    "unit": target.unit or "item",
-                    "restored_quantity": round(max(0.0, restore_in_item_unit), 3),
-                    "pantry_item_id": target.id,
-                }
-            )
-            continue
-
-        created = PantryItem(
-            name=name,
-            quantity=round(max(0.0, consumed_quantity), 3),
-            unit=unit or "item",
-            category="meal-plan",
-            min_quantity=0,
-            note=f"rollback meal #{meal_plan.id}",
-            updated_at=now,
-        )
-        session.add(created)
-        session.flush()
-        pantry_items.append(created)
-        restored.append(
-            {
-                "name": name,
-                "unit": created.unit,
-                "restored_quantity": round(max(0.0, consumed_quantity), 3),
-                "pantry_item_id": created.id,
-            }
-        )
+    for row in lots:
+        entry = _restore_consumption_lot(session, pantry_items, row, meal_plan.id, now)
+        if entry:
+            restored.append(entry)
 
     previous_confirmed_at = confirmation.confirmed_at
     previous_note = confirmation.note
@@ -400,3 +448,17 @@ def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
         "note": previous_note,
         "pantry_restore": restored,
     }
+
+
+def reset_meal_plan_cook_confirmation(session: Session, meal_plan: MealPlan) -> dict | None:
+    """Undo a meal plan's cook confirmation (restoring pantry stock) if one exists.
+
+    Returns the unconfirm result dict when a confirmation was present, else None.
+    Used when editing a confirmed meal plan invalidates its confirmation.
+    """
+    confirmation = session.exec(
+        select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
+    ).first()
+    if not confirmation:
+        return None
+    return unconfirm_meal_plan_cooked(session, meal_plan)
