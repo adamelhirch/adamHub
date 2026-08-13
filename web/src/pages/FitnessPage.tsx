@@ -12,68 +12,15 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import api from '../lib/api';
-
-type FitnessSessionType = 'strength' | 'cardio' | 'mobility' | 'recovery' | 'mixed';
-type FitnessSessionStatus = 'planned' | 'completed' | 'skipped';
-type FitnessExerciseMode = 'reps' | 'duration';
-
-type FitnessSession = {
-  id: number;
-  title: string;
-  session_type: FitnessSessionType;
-  planned_at: string;
-  duration_minutes: number;
-  exercises: FitnessExercise[];
-  note: string | null;
-  status: FitnessSessionStatus;
-  completed_at: string | null;
-  actual_duration_minutes: number | null;
-  effort_rating: number | null;
-  calories_burned: number | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type FitnessExercise = {
-  name: string;
-  mode: FitnessExerciseMode;
-  reps: number | null;
-  duration_minutes: number | null;
-  note: string | null;
-};
-
-type FitnessMeasurement = {
-  id: number;
-  recorded_at: string;
-  body_weight_kg: number | null;
-  body_fat_pct: number | null;
-  resting_hr: number | null;
-  sleep_hours: number | null;
-  steps: number | null;
-  note: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type FitnessStats = {
-  planned_sessions: number;
-  upcoming_sessions: number;
-  completed_sessions_30d: number;
-  completion_rate_30d: number;
-  avg_duration_minutes: number | null;
-  latest_body_weight_kg: number | null;
-  body_weight_delta_30d: number | null;
-  latest_resting_hr: number | null;
-  latest_sleep_hours: number | null;
-};
-
-type FitnessOverview = {
-  stats: FitnessStats;
-  upcoming_sessions: FitnessSession[];
-  recent_sessions: FitnessSession[];
-  measurements: FitnessMeasurement[];
-};
+import { useFitnessStore } from '../store/fitnessStore';
+import type {
+  FitnessSessionType,
+  FitnessSessionStatus,
+  FitnessExerciseMode,
+  FitnessSession,
+  FitnessExercise,
+  FitnessMeasurement,
+} from '../store/fitnessStore';
 
 const TAB_LIST = ['Stats', 'Séances', 'Mesures'] as const;
 type Tab = (typeof TAB_LIST)[number];
@@ -256,8 +203,19 @@ function StatCard({
 }
 
 export default function FitnessPage() {
-  const [overview, setOverview] = useState<FitnessOverview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const {
+    overview,
+    isLoading: loading,
+    fetchOverview,
+    createSession,
+    updateSession,
+    completeSession: completeSessionAction,
+    undoSession: undoSessionAction,
+    deleteSession: deleteSessionAction,
+    createMeasurement,
+    updateMeasurement,
+    deleteMeasurement: deleteMeasurementAction,
+  } = useFitnessStore();
   const [activeTab, setActiveTab] = useState<Tab>('Stats');
   const [sessionForm, setSessionForm] = useState<SessionFormState>(EMPTY_SESSION_FORM);
   const [exerciseDrafts, setExerciseDrafts] = useState<DraftItem[]>([createDraftItem()]);
@@ -273,19 +231,9 @@ export default function FitnessPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadOverview = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/fitness');
-      setOverview(res.data);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    void loadOverview();
-  }, []);
+    void fetchOverview();
+  }, [fetchOverview]);
 
   const resetSessionEditor = () => {
     setEditingSessionId(null);
@@ -444,14 +392,13 @@ export default function FitnessPage() {
 
       setSessionSaving(true);
       if (editingSessionId !== null) {
-        await api.patch(`/fitness/sessions/${editingSessionId}`, payload);
+        await updateSession(editingSessionId, payload);
         setFeedback('Séance modifiée.');
       } else {
-        await api.post('/fitness/sessions', payload);
+        await createSession(payload);
         setFeedback('Séance planifiée.');
       }
       resetSessionEditor();
-      await loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible d’enregistrer la séance.');
     } finally {
@@ -464,9 +411,8 @@ export default function FitnessPage() {
     setError(null);
     setFeedback(null);
     try {
-      await api.post(`/fitness/sessions/${session.id}/complete`, {});
+      await completeSessionAction(session.id);
       setFeedback(`Séance "${session.title}" marquée comme terminée.`);
-      await loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible de terminer la séance.');
     } finally {
@@ -479,9 +425,8 @@ export default function FitnessPage() {
     setError(null);
     setFeedback(null);
     try {
-      await api.patch(`/fitness/sessions/${session.id}`, { status: 'planned' });
+      await undoSessionAction(session.id);
       setFeedback(`Séance "${session.title}" remise en planification.`);
-      await loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible d’annuler la séance.');
     } finally {
@@ -497,12 +442,11 @@ export default function FitnessPage() {
     setError(null);
     setFeedback(null);
     try {
-      await api.delete(`/fitness/sessions/${session.id}`);
+      await deleteSessionAction(session.id);
       if (editingSessionId === session.id) {
         resetSessionEditor();
       }
       setFeedback('Séance supprimée.');
-      await loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible de supprimer la séance.');
     } finally {
@@ -533,14 +477,13 @@ export default function FitnessPage() {
     setMeasurementSaving(true);
     try {
       if (editingMeasurementId !== null) {
-        await api.patch(`/fitness/measurements/${editingMeasurementId}`, payload);
+        await updateMeasurement(editingMeasurementId, payload);
         setFeedback('Mesure modifiée.');
       } else {
-        await api.post('/fitness/measurements', payload);
+        await createMeasurement(payload);
         setFeedback('Mesure enregistrée.');
       }
       resetMeasurementEditor();
-      await loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible d’enregistrer la mesure.');
     } finally {
@@ -556,12 +499,11 @@ export default function FitnessPage() {
     setError(null);
     setFeedback(null);
     try {
-      await api.delete(`/fitness/measurements/${measurement.id}`);
+      await deleteMeasurementAction(measurement.id);
       if (editingMeasurementId === measurement.id) {
         resetMeasurementEditor();
       }
       setFeedback('Mesure supprimée.');
-      await loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible de supprimer la mesure.');
     } finally {
