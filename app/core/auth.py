@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import bcrypt
 import jwt
 from fastapi import HTTPException, Request
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.models import User
@@ -112,3 +113,63 @@ def resolve_optional_user(request: Request, session: Session) -> User | None:
     if user is None or not user.is_active:
         return None
     return user
+
+
+def resolve_owner_user(session: Session) -> User:
+    """Resolve the legacy owner user configured via ADAMHUB_OWNER_EMAIL.
+
+    The owner is the single user all API-key-only traffic (the personal web
+    frontend) is scoped to. Raising a 500 here (instead of silently proceeding
+    with user_id=None) makes a missing or invalid owner config impossible to
+    ignore.
+    """
+    settings = get_settings()
+    owner_email = (settings.owner_email or "").strip().lower()
+    if not owner_email:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "ADAMHUB_OWNER_EMAIL is not configured. Set it to the email of "
+                "the user that API-key-only requests should be scoped to."
+            ),
+        )
+    user = session.exec(select(User).where(User.email == owner_email)).first()
+    if user is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"ADAMHUB_OWNER_EMAIL user '{owner_email}' does not exist. "
+                "Register that account first via POST /auth/register."
+            ),
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=500,
+            detail=f"ADAMHUB_OWNER_EMAIL user '{owner_email}' is inactive.",
+        )
+    return user
+
+
+def resolve_current_or_owner_user(request: Request, session: Session) -> User:
+    """Resolve the acting user for the multi-tenant domain routers.
+
+    Resolution order:
+    1. A valid JWT Bearer token -> that user.
+    2. A valid shared X-API-Key (legacy web frontend) -> the ADAMHUB_OWNER_EMAIL user.
+    3. Neither -> 401, exactly like require_api_key.
+    """
+    user = resolve_optional_user(request, session)
+    if user is not None:
+        return user
+
+    settings = get_settings()
+    x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
+    if x_api_key and any(
+        secrets.compare_digest(x_api_key, key) for key in settings.api_keys_list
+    ):
+        return resolve_owner_user(session)
+
+    raise HTTPException(
+        status_code=401,
+        detail="Missing API key or Bearer token",
+    )
