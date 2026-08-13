@@ -951,6 +951,7 @@ export default function GroceriesPage() {
       unit: newUnit || 'item',
       category: newCategory || undefined,
       image_url: selectedProduct?.image_url || undefined,
+      cache_id: selectedProduct?.cache_id || undefined,
       store_label: selectedProduct ? storeLabelFor(selectedProduct.store) : undefined,
       external_id: selectedProduct?.external_id || undefined,
       packaging: selectedProduct?.packaging || undefined,
@@ -982,6 +983,7 @@ export default function GroceriesPage() {
       unit: pUnit || 'item',
       category: pCategory || undefined,
       image_url: selectedPantryProduct?.image_url || undefined,
+      cache_id: selectedPantryProduct?.cache_id || undefined,
       store_label: selectedPantryProduct ? storeLabelFor(selectedPantryProduct.store) : undefined,
       external_id: selectedPantryProduct?.external_id || undefined,
       packaging: selectedPantryProduct?.packaging || undefined,
@@ -1040,17 +1042,28 @@ export default function GroceriesPage() {
       normalizeListKey(candidate.unit) === normalizeListKey(targetUnit)
     ));
 
+    // Store metadata must reference the cache row it came from; when the
+    // mapping carries no cache_id we omit those fields rather than
+    // re-submitting (the server rejects fabricated store metadata).
+    const storeCacheId = mapping?.cache_id ?? undefined;
+    const storeMetadata = storeCacheId
+      ? {
+          cache_id: storeCacheId,
+          store_label: mapping?.store_label ?? item.store_label ?? undefined,
+          external_id: mapping?.external_id ?? item.external_id ?? undefined,
+          price_text: mapping?.price_snapshot ?? item.price_text ?? undefined,
+          product_url: mapping?.product_url ?? item.product_url ?? undefined,
+        }
+      : {};
+
     if (existing) {
       await updateItem(existing.id, {
         quantity: Number((existing.quantity + targetQuantity).toFixed(2)),
         unit: targetUnit,
         category: existing.category ?? targetCategory,
         image_url: existing.image_url ?? targetImage,
-        store_label: existing.store_label ?? mapping?.store_label ?? item.store_label,
-        external_id: existing.external_id ?? mapping?.external_id ?? item.external_id,
+        ...storeMetadata,
         packaging: existing.packaging ?? mapping?.packaging_snapshot ?? item.packaging,
-        price_text: existing.price_text ?? mapping?.price_snapshot ?? item.price_text,
-        product_url: existing.product_url ?? mapping?.product_url ?? item.product_url,
         priority: Math.min(existing.priority, 2),
         note: existing.note ?? targetNote,
       });
@@ -1063,11 +1076,8 @@ export default function GroceriesPage() {
       unit: targetUnit,
       category: targetCategory ?? undefined,
       image_url: targetImage ?? undefined,
-      store_label: mapping?.store_label ?? item.store_label ?? undefined,
-      external_id: mapping?.external_id ?? item.external_id ?? undefined,
+      ...storeMetadata,
       packaging: mapping?.packaging_snapshot ?? item.packaging ?? undefined,
-      price_text: mapping?.price_snapshot ?? item.price_text ?? undefined,
-      product_url: mapping?.product_url ?? item.product_url ?? undefined,
       priority: 2,
       note: targetNote,
     });
@@ -1471,6 +1481,7 @@ export default function GroceriesPage() {
                   }}
                   onLink={async (product) => {
                     await updatePantryItem(mappingTarget.id, {
+                      cache_id: product.cache_id,
                       image_url: product.image_url ?? null,
                       store_label: storeLabelFor(product.store),
                       external_id: product.external_id ?? null,
