@@ -14,6 +14,25 @@ def get_or_404(session: Session, model: type[ModelT], object_id: int, *, detail:
     return obj
 
 
+def get_owned_or_404(
+    session: Session,
+    model: type[ModelT],
+    object_id: int,
+    *,
+    user_id: int,
+    detail: str,
+) -> ModelT:
+    """Fetch a row or 404 — including when it exists but belongs to another user.
+
+    A 404 (not 403) is used on purpose so we don't leak whether a row with that
+    id exists for a different tenant.
+    """
+    obj = session.get(model, object_id)
+    if obj is None or getattr(obj, "user_id", None) != user_id:
+        raise HTTPException(status_code=404, detail=detail)
+    return obj
+
+
 def create(session: Session, obj: ModelT) -> ModelT:
     session.add(obj)
     session.commit()

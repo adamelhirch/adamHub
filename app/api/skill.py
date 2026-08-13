@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.api.deps import SessionDep
+from app.core.auth import resolve_current_or_owner_user
 from app.core.config import get_settings
 from app.core.security import require_api_key
 from app.schemas import SkillExecuteRequest, SkillExecuteResponse
@@ -37,9 +38,15 @@ def skill_manifest() -> dict:
 
 
 @router.post("/execute", response_model=SkillExecuteResponse)
-def skill_execute(payload: SkillExecuteRequest, session: SessionDep) -> SkillExecuteResponse:
+def skill_execute(
+    payload: SkillExecuteRequest, session: SessionDep, request: Request
+) -> SkillExecuteResponse:
+    # The router-level require_api_key already authenticated the caller; resolve
+    # the acting user with the same dual-mode logic used by the domain routers so
+    # skill actions are scoped to the same tenant the HTTP calls are.
+    user = resolve_current_or_owner_user(request, session)
     try:
-        data = execute_action(payload.action, payload.input, session)
+        data = execute_action(payload.action, payload.input, session, user=user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

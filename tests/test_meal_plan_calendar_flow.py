@@ -131,11 +131,11 @@ def test_edit_confirmed_meal_plan_restores_pantry_stock(client, auth_headers):
     assert _pantry_qty(client, auth_headers, "Egg") == 5.0
 
 
-def test_confirm_unconfirm_cycle_preserves_pantry_lots(client, auth_headers, test_engine):
+def test_confirm_unconfirm_cycle_preserves_pantry_lots(client, auth_headers, test_engine, owner_id):
     now = datetime.now(timezone.utc)
     with Session(test_engine) as session:
-        session.add(PantryItem(name="Farine", quantity=300, unit="g", min_quantity=0, updated_at=now - timedelta(days=2)))
-        session.add(PantryItem(name="Farine", quantity=200, unit="g", min_quantity=0, updated_at=now - timedelta(days=1)))
+        session.add(PantryItem(name="Farine", quantity=300, unit="g", min_quantity=0, updated_at=now - timedelta(days=2), user_id=owner_id))
+        session.add(PantryItem(name="Farine", quantity=200, unit="g", min_quantity=0, updated_at=now - timedelta(days=1), user_id=owner_id))
         session.commit()
 
     recipe_id = _create_recipe(client, auth_headers, "Crepes", [{"name": "Farine", "quantity": 400, "unit": "g"}])

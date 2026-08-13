@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import or_
 from sqlmodel import Session, select
@@ -10,6 +10,7 @@ from app.models import (
     GroceryItem,
     MealPlan,
     MealPlanCookConfirmation,
+    MealSlot,
     PantryItem,
     Recipe,
     RecipeIngredient,
@@ -88,12 +89,47 @@ def _scaled_recipe_ingredients(
     return scaled
 
 
+def validate_meal_plan_slot_free(
+    session: Session,
+    *,
+    user_id: int,
+    planned_for: date,
+    slot: MealSlot | None,
+    exclude_plan_id: int | None = None,
+) -> None:
+    """Reject a meal plan only if the SAME user already plans a meal for the slot.
+
+    This replaces the generic cross-domain calendar overlap check for meal plans:
+    planning lunch must not be blocked by an unrelated task/event at the same hour.
+    Recipe.confirm_cooked marker plans are excluded — they are internal records of
+    a past cook, not scheduled meals.
+    """
+    statement = (
+        exclude_recipe_confirm_marker_plans(select(MealPlan))
+        .where(
+            MealPlan.user_id == user_id,
+            MealPlan.planned_for == planned_for,
+            MealPlan.slot == slot,
+        )
+    )
+    if exclude_plan_id is not None:
+        statement = statement.where(MealPlan.id != exclude_plan_id)
+    existing = session.exec(statement).first()
+    if existing is not None:
+        raise ValueError("Vous avez déjà un repas planifié pour ce créneau")
+
+
 def compute_recipe_missing_ingredients(
     session: Session,
     recipe: Recipe,
     servings_override: int | None = None,
+    *,
+    user_id: int | None = None,
 ) -> list[MissingIngredientRead]:
-    pantry = session.exec(select(PantryItem)).all()
+    statement = select(PantryItem)
+    if user_id is not None:
+        statement = statement.where(PantryItem.user_id == user_id)
+    pantry = session.exec(statement).all()
     pantry_stock: dict[tuple[str, str], float] = {}
     for item in pantry:
         key_name = _normalize_name(item.name)
@@ -134,11 +170,16 @@ def add_missing_to_grocery(
     session: Session,
     missing: list[MissingIngredientRead],
     note_prefix: str | None = None,
+    *,
+    user_id: int | None = None,
 ) -> int:
     if not missing:
         return 0
 
-    existing_unchecked = session.exec(select(GroceryItem).where(GroceryItem.checked == False)).all()  # noqa: E712
+    existing_statement = select(GroceryItem).where(GroceryItem.checked == False)  # noqa: E712
+    if user_id is not None:
+        existing_statement = existing_statement.where(GroceryItem.user_id == user_id)
+    existing_unchecked = session.exec(existing_statement).all()
     indexed: dict[tuple[str, str], GroceryItem] = {}
     for item in existing_unchecked:
         indexed[(_normalize_name(item.name), (item.unit or "item").strip().lower())] = item
@@ -173,6 +214,7 @@ def add_missing_to_grocery(
             checked=False,
             priority=2,
             note=f"{note_prefix}: {ing.name}" if note_prefix else None,
+            user_id=user_id,
         )
         session.add(created)
         indexed[key] = created
@@ -186,8 +228,13 @@ def consume_recipe_ingredients(
     session: Session,
     recipe: Recipe,
     servings_override: int | None = None,
+    *,
+    user_id: int | None = None,
 ) -> ConsumptionResult:
-    pantry_items = session.exec(select(PantryItem)).all()
+    statement = select(PantryItem)
+    if user_id is not None:
+        statement = statement.where(PantryItem.user_id == user_id)
+    pantry_items = session.exec(statement).all()
     now = datetime.now(timezone.utc)
     summary: list[dict] = []
     lots: list[dict] = []
@@ -249,7 +296,12 @@ def consume_recipe_ingredients(
     return ConsumptionResult(summary=summary, lots=lots)
 
 
-def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
+def build_meal_plan_read(
+    session: Session,
+    meal_plan: MealPlan,
+    *,
+    user_id: int | None = None,
+) -> MealPlanRead:
     confirmation = session.exec(
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
     ).first()
@@ -260,7 +312,9 @@ def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
         missing: list[MissingIngredientRead] = []
     else:
         recipe_name = recipe.name
-        missing = compute_recipe_missing_ingredients(session, recipe, meal_plan.servings_override)
+        missing = compute_recipe_missing_ingredients(
+            session, recipe, meal_plan.servings_override, user_id=user_id
+        )
 
     return MealPlanRead(
         id=meal_plan.id,
@@ -282,14 +336,21 @@ def build_meal_plan_read(session: Session, meal_plan: MealPlan) -> MealPlanRead:
     )
 
 
-def sync_meal_plan_to_grocery(session: Session, meal_plan: MealPlan) -> tuple[int, list[MissingIngredientRead]]:
+def sync_meal_plan_to_grocery(
+    session: Session,
+    meal_plan: MealPlan,
+    *,
+    user_id: int | None = None,
+) -> tuple[int, list[MissingIngredientRead]]:
     recipe = session.get(Recipe, meal_plan.recipe_id)
     if not recipe:
         return 0, []
 
-    missing = compute_recipe_missing_ingredients(session, recipe, meal_plan.servings_override)
+    missing = compute_recipe_missing_ingredients(
+        session, recipe, meal_plan.servings_override, user_id=user_id
+    )
     note_prefix = f"meal {meal_plan.planned_at.isoformat()}"
-    added = add_missing_to_grocery(session, missing, note_prefix=note_prefix)
+    added = add_missing_to_grocery(session, missing, note_prefix=note_prefix, user_id=user_id)
 
     meal_plan.synced_grocery_at = datetime.now(timezone.utc)
     meal_plan.updated_at = datetime.now(timezone.utc)
@@ -300,7 +361,13 @@ def sync_meal_plan_to_grocery(session: Session, meal_plan: MealPlan) -> tuple[in
     return added, missing
 
 
-def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | None = None) -> dict:
+def confirm_meal_plan_cooked(
+    session: Session,
+    meal_plan: MealPlan,
+    note: str | None = None,
+    *,
+    user_id: int | None = None,
+) -> dict:
     existing = session.exec(
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
     ).first()
@@ -320,7 +387,9 @@ def confirm_meal_plan_cooked(session: Session, meal_plan: MealPlan, note: str | 
         raise ValueError("recipe_id not found")
 
     now = datetime.now(timezone.utc)
-    consumption = consume_recipe_ingredients(session, recipe, meal_plan.servings_override)
+    consumption = consume_recipe_ingredients(
+        session, recipe, meal_plan.servings_override, user_id=user_id
+    )
 
     confirmation = MealPlanCookConfirmation(
         meal_plan_id=meal_plan.id,
@@ -349,6 +418,8 @@ def _restore_consumption_lot(
     row: dict,
     meal_plan_id: int,
     now: datetime,
+    *,
+    user_id: int | None = None,
 ) -> dict | None:
     """Restore one consumption lot back into the exact pantry row that was consumed.
 
@@ -398,6 +469,7 @@ def _restore_consumption_lot(
         min_quantity=0,
         note=f"rollback meal #{meal_plan_id}",
         updated_at=now,
+        user_id=user_id,
     )
     session.add(created)
     session.flush()
@@ -410,7 +482,12 @@ def _restore_consumption_lot(
     }
 
 
-def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
+def unconfirm_meal_plan_cooked(
+    session: Session,
+    meal_plan: MealPlan,
+    *,
+    user_id: int | None = None,
+) -> dict:
     confirmation = session.exec(
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
     ).first()
@@ -424,7 +501,10 @@ def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
         }
 
     now = datetime.now(timezone.utc)
-    pantry_items = session.exec(select(PantryItem)).all()
+    statement = select(PantryItem)
+    if user_id is not None:
+        statement = statement.where(PantryItem.user_id == user_id)
+    pantry_items = session.exec(statement).all()
     stored = confirmation.pantry_consumption or []
     if isinstance(stored, dict):
         lots = stored.get("lots") or []
@@ -433,7 +513,9 @@ def unconfirm_meal_plan_cooked(session: Session, meal_plan: MealPlan) -> dict:
 
     restored: list[dict] = []
     for row in lots:
-        entry = _restore_consumption_lot(session, pantry_items, row, meal_plan.id, now)
+        entry = _restore_consumption_lot(
+            session, pantry_items, row, meal_plan.id, now, user_id=user_id
+        )
         if entry:
             restored.append(entry)
 
@@ -499,6 +581,8 @@ def confirm_recipe_cooked(
     recipe: Recipe,
     servings_override: int | None = None,
     note: str | None = None,
+    *,
+    user_id: int | None = None,
 ) -> dict:
     """Confirm a recipe cooked without an explicit meal plan.
 
@@ -516,6 +600,7 @@ def confirm_recipe_cooked(
             servings_override=servings_override,
             note=RECIPE_CONFIRM_MARKER,
             auto_add_missing_ingredients=False,
+            user_id=user_id,
         )
         session.add(plan)
         session.commit()
@@ -534,8 +619,10 @@ def confirm_recipe_cooked(
             session.add(plan)
             session.commit()
 
-    missing = compute_recipe_missing_ingredients(session, recipe, plan.servings_override)
-    result = confirm_meal_plan_cooked(session, plan, note=note)
+    missing = compute_recipe_missing_ingredients(
+        session, recipe, plan.servings_override, user_id=user_id
+    )
+    result = confirm_meal_plan_cooked(session, plan, note=note, user_id=user_id)
     result["recipe_id"] = recipe.id
     result["recipe_name"] = recipe.name
     result["meal_plan_id"] = plan.id
@@ -543,7 +630,12 @@ def confirm_recipe_cooked(
     return result
 
 
-def unconfirm_recipe_cooked(session: Session, recipe: Recipe) -> dict:
+def unconfirm_recipe_cooked(
+    session: Session,
+    recipe: Recipe,
+    *,
+    user_id: int | None = None,
+) -> dict:
     """Undo a recipe-level cooked confirmation and restore pantry stock."""
     plan = _recipe_confirmation_plan(session, recipe)
     if plan is None:
@@ -555,7 +647,7 @@ def unconfirm_recipe_cooked(session: Session, recipe: Recipe) -> dict:
             "note": None,
             "pantry_restore": [],
         }
-    result = unconfirm_meal_plan_cooked(session, plan)
+    result = unconfirm_meal_plan_cooked(session, plan, user_id=user_id)
     result["recipe_id"] = recipe.id
     result["recipe_name"] = recipe.name
     return result

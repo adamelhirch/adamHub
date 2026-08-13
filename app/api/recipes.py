@@ -3,9 +3,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
-from app.api._crud import get_or_404
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api._crud import get_owned_or_404
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import MealPlan, MealPlanCookConfirmation, Recipe, RecipeIngredient
 from app.schemas import (
     RecipeCookRequest,
@@ -23,7 +22,7 @@ from app.services.meal_planning import (
     unconfirm_recipe_cooked as unconfirm_recipe_cooked_service,
 )
 
-router = APIRouter(prefix="/recipes", tags=["recipes"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/recipes", tags=["recipes"])
 
 
 def _ingredient_fields(session: Session, ingredient):
@@ -34,7 +33,7 @@ def _ingredient_fields(session: Session, ingredient):
 
 
 @router.post("", response_model=RecipeRead)
-def create_recipe(payload: RecipeCreate, session: SessionDep) -> RecipeRead:
+def create_recipe(payload: RecipeCreate, session: SessionDep, user: CurrentOrOwnerUser) -> RecipeRead:
     recipe = Recipe(
         name=payload.name,
         description=payload.description,
@@ -50,6 +49,7 @@ def create_recipe(payload: RecipeCreate, session: SessionDep) -> RecipeRead:
         source_title=payload.source_title,
         source_description=payload.source_description,
         source_transcript=payload.source_transcript,
+        user_id=user.id,
     )
     session.add(recipe)
     session.commit()
@@ -68,8 +68,13 @@ def create_recipe(payload: RecipeCreate, session: SessionDep) -> RecipeRead:
 
 
 @router.patch("/{recipe_id}", response_model=RecipeRead)
-def update_recipe(recipe_id: int, payload: RecipeUpdate, session: SessionDep) -> RecipeRead:
-    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
+def update_recipe(
+    recipe_id: int,
+    payload: RecipeUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> RecipeRead:
+    recipe = get_owned_or_404(session, Recipe, recipe_id, user_id=user.id, detail="Recipe not found")
 
     updates = payload.model_dump(exclude_unset=True)
     ingredients = updates.pop("ingredients", None)
@@ -97,14 +102,23 @@ def update_recipe(recipe_id: int, payload: RecipeUpdate, session: SessionDep) ->
 
 
 @router.get("", response_model=list[RecipeRead])
-def list_recipes(session: SessionDep, limit: int = Query(default=50, ge=1, le=200)) -> list[RecipeRead]:
-    recipes = session.exec(select(Recipe).order_by(Recipe.created_at.desc()).limit(limit)).all()
+def list_recipes(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[RecipeRead]:
+    recipes = session.exec(
+        select(Recipe)
+        .where(Recipe.user_id == user.id)
+        .order_by(Recipe.created_at.desc())
+        .limit(limit)
+    ).all()
     return [build_recipe_read(session, recipe) for recipe in recipes]
 
 
 @router.get("/{recipe_id}", response_model=RecipeRead)
-def get_recipe(recipe_id: int, session: SessionDep) -> RecipeRead:
-    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
+def get_recipe(recipe_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> RecipeRead:
+    recipe = get_owned_or_404(session, Recipe, recipe_id, user_id=user.id, detail="Recipe not found")
     return build_recipe_read(session, recipe)
 
 
@@ -112,13 +126,16 @@ def get_recipe(recipe_id: int, session: SessionDep) -> RecipeRead:
 def confirm_recipe_cooked(
     recipe_id: int,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     payload: RecipeCookRequest | None = None,
 ) -> RecipeCookResult:
-    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
+    recipe = get_owned_or_404(session, Recipe, recipe_id, user_id=user.id, detail="Recipe not found")
 
     servings_override = payload.servings_override if payload else None
     note = payload.note if payload else None
-    result = confirm_recipe_cooked_service(session, recipe, servings_override, note)
+    result = confirm_recipe_cooked_service(
+        session, recipe, servings_override, note, user_id=user.id
+    )
 
     return RecipeCookResult(
         recipe_id=recipe.id,
@@ -133,15 +150,17 @@ def confirm_recipe_cooked(
 
 
 @router.post("/{recipe_id}/unconfirm-cooked", response_model=RecipeUncookResult)
-def unconfirm_recipe_cooked(recipe_id: int, session: SessionDep) -> RecipeUncookResult:
-    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
-    result = unconfirm_recipe_cooked_service(session, recipe)
+def unconfirm_recipe_cooked(
+    recipe_id: int, session: SessionDep, user: CurrentOrOwnerUser
+) -> RecipeUncookResult:
+    recipe = get_owned_or_404(session, Recipe, recipe_id, user_id=user.id, detail="Recipe not found")
+    result = unconfirm_recipe_cooked_service(session, recipe, user_id=user.id)
     return RecipeUncookResult.model_validate(result)
 
 
 @router.delete("/{recipe_id}")
-def delete_recipe(recipe_id: int, session: SessionDep) -> dict:
-    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
+def delete_recipe(recipe_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    recipe = get_owned_or_404(session, Recipe, recipe_id, user_id=user.id, detail="Recipe not found")
 
     ingredient_rows = session.exec(select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)).all()
     for row in ingredient_rows:
@@ -149,7 +168,9 @@ def delete_recipe(recipe_id: int, session: SessionDep) -> dict:
     if ingredient_rows:
         session.commit()
 
-    meal_plans = session.exec(select(MealPlan).where(MealPlan.recipe_id == recipe.id)).all()
+    meal_plans = session.exec(
+        select(MealPlan).where(MealPlan.recipe_id == recipe.id, MealPlan.user_id == user.id)
+    ).all()
     for meal_plan in meal_plans:
         confirmation = session.exec(
             select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)

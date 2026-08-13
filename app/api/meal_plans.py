@@ -3,9 +3,9 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
-from app.models import CalendarSource, MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
+from app.api._crud import get_owned_or_404
+from app.api.deps import CurrentOrOwnerUser, SessionDep
+from app.models import MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
 from app.schemas import (
     MealCookLogCreate,
     MealPlanConfirmCooked,
@@ -22,10 +22,10 @@ from app.services.meal_planning import (
     reset_meal_plan_cook_confirmation,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
+    validate_meal_plan_slot_free,
 )
-from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/meal-plans", tags=["meal-plans"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/meal-plans", tags=["meal-plans"])
 
 _SLOT_DEFAULT_TIME: dict[MealSlot, time] = {
     MealSlot.BREAKFAST: time(hour=8, minute=0),
@@ -51,18 +51,31 @@ def _resolve_planned_at(payload: MealPlanCreate | MealPlanUpdate, current: datet
     return planned.astimezone(timezone.utc)
 
 
+def _get_owned_recipe(session, recipe_id: int, user_id: int) -> Recipe:
+    return get_owned_or_404(session, Recipe, recipe_id, user_id=user_id, detail="Recipe not found")
+
+
 @router.post("", response_model=MealPlanRead)
-def create_meal_plan(payload: MealPlanCreate, session: SessionDep) -> MealPlanRead:
-    recipe = session.get(Recipe, payload.recipe_id)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+def create_meal_plan(
+    payload: MealPlanCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> MealPlanRead:
+    _get_owned_recipe(session, payload.recipe_id, user.id)
 
     planned_at = _resolve_planned_at(payload)
+    planned_for = payload.planned_for or planned_at.date()
     try:
-        validate_calendar_slot_free(session, planned_at, planned_at + timedelta(minutes=75), source=CalendarSource.MEAL_PLAN)
+        validate_meal_plan_slot_free(
+            session,
+            user_id=user.id,
+            planned_for=planned_for,
+            slot=payload.slot,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    meal_plan = MealPlan(**payload.model_dump(exclude={"planned_at"}), planned_at=planned_at)
+
+    meal_plan = MealPlan(
+        **payload.model_dump(exclude={"planned_at"}), planned_at=planned_at, user_id=user.id
+    )
     if meal_plan.planned_for is None:
         meal_plan.planned_for = planned_at.date()
     session.add(meal_plan)
@@ -70,20 +83,26 @@ def create_meal_plan(payload: MealPlanCreate, session: SessionDep) -> MealPlanRe
     session.refresh(meal_plan)
 
     if meal_plan.auto_add_missing_ingredients:
-        sync_meal_plan_to_grocery(session, meal_plan)
+        sync_meal_plan_to_grocery(session, meal_plan, user_id=user.id)
 
-    return build_meal_plan_read(session, meal_plan)
+    return build_meal_plan_read(session, meal_plan, user_id=user.id)
 
 
 @router.get("", response_model=list[MealPlanRead])
 def list_meal_plans(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     date_from: date | None = None,
     date_to: date | None = None,
     slot: MealSlot | None = None,
     limit: int = Query(default=100, ge=1, le=400),
 ) -> list[MealPlanRead]:
-    statement = exclude_recipe_confirm_marker_plans(select(MealPlan)).order_by(MealPlan.planned_at.asc()).limit(limit)
+    statement = (
+        exclude_recipe_confirm_marker_plans(select(MealPlan))
+        .where(MealPlan.user_id == user.id)
+        .order_by(MealPlan.planned_at.asc())
+        .limit(limit)
+    )
     if date_from is not None:
         statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
     if date_to is not None:
@@ -92,38 +111,46 @@ def list_meal_plans(
         statement = statement.where(MealPlan.slot == slot)
 
     rows = session.exec(statement).all()
-    return [build_meal_plan_read(session, row) for row in rows]
+    return [build_meal_plan_read(session, row, user_id=user.id) for row in rows]
 
 
 @router.get("/{meal_plan_id}", response_model=MealPlanRead)
-def get_meal_plan(meal_plan_id: int, session: SessionDep) -> MealPlanRead:
-    meal_plan = session.get(MealPlan, meal_plan_id)
-    if not meal_plan:
-        raise HTTPException(status_code=404, detail="Meal plan not found")
-    return build_meal_plan_read(session, meal_plan)
+def get_meal_plan(
+    meal_plan_id: int, session: SessionDep, user: CurrentOrOwnerUser
+) -> MealPlanRead:
+    meal_plan = get_owned_or_404(
+        session, MealPlan, meal_plan_id, user_id=user.id, detail="Meal plan not found"
+    )
+    return build_meal_plan_read(session, meal_plan, user_id=user.id)
 
 
 @router.patch("/{meal_plan_id}", response_model=MealPlanRead)
-def update_meal_plan(meal_plan_id: int, payload: MealPlanUpdate, session: SessionDep) -> MealPlanRead:
-    meal_plan = session.get(MealPlan, meal_plan_id)
-    if not meal_plan:
-        raise HTTPException(status_code=404, detail="Meal plan not found")
+def update_meal_plan(
+    meal_plan_id: int,
+    payload: MealPlanUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> MealPlanRead:
+    meal_plan = get_owned_or_404(
+        session, MealPlan, meal_plan_id, user_id=user.id, detail="Meal plan not found"
+    )
 
     updates = payload.model_dump(exclude_unset=True)
     if "recipe_id" in updates:
-        recipe = session.get(Recipe, updates["recipe_id"])
-        if not recipe:
-            raise HTTPException(status_code=404, detail="Recipe not found")
+        _get_owned_recipe(session, updates["recipe_id"], user.id)
 
-    preview_payload = payload.model_copy(update=updates)
-    next_planned_at = _resolve_planned_at(preview_payload, current=meal_plan.planned_at)
+    next_planned_at = _resolve_planned_at(payload, current=meal_plan.planned_at)
+    next_planned_for = updates.get("planned_for", meal_plan.planned_for)
+    if next_planned_for is None:
+        next_planned_for = next_planned_at.date()
+    next_slot = updates.get("slot", meal_plan.slot)
     try:
-        validate_calendar_slot_free(
+        validate_meal_plan_slot_free(
             session,
-            next_planned_at,
-            next_planned_at + timedelta(minutes=75),
-            source=CalendarSource.MEAL_PLAN,
-            source_ref_id=meal_plan.id,
+            user_id=user.id,
+            planned_for=next_planned_for,
+            slot=next_slot,
+            exclude_plan_id=meal_plan.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -139,9 +166,8 @@ def update_meal_plan(meal_plan_id: int, payload: MealPlanUpdate, session: Sessio
 
     for key, value in updates.items():
         setattr(meal_plan, key, value)
-    meal_plan.planned_at = _resolve_planned_at(payload, current=meal_plan.planned_at)
-    if meal_plan.planned_for is None:
-        meal_plan.planned_for = meal_plan.planned_at.date()
+    meal_plan.planned_at = next_planned_at
+    meal_plan.planned_for = next_planned_for
 
     if reset_cook_confirmation:
         reset_meal_plan_cook_confirmation(session, meal_plan)
@@ -151,16 +177,18 @@ def update_meal_plan(meal_plan_id: int, payload: MealPlanUpdate, session: Sessio
     session.commit()
     session.refresh(meal_plan)
 
-    return build_meal_plan_read(session, meal_plan)
+    return build_meal_plan_read(session, meal_plan, user_id=user.id)
 
 
 @router.post("/{meal_plan_id}/sync-groceries")
-def sync_meal_plan_groceries(meal_plan_id: int, session: SessionDep) -> dict:
-    meal_plan = session.get(MealPlan, meal_plan_id)
-    if not meal_plan:
-        raise HTTPException(status_code=404, detail="Meal plan not found")
+def sync_meal_plan_groceries(
+    meal_plan_id: int, session: SessionDep, user: CurrentOrOwnerUser
+) -> dict:
+    meal_plan = get_owned_or_404(
+        session, MealPlan, meal_plan_id, user_id=user.id, detail="Meal plan not found"
+    )
 
-    added, missing = sync_meal_plan_to_grocery(session, meal_plan)
+    added, missing = sync_meal_plan_to_grocery(session, meal_plan, user_id=user.id)
     return {
         "meal_plan_id": meal_plan_id,
         "created_grocery_items": added,
@@ -172,13 +200,16 @@ def sync_meal_plan_groceries(meal_plan_id: int, session: SessionDep) -> dict:
 def confirm_cooked_meal_plan(
     meal_plan_id: int,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     payload: MealPlanConfirmCooked | None = None,
 ) -> MealPlanConfirmResult:
-    meal_plan = session.get(MealPlan, meal_plan_id)
-    if not meal_plan:
-        raise HTTPException(status_code=404, detail="Meal plan not found")
+    meal_plan = get_owned_or_404(
+        session, MealPlan, meal_plan_id, user_id=user.id, detail="Meal plan not found"
+    )
 
-    result = confirm_meal_plan_cooked(session, meal_plan, note=payload.note if payload else None)
+    result = confirm_meal_plan_cooked(
+        session, meal_plan, note=payload.note if payload else None, user_id=user.id
+    )
     return MealPlanConfirmResult.model_validate(result)
 
 
@@ -186,20 +217,21 @@ def confirm_cooked_meal_plan(
 def unconfirm_cooked_meal_plan(
     meal_plan_id: int,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
 ) -> MealPlanUnconfirmResult:
-    meal_plan = session.get(MealPlan, meal_plan_id)
-    if not meal_plan:
-        raise HTTPException(status_code=404, detail="Meal plan not found")
+    meal_plan = get_owned_or_404(
+        session, MealPlan, meal_plan_id, user_id=user.id, detail="Meal plan not found"
+    )
 
-    result = unconfirm_meal_plan_cooked(session, meal_plan)
+    result = unconfirm_meal_plan_cooked(session, meal_plan, user_id=user.id)
     return MealPlanUnconfirmResult.model_validate(result)
 
 
 @router.post("/actions/log-cooked", response_model=MealPlanConfirmResult)
-def log_cooked_without_plan(payload: MealCookLogCreate, session: SessionDep) -> MealPlanConfirmResult:
-    recipe = session.get(Recipe, payload.recipe_id)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+def log_cooked_without_plan(
+    payload: MealCookLogCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> MealPlanConfirmResult:
+    _get_owned_recipe(session, payload.recipe_id, user.id)
 
     cooked_at = payload.cooked_at or datetime.now(timezone.utc)
     if cooked_at.tzinfo is None:
@@ -213,20 +245,21 @@ def log_cooked_without_plan(payload: MealCookLogCreate, session: SessionDep) -> 
         servings_override=payload.servings_override,
         note=payload.note or "cooked without explicit planning",
         auto_add_missing_ingredients=False,
+        user_id=user.id,
     )
     session.add(meal_plan)
     session.commit()
     session.refresh(meal_plan)
 
-    result = confirm_meal_plan_cooked(session, meal_plan, note=payload.note)
+    result = confirm_meal_plan_cooked(session, meal_plan, note=payload.note, user_id=user.id)
     return MealPlanConfirmResult.model_validate(result)
 
 
 @router.delete("/{meal_plan_id}")
-def delete_meal_plan(meal_plan_id: int, session: SessionDep) -> dict:
-    meal_plan = session.get(MealPlan, meal_plan_id)
-    if not meal_plan:
-        raise HTTPException(status_code=404, detail="Meal plan not found")
+def delete_meal_plan(meal_plan_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    meal_plan = get_owned_or_404(
+        session, MealPlan, meal_plan_id, user_id=user.id, detail="Meal plan not found"
+    )
 
     confirmation = session.exec(
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
