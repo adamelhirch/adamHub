@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
+from app.api._crud import apply_updates, create, delete, get_or_404, save
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import CalendarSource, FitnessMeasurement, FitnessSession, FitnessSessionStatus
@@ -150,11 +151,8 @@ def complete_fitness_session(
 
 @router.delete("/sessions/{session_id}")
 def delete_fitness_session(session_id: int, session: SessionDep) -> dict:
-    row = session.get(FitnessSession, session_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Fitness session not found")
-    session.delete(row)
-    session.commit()
+    row = get_or_404(session, FitnessSession, session_id, detail="Fitness session not found")
+    delete(session, row)
     return {"ok": True, "deleted_id": session_id}
 
 
@@ -178,9 +176,7 @@ def create_fitness_measurement(payload: FitnessMeasurementCreate, session: Sessi
         steps=payload.steps,
         note=payload.note.strip() if payload.note else None,
     )
-    session.add(row)
-    session.commit()
-    session.refresh(row)
+    row = create(session, row)
     return build_fitness_measurement_read(row)
 
 
@@ -190,9 +186,7 @@ def update_fitness_measurement(
     payload: FitnessMeasurementUpdate,
     session: SessionDep,
 ) -> FitnessMeasurementRead:
-    row = session.get(FitnessMeasurement, measurement_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Fitness measurement not found")
+    row = get_or_404(session, FitnessMeasurement, measurement_id, detail="Fitness measurement not found")
 
     updates = payload.model_dump(exclude_unset=True)
     if "note" in updates and updates["note"] is not None:
@@ -200,21 +194,13 @@ def update_fitness_measurement(
     if "recorded_at" in updates and updates["recorded_at"] is not None:
         updates["recorded_at"] = _ensure_utc(updates["recorded_at"])
 
-    for key, value in updates.items():
-        setattr(row, key, value)
-
-    row.updated_at = datetime.now(timezone.utc)
-    session.add(row)
-    session.commit()
-    session.refresh(row)
+    apply_updates(row, updates, touch=True)
+    row = save(session, row)
     return build_fitness_measurement_read(row)
 
 
 @router.delete("/measurements/{measurement_id}")
 def delete_fitness_measurement(measurement_id: int, session: SessionDep) -> dict:
-    row = session.get(FitnessMeasurement, measurement_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Fitness measurement not found")
-    session.delete(row)
-    session.commit()
+    row = get_or_404(session, FitnessMeasurement, measurement_id, detail="Fitness measurement not found")
+    delete(session, row)
     return {"ok": True, "deleted_id": measurement_id}

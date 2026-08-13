@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlmodel import select
 
+from app.api._crud import apply_updates, create, delete, get_or_404, save
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import Account, SavingsGoal
@@ -63,10 +62,7 @@ def get_overview(session: SessionDep) -> PatrimoineOverview:
 
 @router.post("/accounts", response_model=AccountRead)
 def create_account(payload: AccountCreate, session: SessionDep) -> AccountRead:
-    acc = Account(**payload.model_dump())
-    session.add(acc)
-    session.commit()
-    session.refresh(acc)
+    acc = create(session, Account(**payload.model_dump()))
     return _to_account_read(acc)
 
 
@@ -80,35 +76,23 @@ def list_accounts(session: SessionDep, active_only: bool = True) -> list[Account
 
 @router.patch("/accounts/{account_id}", response_model=AccountRead)
 def update_account(account_id: int, payload: AccountUpdate, session: SessionDep) -> AccountRead:
-    acc = session.get(Account, account_id)
-    if not acc:
-        raise HTTPException(status_code=404, detail="Account not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(acc, key, value)
-    acc.updated_at = datetime.now(timezone.utc)
-    session.add(acc)
-    session.commit()
-    session.refresh(acc)
+    acc = get_or_404(session, Account, account_id, detail="Account not found")
+    apply_updates(acc, payload.model_dump(exclude_unset=True), touch=True)
+    acc = save(session, acc)
     return _to_account_read(acc)
 
 
 @router.delete("/accounts/{account_id}", status_code=204)
 def delete_account(account_id: int, session: SessionDep) -> None:
-    acc = session.get(Account, account_id)
-    if not acc:
-        raise HTTPException(status_code=404, detail="Account not found")
-    session.delete(acc)
-    session.commit()
+    acc = get_or_404(session, Account, account_id, detail="Account not found")
+    delete(session, acc)
 
 
 # ── Savings Goals ─────────────────────────────────────────────────────────────
 
 @router.post("/goals", response_model=SavingsGoalRead)
 def create_goal(payload: SavingsGoalCreate, session: SessionDep) -> SavingsGoalRead:
-    goal = SavingsGoal(**payload.model_dump())
-    session.add(goal)
-    session.commit()
-    session.refresh(goal)
+    goal = create(session, SavingsGoal(**payload.model_dump()))
     accounts_by_id = {acc.id: acc for acc in session.exec(select(Account)).all() if acc.id}
     return _to_goal_read(goal, accounts_by_id)
 
@@ -122,23 +106,14 @@ def list_goals(session: SessionDep) -> list[SavingsGoalRead]:
 
 @router.patch("/goals/{goal_id}", response_model=SavingsGoalRead)
 def update_goal(goal_id: int, payload: SavingsGoalUpdate, session: SessionDep) -> SavingsGoalRead:
-    goal = session.get(SavingsGoal, goal_id)
-    if not goal:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        setattr(goal, key, value)
-    goal.updated_at = datetime.now(timezone.utc)
-    session.add(goal)
-    session.commit()
-    session.refresh(goal)
+    goal = get_or_404(session, SavingsGoal, goal_id, detail="Goal not found")
+    apply_updates(goal, payload.model_dump(exclude_unset=True), touch=True)
+    goal = save(session, goal)
     accounts_by_id = {acc.id: acc for acc in session.exec(select(Account)).all() if acc.id}
     return _to_goal_read(goal, accounts_by_id)
 
 
 @router.delete("/goals/{goal_id}", status_code=204)
 def delete_goal(goal_id: int, session: SessionDep) -> None:
-    goal = session.get(SavingsGoal, goal_id)
-    if not goal:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    session.delete(goal)
-    session.commit()
+    goal = get_or_404(session, SavingsGoal, goal_id, detail="Goal not found")
+    delete(session, goal)

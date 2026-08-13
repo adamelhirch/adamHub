@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlmodel import select
 
+from app.api._crud import get_or_404
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import MealPlan, MealPlanCookConfirmation, Recipe, RecipeIngredient
@@ -50,9 +51,7 @@ def create_recipe(payload: RecipeCreate, session: SessionDep) -> RecipeRead:
 
 @router.patch("/{recipe_id}", response_model=RecipeRead)
 def update_recipe(recipe_id: int, payload: RecipeUpdate, session: SessionDep) -> RecipeRead:
-    recipe = session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
 
     updates = payload.model_dump(exclude_unset=True)
     ingredients = updates.pop("ingredients", None)
@@ -87,9 +86,7 @@ def list_recipes(session: SessionDep, limit: int = Query(default=50, ge=1, le=20
 
 @router.get("/{recipe_id}", response_model=RecipeRead)
 def get_recipe(recipe_id: int, session: SessionDep) -> RecipeRead:
-    recipe = session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
     return build_recipe_read(session, recipe)
 
 
@@ -99,9 +96,7 @@ def confirm_recipe_cooked(
     session: SessionDep,
     payload: RecipeCookRequest | None = None,
 ) -> RecipeCookResult:
-    recipe = session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
 
     servings_override = payload.servings_override if payload else None
     note = payload.note if payload else None
@@ -120,9 +115,7 @@ def confirm_recipe_cooked(
 
 @router.delete("/{recipe_id}")
 def delete_recipe(recipe_id: int, session: SessionDep) -> dict:
-    recipe = session.get(Recipe, recipe_id)
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    recipe = get_or_404(session, Recipe, recipe_id, detail="Recipe not found")
 
     ingredient_rows = session.exec(select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)).all()
     for row in ingredient_rows:

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
+from app.api._crud import create
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import Budget, FinanceTransaction, TransactionKind
@@ -23,9 +24,7 @@ def create_transaction(payload: FinanceTransactionCreate, session: SessionDep) -
     tx = FinanceTransaction(**payload.model_dump())
     if tx.occurred_at is None:
         tx.occurred_at = datetime.now(timezone.utc)
-    session.add(tx)
-    session.commit()
-    session.refresh(tx)
+    tx = create(session, tx)
     return FinanceTransactionRead.model_validate(tx, from_attributes=True)
 
 
@@ -60,10 +59,7 @@ def create_budget(payload: BudgetCreate, session: SessionDep) -> BudgetRead:
     if len(payload.month) != 7 or payload.month[4] != "-":
         raise HTTPException(status_code=400, detail="month must be in format YYYY-MM")
 
-    budget = Budget(**payload.model_dump())
-    session.add(budget)
-    session.commit()
-    session.refresh(budget)
+    budget = create(session, Budget(**payload.model_dump()))
     return BudgetRead.model_validate(budget, from_attributes=True)
 
 

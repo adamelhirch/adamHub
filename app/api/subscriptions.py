@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
+from app.api._crud import get_or_404
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import CalendarSource, Subscription
@@ -79,9 +80,7 @@ def subscription_projection(session: SessionDep, currency: str = "EUR") -> Subsc
 
 @router.get("/{subscription_id}", response_model=SubscriptionRead)
 def get_subscription(subscription_id: int, session: SessionDep) -> SubscriptionRead:
-    sub = session.get(Subscription, subscription_id)
-    if not sub:
-        raise HTTPException(status_code=404, detail="Subscription not found")
+    sub = get_or_404(session, Subscription, subscription_id, detail="Subscription not found")
     return SubscriptionRead.model_validate(sub, from_attributes=True)
 
 

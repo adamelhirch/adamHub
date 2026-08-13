@@ -1,8 +1,9 @@
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlmodel import select
 
+from app.api._crud import apply_updates, create, delete, get_or_404, save
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
 from app.models import GroceryPantrySync, PantryItem
@@ -20,10 +21,7 @@ router = APIRouter(prefix="/pantry", tags=["pantry"], dependencies=[Depends(requ
 
 @router.post("/items", response_model=PantryItemRead)
 def create_pantry_item(payload: PantryItemCreate, session: SessionDep) -> PantryItemRead:
-    item = PantryItem(**payload.model_dump())
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    item = create(session, PantryItem(**payload.model_dump()))
     return PantryItemRead.model_validate(item, from_attributes=True)
 
 
@@ -47,40 +45,27 @@ def list_pantry_items(
 
 @router.patch("/items/{item_id}", response_model=PantryItemRead)
 def update_pantry_item(item_id: int, payload: PantryItemUpdate, session: SessionDep) -> PantryItemRead:
-    item = session.get(PantryItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Pantry item not found")
+    item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
 
     updates = payload.model_dump(exclude_unset=True)
-    for key, value in updates.items():
-        setattr(item, key, value)
-
-    item.updated_at = datetime.now(timezone.utc)
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    apply_updates(item, updates, touch=True)
+    item = save(session, item)
     return PantryItemRead.model_validate(item, from_attributes=True)
 
 
 @router.post("/items/{item_id}/consume", response_model=PantryItemRead)
 def consume_pantry_item(item_id: int, payload: PantryConsume, session: SessionDep) -> PantryItemRead:
-    item = session.get(PantryItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Pantry item not found")
+    item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
 
     item.quantity = max(0.0, item.quantity - payload.amount)
     item.updated_at = datetime.now(timezone.utc)
-    session.add(item)
-    session.commit()
-    session.refresh(item)
+    item = save(session, item)
     return PantryItemRead.model_validate(item, from_attributes=True)
 
 
 @router.delete("/items/{item_id}")
 def delete_pantry_item(item_id: int, session: SessionDep) -> dict:
-    item = session.get(PantryItem, item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Pantry item not found")
+    item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
 
     # Keep sync table consistent (important with PostgreSQL FK checks).
     sync_rows = session.exec(
@@ -92,8 +77,7 @@ def delete_pantry_item(item_id: int, session: SessionDep) -> dict:
         # Flush these deletes first to satisfy FK constraints on PostgreSQL.
         session.commit()
 
-    session.delete(item)
-    session.commit()
+    delete(session, item)
     return {"ok": True, "deleted_id": item_id}
 
 

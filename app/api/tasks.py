@@ -3,11 +3,12 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
+from app.api._crud import create, delete, get_or_404, save
 from app.api.deps import SessionDep
 from app.core.security import require_api_key
-from app.models import CalendarSource, Task, TaskScheduleMode, TaskStatus
+from app.models import CalendarSource, Task, TaskStatus
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
-from app.services.calendar_hub import validate_task_schedule_free
+from app.services.calendar_hub import apply_task_update, validate_task_schedule_free
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_api_key)])
 
@@ -19,9 +20,7 @@ def create_task(payload: TaskCreate, session: SessionDep) -> TaskRead:
         validate_task_schedule_free(session, task)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+    task = create(session, task)
     return TaskRead.model_validate(task, from_attributes=True)
 
 
@@ -49,34 +48,7 @@ def update_task(task_id: int, payload: TaskUpdate, session: SessionDep) -> TaskR
         raise HTTPException(status_code=404, detail="Task not found")
 
     updates = payload.model_dump(exclude_unset=True)
-    if "due_at" in updates and "schedule_mode" not in updates:
-        updates["schedule_mode"] = (
-            TaskScheduleMode.ONCE if updates["due_at"] is not None else TaskScheduleMode.NONE
-        )
-
-    if "schedule_mode" in updates:
-        mode = updates["schedule_mode"]
-        if mode == TaskScheduleMode.NONE:
-            updates["due_at"] = None
-            updates["schedule_time"] = None
-            updates["schedule_weekday"] = None
-        elif mode == TaskScheduleMode.ONCE:
-            updates["schedule_time"] = None
-            updates["schedule_weekday"] = None
-        elif mode == TaskScheduleMode.DAILY:
-            updates["due_at"] = None
-            updates["schedule_weekday"] = None
-        elif mode == TaskScheduleMode.WEEKLY:
-            updates["due_at"] = None
-
-    for key, value in updates.items():
-        setattr(task, key, value)
-
-    if task.schedule_mode == TaskScheduleMode.NONE and task.due_at is not None:
-        task.schedule_mode = TaskScheduleMode.ONCE
-
-    if task.schedule_mode == TaskScheduleMode.ONCE and task.due_at is None:
-        task.schedule_mode = TaskScheduleMode.NONE
+    apply_task_update(task, updates)
 
     try:
         validate_task_schedule_free(session, task, ignore_task_id=task.id)
@@ -92,24 +64,16 @@ def update_task(task_id: int, payload: TaskUpdate, session: SessionDep) -> TaskR
 
 @router.post("/{task_id}/complete", response_model=TaskRead)
 def complete_task(task_id: int, session: SessionDep) -> TaskRead:
-    task = session.get(Task, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    task = get_or_404(session, Task, task_id, detail="Task not found")
 
     task.status = TaskStatus.DONE
     task.updated_at = datetime.now(timezone.utc)
-    session.add(task)
-    session.commit()
-    session.refresh(task)
+    task = save(session, task)
     return TaskRead.model_validate(task, from_attributes=True)
 
 
 @router.delete("/{task_id}")
 def delete_task(task_id: int, session: SessionDep) -> dict:
-    task = session.get(Task, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    session.delete(task)
-    session.commit()
+    task = get_or_404(session, Task, task_id, detail="Task not found")
+    delete(session, task)
     return {"ok": True}

@@ -553,6 +553,39 @@ def validate_calendar_slot_free(
             raise ValueError(f"Calendar slot overlaps with generated item: {row['title']}")
 
 
+def apply_task_update(task: Task, updates: dict) -> dict:
+    if "due_at" in updates and "schedule_mode" not in updates:
+        updates["schedule_mode"] = (
+            TaskScheduleMode.ONCE if updates["due_at"] is not None else TaskScheduleMode.NONE
+        )
+
+    if "schedule_mode" in updates:
+        mode = updates["schedule_mode"]
+        if mode == TaskScheduleMode.NONE:
+            updates["due_at"] = None
+            updates["schedule_time"] = None
+            updates["schedule_weekday"] = None
+        elif mode == TaskScheduleMode.ONCE:
+            updates["schedule_time"] = None
+            updates["schedule_weekday"] = None
+        elif mode == TaskScheduleMode.DAILY:
+            updates["due_at"] = None
+            updates["schedule_weekday"] = None
+        elif mode == TaskScheduleMode.WEEKLY:
+            updates["due_at"] = None
+
+    for key, value in updates.items():
+        setattr(task, key, value)
+
+    if task.schedule_mode == TaskScheduleMode.NONE and task.due_at is not None:
+        task.schedule_mode = TaskScheduleMode.ONCE
+
+    if task.schedule_mode == TaskScheduleMode.ONCE and task.due_at is None:
+        task.schedule_mode = TaskScheduleMode.NONE
+
+    return updates
+
+
 def validate_task_schedule_free(
     session: Session,
     task: Task,
