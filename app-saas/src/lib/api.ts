@@ -94,3 +94,67 @@ export function register(
 export function logout(): Promise<void> {
   return setStoredToken(null);
 }
+
+export interface MealPlanRead {
+  id: number;
+  planned_at: string;
+  planned_for: string | null;
+  slot: "breakfast" | "lunch" | "dinner" | null;
+  recipe_id: number;
+  recipe_name: string;
+  servings_override: number | null;
+  note: string | null;
+  cooked: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listMealPlans(params: { date_from?: string; date_to?: string } = {}): Promise<MealPlanRead[]> {
+  const query = new URLSearchParams();
+  if (params.date_from) query.set("date_from", params.date_from);
+  if (params.date_to) query.set("date_to", params.date_to);
+  const qs = query.toString();
+  return request<MealPlanRead[]>(`/meal-plans${qs ? `?${qs}` : ""}`);
+}
+
+export interface GroceryItemRead {
+  id: number;
+  name: string;
+  quantity: number;
+  unit: string;
+  category: string | null;
+  checked: boolean;
+  priority: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listGroceryItems(): Promise<GroceryItemRead[]> {
+  return request<GroceryItemRead[]>("/groceries");
+}
+
+export function updateGroceryItem(
+  id: number,
+  payload: { checked?: boolean },
+): Promise<GroceryItemRead> {
+  return request<GroceryItemRead>(`/groceries/${id}`, { method: "PATCH", body: payload });
+}
+
+export interface PantryItemRead {
+  id: number;
+  name: string;
+  quantity: number;
+  unit: string;
+  category: string | null;
+  min_quantity: number;
+  expires_at: string | null;
+  location: string | null;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listPantryItems(): Promise<PantryItemRead[]> {
+  return request<PantryItemRead[]>("/pantry/items");
+}
