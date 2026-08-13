@@ -6,11 +6,13 @@ This is the correct skill behind the frontend `Routine` tab inside the Tasks pag
 
 ## Actions
 
+<!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `habit.create`
 - `habit.list`
 - `habit.set_active`
 - `habit.log`
 - `habit.list_logs`
+<!-- END GENERATED: action-list -->
 
 ## Decision rules
 
