@@ -150,6 +150,7 @@ function recipeToIngredientDrafts(recipe: Recipe): RecipeIngredientDraft[] {
     quantity: String(ingredient.quantity ?? 1),
     unit: ingredient.unit || 'item',
     note: ingredient.note || '',
+    cache_id: null,
     store: ingredient.store,
     store_label: ingredient.store_label,
     external_id: ingredient.external_id,
@@ -167,6 +168,7 @@ type RecipeIngredientDraft = {
   quantity: string;
   unit: string;
   note: string;
+  cache_id: number | null;
   store: string | null;
   store_label: string | null;
   external_id: string | null;
@@ -184,6 +186,7 @@ function createIngredientDraft(overrides: Partial<RecipeIngredientDraft> = {}): 
     quantity: '1',
     unit: 'item',
     note: '',
+    cache_id: null,
     store: null,
     store_label: null,
     external_id: null,
@@ -204,14 +207,8 @@ function buildIngredientPayload(draft: RecipeIngredientDraft) {
     quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
     unit: draft.unit.trim() || 'item',
     note: draft.note.trim() || null,
-    store: draft.store,
-    store_label: draft.store_label,
-    external_id: draft.external_id,
     category: draft.category,
-    packaging: draft.packaging,
-    price_text: draft.price_text,
-    product_url: draft.product_url,
-    image_url: draft.image_url,
+    cache_id: draft.cache_id ?? null,
   };
 }
 
@@ -484,6 +481,7 @@ export default function RecipesPage() {
     if (activeDraftIndex === null) return;
     updateDraftIngredient(activeDraftIndex, {
       name: result.name,
+      cache_id: result.cache_id,
       store: result.store,
       store_label: result.store === 'intermarche' ? 'Intermarché' : result.store,
       external_id: result.external_id,
