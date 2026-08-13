@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.models import (
@@ -468,14 +469,27 @@ def reset_meal_plan_cook_confirmation(session: Session, meal_plan: MealPlan) -> 
 
 # Marker used to link a recipe-level "confirm cooked" to an ad-hoc MealPlan that
 # carries the MealPlanCookConfirmation record (same record type as the meal-plan flow).
-_RECIPE_CONFIRM_MARKER = "recipe.confirm_cooked"
+RECIPE_CONFIRM_MARKER = "recipe.confirm_cooked"
+
+
+def exclude_recipe_confirm_marker_plans(statement):
+    """Filter recipe.confirm_cooked carrier plans out of a MealPlan select.
+
+    Marker rows only exist to carry a MealPlanCookConfirmation for recipe-level
+    confirmations; they must never surface in meal-plan listings or calendar
+    projections. ``MealPlan.note`` is nullable, so NULL notes are kept explicitly
+    (a plain ``note != marker`` comparison would silently drop them).
+    """
+    return statement.where(
+        or_(MealPlan.note.is_(None), MealPlan.note != RECIPE_CONFIRM_MARKER)
+    )
 
 
 def _recipe_confirmation_plan(session: Session, recipe: Recipe) -> MealPlan | None:
     return session.exec(
         select(MealPlan).where(
             MealPlan.recipe_id == recipe.id,
-            MealPlan.note == _RECIPE_CONFIRM_MARKER,
+            MealPlan.note == RECIPE_CONFIRM_MARKER,
         )
     ).first()
 
@@ -489,7 +503,7 @@ def confirm_recipe_cooked(
     """Confirm a recipe cooked without an explicit meal plan.
 
     Mirrors the meal-plan flow by reusing MealPlanCookConfirmation: an ad-hoc
-    MealPlan (note = _RECIPE_CONFIRM_MARKER) carries the confirmation record, so
+    MealPlan (note = RECIPE_CONFIRM_MARKER) carries the confirmation record, so
     confirm is idempotent and can be reversed via unconfirm_recipe_cooked.
     """
     plan = _recipe_confirmation_plan(session, recipe)
@@ -500,12 +514,25 @@ def confirm_recipe_cooked(
             planned_for=now.date(),
             recipe_id=recipe.id,
             servings_override=servings_override,
-            note=_RECIPE_CONFIRM_MARKER,
+            note=RECIPE_CONFIRM_MARKER,
             auto_add_missing_ingredients=False,
         )
         session.add(plan)
         session.commit()
         session.refresh(plan)
+    else:
+        # Reused from a previous confirm/unconfirm cycle: refresh its timestamp so
+        # planned_at tracks the current cook rather than the very first one.
+        existing = session.exec(
+            select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
+        ).first()
+        if existing is None:
+            now = datetime.now(timezone.utc)
+            plan.planned_at = now
+            plan.planned_for = now.date()
+            plan.updated_at = now
+            session.add(plan)
+            session.commit()
 
     missing = compute_recipe_missing_ingredients(session, recipe, plan.servings_override)
     result = confirm_meal_plan_cooked(session, plan, note=note)

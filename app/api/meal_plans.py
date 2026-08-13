@@ -18,6 +18,7 @@ from app.schemas import (
 from app.services.meal_planning import (
     build_meal_plan_read,
     confirm_meal_plan_cooked,
+    exclude_recipe_confirm_marker_plans,
     reset_meal_plan_cook_confirmation,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
@@ -82,7 +83,7 @@ def list_meal_plans(
     slot: MealSlot | None = None,
     limit: int = Query(default=100, ge=1, le=400),
 ) -> list[MealPlanRead]:
-    statement = select(MealPlan).order_by(MealPlan.planned_at.asc()).limit(limit)
+    statement = exclude_recipe_confirm_marker_plans(select(MealPlan)).order_by(MealPlan.planned_at.asc()).limit(limit)
     if date_from is not None:
         statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
     if date_to is not None:

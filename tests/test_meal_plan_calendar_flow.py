@@ -276,6 +276,73 @@ def test_skill_recipe_confirm_unconfirm_cooked(client, auth_headers):
     assert _pantry_qty(client, auth_headers, "Riz") == 4.0
 
 
+def test_recipe_confirm_cooked_marker_plan_hidden_from_meal_plans_and_calendar(client, auth_headers):
+    _create_pantry(client, auth_headers, "Riz", 4)
+    recipe_id = _create_recipe(client, auth_headers, "Riz saute", [{"name": "Riz", "quantity": 2, "unit": "item"}])
+    real_plan_id = _create_meal_plan(client, auth_headers, recipe_id)
+
+    confirm = client.post(f"/api/v1/recipes/{recipe_id}/confirm-cooked", headers=auth_headers, json={})
+    assert confirm.status_code == 200
+    marker_plan_id = confirm.json()["meal_plan_id"]
+    assert marker_plan_id != real_plan_id
+
+    plans = client.get("/api/v1/meal-plans", headers=auth_headers, params={"limit": 400}).json()
+    plan_ids = [plan["id"] for plan in plans]
+    assert marker_plan_id not in plan_ids
+    assert real_plan_id in plan_ids
+
+    skill_list = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "meal_plan.list", "input": {"limit": 400}},
+    )
+    assert skill_list.status_code == 200
+    skill_plan_ids = [plan["id"] for plan in skill_list.json()["data"]["meal_plans"]]
+    assert marker_plan_id not in skill_plan_ids
+    assert real_plan_id in skill_plan_ids
+
+    sync = client.post("/api/v1/calendar/sync", headers=auth_headers)
+    assert sync.status_code == 200
+    calendar_rows = client.get(
+        "/api/v1/calendar/items",
+        headers=auth_headers,
+        params={"include_completed": True, "limit": 500},
+    )
+    assert calendar_rows.status_code == 200
+    meal_ref_ids = [row["source_ref_id"] for row in calendar_rows.json() if row["source"] == "meal_plan"]
+    assert marker_plan_id not in meal_ref_ids
+    assert real_plan_id in meal_ref_ids
+
+
+def test_recipe_confirm_cooked_refreshes_marker_plan_timestamp(client, auth_headers, test_engine):
+    from app.models import MealPlan
+
+    _create_pantry(client, auth_headers, "Riz", 4)
+    recipe_id = _create_recipe(client, auth_headers, "Riz saute", [{"name": "Riz", "quantity": 2, "unit": "item"}])
+
+    client.post(f"/api/v1/recipes/{recipe_id}/confirm-cooked", headers=auth_headers, json={})
+    client.post(f"/api/v1/recipes/{recipe_id}/unconfirm-cooked", headers=auth_headers)
+
+    # Backdate the marker plan to simulate a stale plan from a long-ago cook.
+    stale = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    with Session(test_engine) as session:
+        plan = session.exec(select(MealPlan).where(MealPlan.note == "recipe.confirm_cooked")).one()
+        plan.planned_at = stale
+        plan.planned_for = stale.date()
+        session.add(plan)
+        session.commit()
+
+    # Re-confirm after an unconfirm cycle: the reused marker plan's planned_at must
+    # track the current cook instead of the stale one.
+    client.post(f"/api/v1/recipes/{recipe_id}/confirm-cooked", headers=auth_headers, json={})
+
+    with Session(test_engine) as session:
+        plan = session.exec(select(MealPlan).where(MealPlan.note == "recipe.confirm_cooked")).one()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        assert abs((now - plan.planned_at).total_seconds()) < 5
+        assert plan.planned_for == now.date()
+
+
 def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers, test_engine):
     from app.models import SupermarketSearchCache, SupermarketStore
     from app.services.scraper_service import upsert_search_cache

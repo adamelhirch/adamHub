@@ -102,6 +102,7 @@ from app.services.meal_planning import (
     build_meal_plan_read,
     confirm_meal_plan_cooked,
     confirm_recipe_cooked,
+    exclude_recipe_confirm_marker_plans,
     reset_meal_plan_cook_confirmation,
     resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
@@ -1243,7 +1244,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.list":
         limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=400)
-        statement = select(MealPlan).order_by(MealPlan.planned_at.asc()).limit(limit)
+        statement = exclude_recipe_confirm_marker_plans(select(MealPlan)).order_by(MealPlan.planned_at.asc()).limit(limit)
         if payload.get("date_from"):
             date_from = _parse_date(payload.get("date_from"), "date_from")
             statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
