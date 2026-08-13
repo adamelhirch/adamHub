@@ -583,6 +583,17 @@ class RecipeCookResult(BaseModel):
     note: str | None = None
     missing_ingredients: list[MissingIngredientRead]
     pantry_consumption: list[MealIngredientConsumptionRead]
+    meal_plan_id: int
+    already_confirmed: bool = False
+
+
+class RecipeUncookResult(BaseModel):
+    recipe_id: int
+    recipe_name: str
+    already_unconfirmed: bool
+    previously_confirmed_at: datetime | None = None
+    note: str | None = None
+    pantry_restore: list[MealIngredientRestoreRead]
 
 
 class RecipeRead(BaseModel):

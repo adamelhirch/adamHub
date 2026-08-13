@@ -462,3 +462,71 @@ def reset_meal_plan_cook_confirmation(session: Session, meal_plan: MealPlan) -> 
     if not confirmation:
         return None
     return unconfirm_meal_plan_cooked(session, meal_plan)
+
+
+# Marker used to link a recipe-level "confirm cooked" to an ad-hoc MealPlan that
+# carries the MealPlanCookConfirmation record (same record type as the meal-plan flow).
+_RECIPE_CONFIRM_MARKER = "recipe.confirm_cooked"
+
+
+def _recipe_confirmation_plan(session: Session, recipe: Recipe) -> MealPlan | None:
+    return session.exec(
+        select(MealPlan).where(
+            MealPlan.recipe_id == recipe.id,
+            MealPlan.note == _RECIPE_CONFIRM_MARKER,
+        )
+    ).first()
+
+
+def confirm_recipe_cooked(
+    session: Session,
+    recipe: Recipe,
+    servings_override: int | None = None,
+    note: str | None = None,
+) -> dict:
+    """Confirm a recipe cooked without an explicit meal plan.
+
+    Mirrors the meal-plan flow by reusing MealPlanCookConfirmation: an ad-hoc
+    MealPlan (note = _RECIPE_CONFIRM_MARKER) carries the confirmation record, so
+    confirm is idempotent and can be reversed via unconfirm_recipe_cooked.
+    """
+    plan = _recipe_confirmation_plan(session, recipe)
+    if plan is None:
+        now = datetime.now(timezone.utc)
+        plan = MealPlan(
+            planned_at=now,
+            planned_for=now.date(),
+            recipe_id=recipe.id,
+            servings_override=servings_override,
+            note=_RECIPE_CONFIRM_MARKER,
+            auto_add_missing_ingredients=False,
+        )
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+
+    missing = compute_recipe_missing_ingredients(session, recipe, plan.servings_override)
+    result = confirm_meal_plan_cooked(session, plan, note=note)
+    result["recipe_id"] = recipe.id
+    result["recipe_name"] = recipe.name
+    result["meal_plan_id"] = plan.id
+    result["missing_ingredients"] = missing
+    return result
+
+
+def unconfirm_recipe_cooked(session: Session, recipe: Recipe) -> dict:
+    """Undo a recipe-level cooked confirmation and restore pantry stock."""
+    plan = _recipe_confirmation_plan(session, recipe)
+    if plan is None:
+        return {
+            "recipe_id": recipe.id,
+            "recipe_name": recipe.name,
+            "already_unconfirmed": True,
+            "previously_confirmed_at": None,
+            "note": None,
+            "pantry_restore": [],
+        }
+    result = unconfirm_meal_plan_cooked(session, plan)
+    result["recipe_id"] = recipe.id
+    result["recipe_name"] = recipe.name
+    return result

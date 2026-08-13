@@ -215,6 +215,67 @@ def test_skill_meal_plan_update_restores_stock(client, auth_headers):
     assert _pantry_qty(client, auth_headers, "Egg") == 5.0
 
 
+def test_recipe_confirm_cooked_idempotent_and_unconfirm(client, auth_headers):
+    pantry_id = _create_pantry(client, auth_headers, "Riz", 4)
+    recipe_id = _create_recipe(client, auth_headers, "Riz saute", [{"name": "Riz", "quantity": 2, "unit": "item"}])
+
+    def riz_qty() -> float:
+        rows = client.get("/api/v1/pantry/items", headers=auth_headers).json()
+        return next(row for row in rows if row["id"] == pantry_id)["quantity"]
+
+    first = client.post(f"/api/v1/recipes/{recipe_id}/confirm-cooked", headers=auth_headers, json={"note": "cuit"})
+    assert first.status_code == 200
+    assert first.json()["already_confirmed"] is False
+    assert first.json()["meal_plan_id"] > 0
+    assert riz_qty() == 2.0
+
+    second = client.post(f"/api/v1/recipes/{recipe_id}/confirm-cooked", headers=auth_headers, json={})
+    assert second.status_code == 200
+    assert second.json()["already_confirmed"] is True
+    assert riz_qty() == 2.0  # idempotent: no double consumption
+
+    unconfirm = client.post(f"/api/v1/recipes/{recipe_id}/unconfirm-cooked", headers=auth_headers)
+    assert unconfirm.status_code == 200
+    assert unconfirm.json()["already_unconfirmed"] is False
+    assert riz_qty() == 4.0
+
+    unconfirm_again = client.post(f"/api/v1/recipes/{recipe_id}/unconfirm-cooked", headers=auth_headers)
+    assert unconfirm_again.status_code == 200
+    assert unconfirm_again.json()["already_unconfirmed"] is True
+
+
+def test_skill_recipe_confirm_unconfirm_cooked(client, auth_headers):
+    _create_pantry(client, auth_headers, "Riz", 4)
+    recipe_id = _create_recipe(client, auth_headers, "Riz saute", [{"name": "Riz", "quantity": 2, "unit": "item"}])
+
+    confirmed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.confirm_cooked", "input": {"recipe_id": recipe_id}},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["data"]["already_confirmed"] is False
+    assert _pantry_qty(client, auth_headers, "Riz") == 2.0
+
+    again = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.confirm_cooked", "input": {"recipe_id": recipe_id}},
+    )
+    assert again.status_code == 200
+    assert again.json()["data"]["already_confirmed"] is True
+    assert _pantry_qty(client, auth_headers, "Riz") == 2.0
+
+    unconfirmed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.unconfirm_cooked", "input": {"recipe_id": recipe_id}},
+    )
+    assert unconfirmed.status_code == 200
+    assert unconfirmed.json()["data"]["already_unconfirmed"] is False
+    assert _pantry_qty(client, auth_headers, "Riz") == 4.0
+
+
 def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers):
     recipe = client.post(
         "/api/v1/recipes",
