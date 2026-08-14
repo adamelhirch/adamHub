@@ -405,3 +405,354 @@ def test_skill_ubereats_save_address_missing_coordinates_is_a_400(client, auth_h
     assert response.status_code == 400
     assert "latitude and longitude are required" in response.json()["detail"]
 
+
+# ── B2: smoke coverage per domain (create/list/get/delete via skill/execute) ──
+
+
+def test_skill_smoke_habit_create_and_list(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "habit.create", "input": {"name": "Lire 20 pages", "frequency": "daily"}},
+    )
+    assert created.status_code == 200
+    habit = created.json()["data"]["habit"]
+    assert habit["name"] == "Lire 20 pages"
+    assert habit["active"] is True
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "habit.list", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [item["name"] for item in listed.json()["data"]["habits"]] == ["Lire 20 pages"]
+
+
+def test_skill_smoke_goal_create_list_get(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "goal.create", "input": {"title": "Courir un 10 km"}},
+    )
+    assert created.status_code == 200
+    goal_id = created.json()["data"]["goal"]["id"]
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "goal.list", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["data"]["goals"]] == [goal_id]
+
+    fetched = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "goal.get", "input": {"goal_id": goal_id}},
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["goal"]["title"] == "Courir un 10 km"
+
+
+def test_skill_smoke_event_create_and_list(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "event.create",
+            "input": {
+                "title": "RDV kiné",
+                "start_at": "2031-05-10T09:00:00Z",
+                "end_at": "2031-05-10T09:30:00Z",
+            },
+        },
+    )
+    assert created.status_code == 200
+    event = created.json()["data"]["event"]
+    assert event["title"] == "RDV kiné"
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "event.list", "input": {"from_at": "2031-05-01T00:00:00Z"}},
+    )
+    assert listed.status_code == 200
+    assert [item["title"] for item in listed.json()["data"]["events"]] == ["RDV kiné"]
+
+
+def test_skill_smoke_subscription_create_list_get(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "subscription.create",
+            "input": {"name": "Netflix", "amount": 12.99, "next_due_date": "2031-06-01"},
+        },
+    )
+    assert created.status_code == 200
+    subscription_id = created.json()["data"]["subscription"]["id"]
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "subscription.list", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [item["name"] for item in listed.json()["data"]["subscriptions"]] == ["Netflix"]
+
+    fetched = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "subscription.get", "input": {"subscription_id": subscription_id}},
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["subscription"]["amount"] == 12.99
+
+
+def test_skill_smoke_pantry_add_and_list(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "pantry.add_item", "input": {"name": "Farine", "quantity": 2, "unit": "kg"}},
+    )
+    assert created.status_code == 200
+    item = created.json()["data"]["item"]
+    assert item["name"] == "Farine"
+    assert item["quantity"] == 2.0
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "pantry.list_items", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [row["name"] for row in listed.json()["data"]["items"]] == ["Farine"]
+
+
+def test_skill_smoke_recipe_add_list_get_delete(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.add", "input": {"name": "Omelette", "instructions": "Cuire"}},
+    )
+    assert created.status_code == 200
+    recipe_id = created.json()["data"]["recipe"]["id"]
+
+    fetched = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.get", "input": {"recipe_id": recipe_id}},
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["recipe"]["name"] == "Omelette"
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.list", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["data"]["recipes"]] == [recipe_id]
+
+    deleted = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.delete", "input": {"recipe_id": recipe_id}},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["data"]["deleted_id"] == recipe_id
+
+    gone = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.get", "input": {"recipe_id": recipe_id}},
+    )
+    assert gone.status_code == 400
+    assert "not found" in gone.json()["detail"]
+
+
+def test_skill_smoke_meal_plan_log_cooked_and_list(client, auth_headers):
+    recipe = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.add", "input": {"name": "Pâtes", "instructions": "Cuire"}},
+    )
+    assert recipe.status_code == 200
+    recipe_id = recipe.json()["data"]["recipe"]["id"]
+
+    logged = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "meal_plan.log_cooked",
+            "input": {"recipe_id": recipe_id, "cooked_at": "2031-07-10T19:00:00Z"},
+        },
+    )
+    assert logged.status_code == 200
+    assert logged.json()["data"]["meal_plan"]["recipe_id"] == recipe_id
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "meal_plan.list", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert len(listed.json()["data"]["meal_plans"]) == 1
+
+
+def test_skill_smoke_grocery_add_list_check_delete(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "grocery.add_item", "input": {"name": "Lait", "quantity": 2, "unit": "L"}},
+    )
+    assert created.status_code == 200
+    item_id = created.json()["data"]["item"]["id"]
+
+    checked = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "grocery.check_item", "input": {"item_id": item_id, "checked": True}},
+    )
+    assert checked.status_code == 200
+    assert checked.json()["data"]["pantry_sync"]["synced"] is True
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "grocery.list_items", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [item["name"] for item in listed.json()["data"]["items"]] == ["Lait"]
+    assert listed.json()["data"]["items"][0]["checked"] is True
+
+    deleted = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "grocery.delete_item", "input": {"item_id": item_id}},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["data"]["deleted_id"] == item_id
+
+
+def test_skill_smoke_note_create_list_get(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "note.create", "input": {"title": "Idée", "content": "Écrire un livre", "tags": ["créatif"]}},
+    )
+    assert created.status_code == 200
+    note_id = created.json()["data"]["note"]["id"]
+
+    listed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "note.list", "input": {}},
+    )
+    assert listed.status_code == 200
+    assert [item["title"] for item in listed.json()["data"]["notes"]] == ["Idée"]
+
+    fetched = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "note.get", "input": {"note_id": note_id}},
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["note"]["content"] == "Écrire un livre"
+
+
+def test_skill_smoke_linear_uses_cache_not_live(client, auth_headers):
+    projects = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "linear.projects", "input": {"source": "cache"}},
+    )
+    assert projects.status_code == 200
+    assert projects.json()["data"]["projects"] == []
+
+    issues = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "linear.issues", "input": {"source": "cache"}},
+    )
+    assert issues.status_code == 200
+    assert issues.json()["data"]["issues"] == []
+
+
+# ── B2: regression for bug #66 (invalid servings_override -> 400, never 500) ──
+
+
+def test_skill_recipe_confirm_cooked_rejects_invalid_servings_override(client, auth_headers):
+    recipe = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.add", "input": {"name": "Risotto", "instructions": "Cuire"}},
+    )
+    assert recipe.status_code == 200
+    recipe_id = recipe.json()["data"]["recipe"]["id"]
+
+    invalid = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "recipe.confirm_cooked",
+            "input": {"recipe_id": recipe_id, "servings_override": "abc"},
+        },
+    )
+    assert invalid.status_code == 400
+    assert "servings_override" in invalid.json()["detail"]
+
+    # A valid override on the same recipe still works.
+    valid = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "recipe.confirm_cooked",
+            "input": {"recipe_id": recipe_id, "servings_override": 2},
+        },
+    )
+    assert valid.status_code == 200
+
+
+# ── B2: network-touching actions must fail cleanly (400), never 500 ──────────
+
+
+def test_skill_network_actions_fail_cleanly_before_hitting_the_network(client, auth_headers):
+    cases = [
+        ("video.fetch", {}, "url is required"),
+        ("supermarket.search", {"store": "colruyt", "queries": ["lait"]}, "intermarche"),
+        ("ubereats.geocode_address", {}, "query is required"),
+        ("ubereats.search_products", {}, "query is required"),
+    ]
+    for action, payload, expected_detail in cases:
+        response = client.post(
+            "/api/v1/skill/execute",
+            headers=auth_headers,
+            json={"action": action, "input": payload},
+        )
+        assert response.status_code == 400, f"{action}: {response.text}"
+        if expected_detail:
+            assert expected_detail in response.json()["detail"]
+
+
+def test_skill_ubereats_selected_store_is_db_only(client, auth_headers):
+    saved = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "ubereats.set_selected_store",
+            "input": {"external_store_id": "ext-123", "store_label": "Franprix"},
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["data"]["selection"]["external_store_id"] == "ext-123"
+
+    fetched = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "ubereats.get_selected_store", "input": {}},
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["selection"]["store_label"] == "Franprix"
+
