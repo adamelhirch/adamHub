@@ -57,14 +57,29 @@ DOMAIN_ACTION_PREFIXES = {
 
 def load_action_catalog() -> list[dict]:
     """Parse ACTION_CATALOG out of app/skill/actions.py via AST, without
-    importing the module (which would pull in DB/settings dependencies)."""
+    importing the module (which would pull in DB/settings dependencies).
+
+    The catalog entries carry a dispatch-only `handler` key holding a
+    function reference, which is not a literal; those keys are skipped so
+    the metadata fields (action/description/input_schema) stay parseable.
+    """
     source = ACTIONS_PY.read_text()
     tree = ast.parse(source, filename=str(ACTIONS_PY))
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "ACTION_CATALOG" for t in node.targets
         ):
-            return ast.literal_eval(node.value)
+            catalog = []
+            for entry in node.value.elts:
+                item: dict = {}
+                for key_node, value_node in zip(entry.keys, entry.values):
+                    if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
+                        continue
+                    if key_node.value == "handler":
+                        continue
+                    item[key_node.value] = ast.literal_eval(value_node)
+                catalog.append(item)
+            return catalog
     raise SystemExit(f"ACTION_CATALOG assignment not found in {ACTIONS_PY}")
 
 

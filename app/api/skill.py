@@ -5,7 +5,7 @@ from app.core.auth import resolve_current_or_owner_user
 from app.core.config import get_settings
 from app.core.security import require_api_key
 from app.schemas import SkillExecuteRequest, SkillExecuteResponse
-from app.skill.actions import ACTION_CATALOG, execute_action
+from app.skill.actions import action_catalog_manifest, execute_action
 
 router = APIRouter(prefix="/skill", tags=["skill"], dependencies=[Depends(require_api_key)])
 
@@ -19,7 +19,7 @@ def skill_manifest() -> dict:
         "description": "Skill API for life management domains on AdamHUB",
         "base_url": settings.public_base_url,
         "auth": {"type": "api_key", "header": "X-API-Key"},
-        "actions": ACTION_CATALOG,
+        "actions": action_catalog_manifest(),
         "workflows": {
             "ubereats_grocery": (
                 "End-to-end Uber Eats grocery skill. SETUP (once): ubereats.geocode_address → "
