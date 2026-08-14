@@ -13,8 +13,9 @@ This module is the single source of truth for the rule
 
 Store metadata is never fabricated from client input: the only trusted source is
 a SupermarketSearchCache row. The ``cache_id`` key is consumed at the seam and
-never persisted, and callers hold no knowledge of the cache table, the store
-definition lookup, or the field names that count as "store metadata".
+persisted on the durable mapping so the snapshot can be re-anchored on read;
+callers hold no knowledge of the cache table, the store definition lookup, or
+the field names that count as "store metadata".
 """
 
 from __future__ import annotations
@@ -215,6 +216,7 @@ def create_or_replace_mapping(
         target_type=target_type,
         target_id=target_id,
         store=payload.store,
+        cache_id=payload.cache_id,
         external_id=resolved["external_id"],
         store_label=resolved["store_label"],
         name_snapshot=resolved["name"],

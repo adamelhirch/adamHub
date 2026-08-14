@@ -222,6 +222,7 @@ class SupermarketMappingRead(BaseModel):
     target_type: SupermarketTargetType
     target_id: int
     store: SupermarketStore
+    cache_id: int | None = None
     external_id: str
     store_label: str
     name_snapshot: str
