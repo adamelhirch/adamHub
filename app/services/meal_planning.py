@@ -12,7 +12,7 @@ from app.models import (
     MealSlot,
     Recipe,
 )
-from app.schemas import MealPlanRead, MissingIngredientRead
+from app.schemas import MealPlanRead, MissingIngredientRead, RecipeIngredientIn
 from app.services.cook import RECIPE_CONFIRM_MARKER, compute_recipe_missing_ingredients
 from app.services.store_catalog import resolve_store_fields
 from app.services.units import normalize_name
@@ -227,14 +227,18 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     Store metadata is never taken from the client: it is resolved server-side
     from the SupermarketSearchCache row referenced by ``cache_id`` (the same
     mechanism used by create_or_replace_mapping). Client-supplied store fields
-    are ignored.
+    are ignored. Accepts both a RecipeIngredientIn model and a raw dict (the
+    recipe update route forwards ingredients from ``model_dump``).
     """
+    if isinstance(ingredient_in, dict):
+        ingredient_in = RecipeIngredientIn.model_validate(ingredient_in)
     fields: dict = {
         "name": ingredient_in.name,
         "quantity": ingredient_in.quantity,
         "unit": ingredient_in.unit,
         "note": ingredient_in.note,
         "category": ingredient_in.category,
+        "cache_id": None,
         "store": None,
         "store_label": None,
         "external_id": None,
@@ -250,6 +254,7 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     resolved = resolve_store_fields(session, cache_id)
     fields.update(
         {
+            "cache_id": cache_id,
             "store": resolved["store"],
             "store_label": resolved["store_label"],
             "external_id": resolved["external_id"],

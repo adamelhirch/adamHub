@@ -239,6 +239,7 @@ class RecipeIngredient(SQLModel, table=True):
     quantity: float = 1
     unit: str = "item"
     note: str | None = None
+    cache_id: int | None = Field(default=None, foreign_key="supermarketsearchcache.id")
     store: SupermarketStore | None = None
     store_label: str | None = None
     external_id: str | None = Field(default=None, index=True)
@@ -494,6 +495,7 @@ class SupermarketMapping(SQLModel, table=True):
     target_type: SupermarketTargetType = Field(index=True)
     target_id: int = Field(index=True)
     store: SupermarketStore = Field(index=True)
+    cache_id: int | None = Field(default=None, foreign_key="supermarketsearchcache.id", index=True)
     external_id: str
     store_label: str
     name_snapshot: str

@@ -30,6 +30,7 @@ class RecipeIngredientRead(BaseModel):
     quantity: float
     unit: str
     note: str | None
+    cache_id: int | None = None
     store: SupermarketStore | None = None
     store_label: str | None = None
     external_id: str | None = None
