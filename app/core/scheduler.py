@@ -9,7 +9,7 @@ from app.core.db import engine
 from app.models import CalendarCategory, CalendarEvent, CalendarItem, PantryItem
 from app.services.calendar_hub import list_due_reminders, sync_generated_calendar_items
 from app.services.notifications import build_hub_link, send_push_notification
-from app.services.scraper_service import run_intermarche_scraper
+from app.services.store_catalog import run_intermarche_scraper
 
 logger = logging.getLogger(__name__)
 

@@ -345,7 +345,7 @@ def test_recipe_confirm_cooked_refreshes_marker_plan_timestamp(client, auth_head
 
 def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers, test_engine):
     from app.models import SupermarketSearchCache, SupermarketStore
-    from app.services.scraper_service import upsert_search_cache
+    from app.services.store_catalog import upsert_search_cache
 
     cache = upsert_search_cache(
         Session(test_engine),
