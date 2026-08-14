@@ -38,6 +38,13 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="archive" size={size} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="account"
+        options={{
+          title: "Compte",
+          tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+        }}
+      />
     </Tabs>
   );
 }
