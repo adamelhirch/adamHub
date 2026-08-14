@@ -9,6 +9,7 @@ This is the correct skill behind the frontend `Routine` tab inside the Tasks pag
 <!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
 - `habit.create`
 - `habit.list`
+- `habit.update`
 - `habit.set_active`
 - `habit.log`
 - `habit.list_logs`

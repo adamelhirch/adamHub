@@ -6,7 +6,9 @@ The source of truth is always the live manifest returned by:
 
 - `GET /api/v1/skill/manifest`
 
-As of `2026-03-29`, the skill surface exposes `99` actions.
+<!-- BEGIN GENERATED: action-count (source: app/skill/actions.py ACTION_CATALOG) -->
+As of `2026-08-14`, the skill surface exposes `120` actions.
+<!-- END GENERATED: action-count -->
 
 ## 1) Runtime contract
 
@@ -80,7 +82,8 @@ Never perform destructive writes on implicit intent.
 - tasks -> `task.create|task.list|task.update|task.complete`
 - finances -> `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
 - patrimony -> `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
-- groceries -> `supermarket.list_stores|supermarket.search|grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
+- groceries -> `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.search|grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
+- ubereats grocery -> `ubereats.geocode_address|ubereats.save_address|ubereats.list_stores|ubereats.set_selected_store|ubereats.search_products|ubereats.add_to_cart|ubereats.import_order_to_pantry`
 - pantry -> `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
 - recipes -> `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.delete`
 - meal planning -> `meal_plan.add|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked|meal_plan.log_cooked`
@@ -92,6 +95,7 @@ Never perform destructive writes on implicit intent.
 - subscriptions -> `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
 - notes -> `note.create|note.list|note.get|note.update|note.delete|note.journal`
 - video ingestion -> `video.fetch`
+- linear -> `linear.sync|linear.projects|linear.issues|linear.issue_create`
 
 ## 7) Domain rules you must respect
 
@@ -257,20 +261,24 @@ After a read:
 
 ## 14) Quick action index
 
-- `dashboard.overview`
-- `task.create|task.list|task.update|task.complete`
+<!-- BEGIN GENERATED: action-index (source: app/skill/actions.py ACTION_CATALOG) -->
+- `task.create|task.list|task.update|task.complete|task.delete`
 - `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
 - `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
-- `supermarket.list_stores|supermarket.search`
+- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.search`
+- `ubereats.list_addresses|ubereats.geocode_address|ubereats.save_address|ubereats.activate_address|ubereats.delete_address|ubereats.list_stores|ubereats.set_selected_store|ubereats.get_selected_store|ubereats.search_products|ubereats.add_to_cart|ubereats.list_carts|ubereats.list_past_orders|ubereats.import_order_to_pantry|ubereats.import_third_party_order`
 - `grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
 - `video.fetch`
-- `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.delete`
-- `meal_plan.add|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked|meal_plan.log_cooked`
+- `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.unconfirm_cooked|recipe.delete`
+- `meal_plan.add|meal_plan.log_cooked|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked`
 - `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder`
-- `habit.create|habit.list|habit.set_active|habit.log|habit.list_logs`
+- `habit.create|habit.list|habit.update|habit.set_active|habit.log|habit.list_logs`
 - `goal.create|goal.list|goal.get|goal.update|goal.add_milestone|goal.list_milestones|goal.update_milestone`
 - `event.create|event.list|event.upcoming|event.get|event.update|event.delete`
 - `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
 - `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
 - `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
 - `note.create|note.list|note.get|note.update|note.delete|note.journal`
+- `linear.projects|linear.issues|linear.issue_create|linear.sync`
+- `dashboard.overview`
+<!-- END GENERATED: action-index -->
