@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import apply_updates, create, delete, get_or_404, save
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import CalendarSource, FitnessMeasurement, FitnessSession, FitnessSessionStatus
 from app.schemas import (
     FitnessExerciseIn,
@@ -27,7 +26,7 @@ from app.services.fitness import (
 )
 from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/fitness", tags=["fitness"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/fitness", tags=["fitness"], dependencies=[Depends(owner_only_user)])
 
 
 def _normalize_exercise_payload(values: list[FitnessExerciseIn | str] | None) -> list[dict[str, object]]:

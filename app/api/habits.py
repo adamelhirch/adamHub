@@ -4,15 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import create, get_or_404
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import Habit, HabitFrequency, HabitLog
 from app.schemas import HabitCreate, HabitLogCreate, HabitLogRead, HabitRead, HabitUpdate
 from app.schemas.dto import _normalize_schedule_times, _normalize_schedule_weekdays
 from app.services.calendar_hub import validate_habit_schedule_free
 from app.services.life import update_habit_streak
 
-router = APIRouter(prefix="/habits", tags=["habits"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/habits", tags=["habits"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("", response_model=HabitRead)

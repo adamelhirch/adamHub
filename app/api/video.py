@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.schemas import VideoSourceRead, VideoSourceRequest
 from app.services.video_intake import extract_video_source
 
-router = APIRouter(prefix="/video", tags=["video"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/video", tags=["video"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("/extract", response_model=VideoSourceRead)

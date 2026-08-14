@@ -89,9 +89,12 @@ The user a multi-tenant request is scoped to: a signed-in SaaS user authenticate
 _Avoid_: Current user, requester, caller
 
 **Owner**:
-The single account the personal frontend always acts as; it is not a superuser role, just the one Tenant that pre-dates the SaaS pivot.
+The single account the personal frontend always acts as; it is not a superuser role, just the one Tenant that pre-dates the SaaS pivot. The Owner is also the only caller allowed into the off-MVP domains (finances, tasks, calendar, …), which are not user-scoped — see ADR-0001.
 _Avoid_: Admin, superuser, master account
 
 **Tenant**:
 A user's isolated data scope: every domain record belongs to exactly one tenant, so one tenant's records are invisible (not merely forbidden) to another. Rows created before tenancy existed belong to no tenant until an explicit one-off migration assigns them to the Owner.
 _Avoid_: Account, organization, workspace
+
+**Owner-only domain**:
+An off-MVP domain whose tables have no `user_id` and therefore expose the Owner's data to anyone who can authenticate. The API rejects a non-Owner acting user on these routers with 401 — the Owner is the only legitimate caller until the domain is scoped to tenants. _Avoid_: Private domain, restricted domain

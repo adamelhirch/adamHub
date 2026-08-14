@@ -242,15 +242,16 @@ def test_same_user_cannot_plan_same_date_and_slot_twice(client):
     assert lunch.status_code == 200, lunch.text
 
 
-def test_meal_plan_not_blocked_by_unrelated_task_at_same_time(client):
+def test_meal_plan_not_blocked_by_unrelated_task_at_same_time(client, auth_headers):
     user = register_user(client, "meal-not-blocked@adamelhirch.com")
     recipe_id = _create_recipe_for(client, user["headers"])
 
-    # An unrelated one-shot task occupies the exact same time window.
+    # An unrelated one-shot task occupies the exact same time window. Tasks are
+    # owner-only (unscoped domain), so it is created as the owner via X-API-Key.
     planned_for = (date.today() + timedelta(days=1)).isoformat()
     task = client.post(
         "/api/v1/tasks",
-        headers=user["headers"],
+        headers=auth_headers,
         json={"title": "Réunion", "due_at": f"{planned_for}T12:30:00Z", "estimated_minutes": 30},
     )
     assert task.status_code == 200, task.text
@@ -264,14 +265,14 @@ def test_meal_plan_not_blocked_by_unrelated_task_at_same_time(client):
     assert meal_plan.status_code == 200, meal_plan.text
 
 
-def test_meal_plan_not_blocked_by_unrelated_event_at_same_time(client):
+def test_meal_plan_not_blocked_by_unrelated_event_at_same_time(client, auth_headers):
     user = register_user(client, "meal-not-blocked-event@adamelhirch.com")
     recipe_id = _create_recipe_for(client, user["headers"])
     planned_for = (date.today() + timedelta(days=1)).isoformat()
 
     event = client.post(
         "/api/v1/events",
-        headers=user["headers"],
+        headers=auth_headers,
         json={
             "title": "Appel",
             "start_at": f"{planned_for}T19:30:00Z",

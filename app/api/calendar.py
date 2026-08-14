@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from sqlmodel import select
 
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import CalendarCategory, CalendarItem, CalendarSource
 from app.schemas import (
     CalendarItemCreate,
@@ -24,7 +23,7 @@ from app.services.calendar_hub import (
     validate_calendar_slot_free,
 )
 
-router = APIRouter(prefix="/calendar", tags=["calendar"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/calendar", tags=["calendar"], dependencies=[Depends(owner_only_user)])
 
 
 def _sync_generated(session: SessionDep) -> None:

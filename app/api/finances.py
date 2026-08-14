@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import create
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import Budget, FinanceTransaction, TransactionKind
 from app.schemas import (
     BudgetCreate,
@@ -16,7 +15,7 @@ from app.schemas import (
 )
 from app.services.life import build_month_summary
 
-router = APIRouter(prefix="/finances", tags=["finances"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/finances", tags=["finances"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("/transactions", response_model=FinanceTransactionRead)

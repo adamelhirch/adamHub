@@ -177,3 +177,21 @@ def resolve_current_or_owner_user(request: Request, session: Session) -> User:
         status_code=401,
         detail="Missing API key or Bearer token",
     )
+
+
+def require_owner_only(request: Request, session: Session) -> User:
+    """Gate the unscoped off-MVP domain routers to the Owner only.
+
+    These domains (finances, tasks, calendar, …) are not user-scoped, so a
+    SaaS user must never reach them. Resolution order:
+    1. A valid JWT Bearer token: allowed only if it belongs to ADAMHUB_OWNER_EMAIL;
+       any other user is rejected with a plain 401 (no existence leak).
+    2. A valid shared X-API-Key (legacy personal frontend) -> the owner.
+    3. Neither -> 401, exactly like require_api_key.
+    """
+    user = resolve_current_or_owner_user(request, session)
+    owner_email = (get_settings().owner_email or "").strip().lower()
+    if user.email.strip().lower() == owner_email:
+        return user
+
+    raise HTTPException(status_code=401, detail="Not authorized")
