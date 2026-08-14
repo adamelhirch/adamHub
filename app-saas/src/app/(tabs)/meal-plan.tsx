@@ -7,6 +7,7 @@ import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
 import { listMealPlans, syncMealPlanGroceries, type MealPlanRead } from "@/lib/api";
 import { toISODate } from "@/lib/date";
+import { confirmMealPlanCooked, unconfirmMealPlanCooked } from "@/lib/meal-plans";
 
 const SLOT_LABELS: Record<string, string> = {
   breakfast: "Petit-déjeuner",
@@ -22,6 +23,7 @@ type MealPlanDay = {
     label: string;
     recipe: string;
     syncedGroceryAt: string | null;
+    cooked: boolean;
   }[];
 };
 
@@ -58,6 +60,7 @@ function groupMealPlans(plans: MealPlanRead[]): MealPlanDay[] {
           label: plan.slot ? SLOT_LABELS[plan.slot] : "Repas",
           recipe: plan.recipe_name,
           syncedGroceryAt: plan.synced_grocery_at,
+          cooked: plan.cooked,
         })),
       };
     });
@@ -70,6 +73,8 @@ export default function MealPlanScreen() {
   const [syncingIds, setSyncingIds] = useState<Set<number>>(new Set());
   const [syncErrors, setSyncErrors] = useState<Set<number>>(new Set());
   const [syncCounts, setSyncCounts] = useState<Record<number, number>>({});
+  const [cookingIds, setCookingIds] = useState<Set<number>>(new Set());
+  const [cookErrors, setCookErrors] = useState<Set<number>>(new Set());
   const days = groupMealPlans(plans);
 
   async function handleSync(id: number) {
@@ -94,6 +99,42 @@ export default function MealPlanScreen() {
       setSyncErrors((prev) => new Set(prev).add(id));
     } finally {
       setSyncingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
+
+  async function handleCook(id: number) {
+    if (cookingIds.has(id)) return;
+    const plan = plans.find((p) => p.id === id);
+    if (!plan) return;
+    const wasCooked = plan.cooked;
+    setCookingIds((prev) => new Set(prev).add(id));
+    setCookErrors((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setError(null);
+    setPlans((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, cooked: !wasCooked } : p)),
+    );
+    try {
+      if (wasCooked) {
+        await unconfirmMealPlanCooked(id);
+      } else {
+        await confirmMealPlanCooked(id);
+      }
+    } catch (err) {
+      setPlans((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, cooked: wasCooked } : p)),
+      );
+      setCookErrors((prev) => new Set(prev).add(id));
+      setError(err instanceof Error ? err.message : "Une erreur est survenue");
+    } finally {
+      setCookingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
@@ -170,11 +211,27 @@ export default function MealPlanScreen() {
               <Text className="text-sm text-slate-400">{day.date}</Text>
             </View>
             {day.meals.map((meal) => (
-              <View key={meal.id} className="flex-row items-start py-1.5">
+              <View
+                key={meal.id}
+                className={`flex-row items-start py-1.5 ${meal.cooked ? "opacity-60" : ""}`}
+              >
                 <View className="mr-3 mt-1 h-2 w-2 rounded-full bg-emerald-500" />
                 <View className="flex-1">
-                  <Text className="text-sm font-medium text-slate-500">{meal.label}</Text>
-                  <Text className="text-base text-slate-900">{meal.recipe}</Text>
+                  <View className="flex-row items-center">
+                    <Text className="text-sm font-medium text-slate-500">{meal.label}</Text>
+                    {meal.cooked ? (
+                      <View className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5">
+                        <Text className="text-[10px] font-semibold text-emerald-700">
+                          Cuisiné
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text
+                    className={`text-base ${meal.cooked ? "text-slate-500 line-through" : "text-slate-900"}`}
+                  >
+                    {meal.recipe}
+                  </Text>
                 </View>
                 <View className="ml-3 mt-1 flex-row items-center">
                   {syncCounts[meal.id] != null ? (
@@ -195,6 +252,21 @@ export default function MealPlanScreen() {
                       )}
                     </Pressable>
                   )}
+                  <View className="ml-2">
+                    {cookingIds.has(meal.id) ? (
+                      <ActivityIndicator size="small" color="#10b981" />
+                    ) : (
+                      <Pressable onPress={() => handleCook(meal.id)} hitSlop={8}>
+                        {cookErrors.has(meal.id) ? (
+                          <Ionicons name="alert-circle-outline" size={20} color="#ef4444" />
+                        ) : meal.cooked ? (
+                          <Ionicons name="checkmark-done" size={20} color="#10b981" />
+                        ) : (
+                          <Ionicons name="flame-outline" size={20} color="#f59e0b" />
+                        )}
+                      </Pressable>
+                    )}
+                  </View>
                 </View>
               </View>
             ))}
