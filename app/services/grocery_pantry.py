@@ -2,16 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.models import GroceryItem, GroceryPantrySync, PantryItem, SupermarketSearchCache
-from app.services.supermarket_registry import get_store_definition
+from app.models import GroceryItem, GroceryPantrySync, PantryItem
+from app.services.store_fields import reject_fabricated_store_fields, resolve_store_fields
 from app.services.units import from_base, normalize_name, to_base
-
-# Client-facing store metadata fields that must never be fabricated: they are
-# only ever populated server-side from a SupermarketSearchCache row.
-STORE_METADATA_FIELDS = ("external_id", "store_label", "price_text", "product_url")
 
 
 def resolve_store_metadata(session: Session, data: dict) -> dict:
@@ -24,29 +19,13 @@ def resolve_store_metadata(session: Session, data: dict) -> dict:
     """
     cache_id = data.pop("cache_id", None)
 
-    fabricated = [field for field in STORE_METADATA_FIELDS if data.get(field)]
     if cache_id is None:
-        if fabricated:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Store metadata fields (external_id, store_label, price_text, "
-                    "product_url) require a valid cache_id"
-                ),
-            )
+        reject_fabricated_store_fields(data)
         return data
 
-    cache_row = session.get(SupermarketSearchCache, cache_id)
-    if cache_row is None:
-        raise HTTPException(status_code=404, detail="Search cache entry not found")
-
-    definition = get_store_definition(cache_row.store)
-    data["external_id"] = cache_row.external_id
-    data["store_label"] = definition.label if definition else cache_row.store.value
-    data["price_text"] = cache_row.price_text
-    data["product_url"] = cache_row.product_url
-    data["packaging"] = cache_row.packaging
-    data["image_url"] = cache_row.image_url
+    resolved = resolve_store_fields(session, cache_id)
+    for field in ("external_id", "store_label", "price_text", "product_url", "packaging", "image_url"):
+        data[field] = resolved[field]
     return data
 
 

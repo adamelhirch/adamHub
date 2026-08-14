@@ -14,10 +14,9 @@ from app.models import (
     PantryItem,
     Recipe,
     RecipeIngredient,
-    SupermarketSearchCache,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
-from app.services.supermarket_registry import get_store_definition
+from app.services.store_fields import resolve_store_fields
 from app.services.units import from_base, normalize_name, to_base, unit_meta
 
 
@@ -621,9 +620,10 @@ def unconfirm_recipe_cooked(
 def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     """Return the fields to persist on a RecipeIngredient for validated input.
 
-    Store metadata is never taken from the client: it is resolved server-side from
-    the SupermarketSearchCache row referenced by ``cache_id`` (the same mechanism
-    used by create_or_replace_mapping). Client-supplied store fields are ignored.
+    Store metadata is never taken from the client: it is resolved server-side
+    from the SupermarketSearchCache row referenced by ``cache_id`` (the same
+    mechanism used by create_or_replace_mapping). Client-supplied store fields
+    are ignored.
     """
     fields: dict = {
         "name": ingredient_in.name,
@@ -643,21 +643,17 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     if cache_id is None:
         return fields
 
-    cache_row = session.get(SupermarketSearchCache, cache_id)
-    if cache_row is None:
-        raise ValueError(f"cache_id {cache_id} does not reference a known supermarket search result")
-
-    definition = get_store_definition(cache_row.store)
+    resolved = resolve_store_fields(session, cache_id)
     fields.update(
         {
-            "store": cache_row.store,
-            "store_label": definition.label if definition else cache_row.store.value,
-            "external_id": cache_row.external_id,
-            "category": cache_row.category or fields["category"],
-            "packaging": cache_row.packaging,
-            "price_text": cache_row.price_text,
-            "product_url": cache_row.product_url,
-            "image_url": cache_row.image_url,
+            "store": resolved["store"],
+            "store_label": resolved["store_label"],
+            "external_id": resolved["external_id"],
+            "category": resolved["category"] or fields["category"],
+            "packaging": resolved["packaging"],
+            "price_text": resolved["price_text"],
+            "product_url": resolved["product_url"],
+            "image_url": resolved["image_url"],
         }
     )
     return fields

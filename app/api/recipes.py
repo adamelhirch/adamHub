@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, select
 
 from app.api._crud import get_owned_or_404
@@ -26,10 +26,7 @@ router = APIRouter(prefix="/recipes", tags=["recipes"])
 
 
 def _ingredient_fields(session: Session, ingredient):
-    try:
-        return resolve_recipe_ingredient_fields(session, ingredient)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return resolve_recipe_ingredient_fields(session, ingredient)
 
 
 @router.post("", response_model=RecipeRead)

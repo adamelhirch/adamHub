@@ -433,7 +433,7 @@ def test_recipe_ingredient_rejects_unknown_cache_id(client, auth_headers):
             "ingredients": [{"name": "Lait", "quantity": 1, "unit": "L", "cache_id": 999999}],
         },
     )
-    assert recipe.status_code == 400
+    assert recipe.status_code == 404
 
 
 def test_recipe_ingredient_store_metadata_dropped_without_cache_id(client, auth_headers):
