@@ -6,6 +6,7 @@ export interface GroceryItemCreateInput {
   unit?: string;
   category?: string | null;
   note?: string | null;
+  cache_id?: number;
 }
 
 export function createGroceryItem(payload: GroceryItemCreateInput): Promise<GroceryItemRead> {

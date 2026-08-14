@@ -9,6 +9,7 @@ export interface PantryItemCreateInput {
   expires_at?: string | null;
   location?: string | null;
   note?: string | null;
+  cache_id?: number;
 }
 
 export interface PantryItemUpdateInput {
