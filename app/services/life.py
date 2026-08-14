@@ -113,6 +113,7 @@ def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
                 "quantity": ing.quantity,
                 "unit": ing.unit,
                 "note": ing.note,
+                "cache_id": ing.cache_id,
                 "store": ing.store,
                 "store_label": ing.store_label,
                 "external_id": ing.external_id,
