@@ -42,7 +42,21 @@ const getRandomColor = () => {
   return colors[Math.floor(Math.random() * colors.length)];
 };
 
-function getEffectiveScheduleMode(b: any): TaskScheduleMode {
+interface TaskRow {
+  id: number | string;
+  title: string;
+  status?: string | null;
+  tags?: string[] | null;
+  estimated_minutes?: number | null;
+  description?: string | null;
+  subtasks?: SubTask[] | null;
+  due_at?: string | null;
+  schedule_mode?: string | null;
+  schedule_time?: string | null;
+  schedule_weekday?: number | null;
+}
+
+function getEffectiveScheduleMode(b: TaskRow): TaskScheduleMode {
   if (b.schedule_mode) {
     return String(b.schedule_mode).toLowerCase() as TaskScheduleMode;
   }
@@ -51,7 +65,7 @@ function getEffectiveScheduleMode(b: any): TaskScheduleMode {
 
 // Helper: Frontend to Backend
 function mapToBackendTask(t: Partial<TaskItem>) {
-  const payload: any = {};
+  const payload: Record<string, unknown> = {};
   if (t.title !== undefined) payload.title = t.title;
   if (t.duration !== undefined) payload.estimated_minutes = t.duration;
   if (t.tags !== undefined) payload.tags = t.tags;
@@ -67,7 +81,7 @@ function mapToBackendTask(t: Partial<TaskItem>) {
       try {
         const [year, month, day, hm] = t.slotId.split('-');
         payload.due_at = `${year}-${month}-${day}T${hm}:00Z`;
-      } catch (e) {
+      } catch {
         console.warn("Invalid slotId format", t.slotId);
       }
     } else {
@@ -94,7 +108,7 @@ function mapToBackendTask(t: Partial<TaskItem>) {
 }
 
 // Helper: Backend to Frontend
-function mapToFrontendTask(b: any): TaskItem {
+function mapToFrontendTask(b: TaskRow): TaskItem {
    let descriptionText = "";
    let subtasks: SubTask[] = [];
    const scheduleMode = getEffectiveScheduleMode(b);
@@ -110,7 +124,7 @@ function mapToFrontendTask(b: any): TaskItem {
         if (subtasks.length === 0) {
           subtasks = parsed.subtasks || [];
         }
-      } catch (e) {
+      } catch {
         descriptionText = b.description;
       }
    }
@@ -125,7 +139,7 @@ function mapToFrontendTask(b: any): TaskItem {
           const [yyyy, MM, dd, HH, mm] = parts;
           slotId = `${yyyy}-${MM}-${dd}-${HH}:${mm}`;
         }
-      } catch (e) {}
+      } catch { /* ignore malformed due_at */ }
    }
 
    return {
@@ -155,8 +169,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       const response = await api.get('/tasks');
       const frontendTasks = response.data.map(mapToFrontendTask);
       set({ tasks: frontendTasks, isLoading: false });
-    } catch (error: any) {
-      set({ error: error.message, isLoading: false });
+    } catch (error) {
+      set({ error: (error as Error).message, isLoading: false });
       console.error("Failed to fetch tasks", error);
     }
   },

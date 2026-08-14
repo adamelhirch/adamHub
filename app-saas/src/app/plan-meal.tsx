@@ -26,8 +26,15 @@ function formatChipLabel(date: Date): string {
 }
 
 export default function PlanMealScreen() {
-  const [days, setDays] = useState<string[]>([]);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [days] = useState<string[]>(() => {
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() + index);
+      return toISODate(day);
+    });
+  });
+  const [selectedDate, setSelectedDate] = useState<string | null>(days[0] ?? null);
   const [slot, setSlot] = useState<Slot | null>(null);
   const [selectedRecipeId, setSelectedRecipeId] = useState<number | null>(null);
   const [recipes, setRecipes] = useState<RecipeRead[]>([]);
@@ -36,15 +43,6 @@ export default function PlanMealScreen() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const today = new Date();
-    const dates = Array.from({ length: 7 }, (_, index) => {
-      const day = new Date(today);
-      day.setDate(today.getDate() + index);
-      return toISODate(day);
-    });
-    setDays(dates);
-    setSelectedDate(dates[0]);
-
     let active = true;
     listRecipes()
       .then((data) => {
@@ -162,7 +160,7 @@ export default function PlanMealScreen() {
       ) : recipes.length === 0 ? (
         <View className="mb-4 rounded-2xl border border-slate-100 bg-white p-4">
           <Text className="text-center text-base text-slate-500">
-            Aucune recette pour l'instant.
+            Aucune recette pour l&apos;instant.
           </Text>
         </View>
       ) : (

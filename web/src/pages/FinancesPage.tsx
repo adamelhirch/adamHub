@@ -213,10 +213,10 @@ export default function FinancesPage() {
       setSubAutopay(false);
       setSubNote('');
       setShowSubForm(false);
-    } catch (error: any) {
+    } catch (error) {
       setSubError(
-        error?.response?.data?.detail ??
-          "Impossible d'ajouter cet abonnement.",
+        (error as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail ?? "Impossible d'ajouter cet abonnement.",
       );
     }
   };

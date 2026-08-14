@@ -66,7 +66,7 @@ export default function GroceriesScreen() {
         </View>
       ) : items.length === 0 ? (
         <View className="flex-1 items-center justify-center">
-          <Text className="text-base text-slate-500">Aucun article pour l'instant.</Text>
+          <Text className="text-base text-slate-500">Aucun article pour l&apos;instant.</Text>
         </View>
       ) : (
         items.map((item) => (
