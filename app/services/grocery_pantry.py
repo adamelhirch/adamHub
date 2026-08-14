@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from app.models import GroceryItem, GroceryPantrySync, PantryItem
-from app.services.store_fields import reject_fabricated_store_fields, resolve_store_fields
+from app.services.store_catalog import reject_fabricated_store_fields, resolve_store_fields
 from app.services.units import from_base, normalize_name, to_base
 
 

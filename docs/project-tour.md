@@ -146,9 +146,7 @@ Backend:
 - `app/api/pantry.py`
 - `app/api/endpoints/supermarket.py`
 - `app/services/grocery_pantry.py`
-- `app/services/scraper_service.py`
-- `app/services/supermarket_mapping.py`
-- `app/services/supermarket_registry.py`
+- `app/services/store_catalog.py`
 - `app/services/scrapers/intermarche.py`
 
 Frontend:
@@ -325,9 +323,9 @@ Pour toute extension UI sur ces domaines:
 ### Ajouter une nouvelle enseigne supermarche
 
 1. etendre `SupermarketStore`
-2. enregistrer le provider dans `app/services/supermarket_registry.py`
+2. enregistrer le provider dans `app/services/store_catalog.py`
 3. implementer le scraper sous `app/services/scrapers/`
-4. brancher `app/services/scraper_service.py`
+4. brancher `app/services/store_catalog.py`
 5. tester normalisation + cache + mappings
 6. verifier que le front ne hardcode pas Intermarche
 

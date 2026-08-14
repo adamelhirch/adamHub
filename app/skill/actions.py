@@ -137,9 +137,10 @@ from app.services.connections import (
     upsert_connection as upsert_supermarket_connection,
     decrypt_cookies as decrypt_connection_cookies,
 )
-from app.services.scraper_service import (
+from app.services.store_catalog import (
     fetch_search_results,
     get_selected_store as get_selected_supermarket_store,
+    list_store_definitions,
     upsert_search_cache,
     upsert_selected_store,
 )
@@ -163,7 +164,6 @@ from app.services.ubereats_orders import (
     import_order_to_pantry as import_ubereats_order_to_pantry,
     list_past_orders as list_ubereats_past_orders,
 )
-from app.services.supermarket_registry import list_store_definitions
 from app.services.video_intake import extract_video_source
 
 

@@ -14,7 +14,7 @@ from app.models import (
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
 from app.services.cook import RECIPE_CONFIRM_MARKER, compute_recipe_missing_ingredients
-from app.services.store_fields import resolve_store_fields
+from app.services.store_catalog import resolve_store_fields
 from app.services.units import normalize_name
 
 
