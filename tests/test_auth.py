@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import jwt as pyjwt
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.auth import _jwt_secret, hash_password, verify_password
 from app.models import User
@@ -18,6 +18,72 @@ def test_register_happy_path(client):
     assert body["user"]["email"] == "newuser@example.com"
     assert body["user"]["display_name"] == "New User"
     assert body["user"]["is_active"] is True
+    assert body["user"]["email_verified"] is False
+
+
+def test_verify_email_with_correct_token_marks_verified(client, test_engine, monkeypatch):
+    captured: dict = {}
+
+    async def fake_send(session, user, token):
+        captured["token"] = token
+        return True
+
+    monkeypatch.setattr("app.api.auth.send_verification_email", fake_send)
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"email": "verify@example.com", "password": "secret-123", "display_name": "Verify"},
+    )
+    assert response.status_code == 201
+    assert response.json()["user"]["email_verified"] is False
+    token = captured["token"]
+    assert token
+
+    bad = client.post("/api/v1/auth/verify-email", json={"token": "not-the-token"})
+    assert bad.status_code == 400
+
+    good = client.post("/api/v1/auth/verify-email", json={"token": token})
+    assert good.status_code == 200
+    assert good.json()["email_verified"] is True
+
+    with Session(test_engine) as session:
+        user = session.exec(select(User).where(User.email == "verify@example.com")).first()
+        assert user.email_verified is True
+        assert user.email_verification_token_hash is None
+
+    reuse = client.post("/api/v1/auth/verify-email", json={"token": token})
+    assert reuse.status_code == 400
+
+
+def test_resend_verification_rotates_token(client, test_engine, monkeypatch):
+    captured: list[str] = []
+
+    async def fake_send(session, user, token):
+        captured.append(token)
+        return True
+
+    monkeypatch.setattr("app.api.auth.send_verification_email", fake_send)
+
+    reg = client.post(
+        "/api/v1/auth/register",
+        json={"email": "resend@example.com", "password": "secret-123", "display_name": "Resend"},
+    )
+    assert reg.status_code == 201
+    headers = {"Authorization": f"Bearer {reg.json()['token']}"}
+    assert len(captured) == 1
+    first_token = captured[0]
+
+    resent = client.post("/api/v1/auth/resend-verification", headers=headers)
+    assert resent.status_code == 200
+    assert len(captured) == 2
+    second_token = captured[1]
+    assert second_token != first_token
+
+    old = client.post("/api/v1/auth/verify-email", json={"token": first_token})
+    assert old.status_code == 400
+    new = client.post("/api/v1/auth/verify-email", json={"token": second_token})
+    assert new.status_code == 200
+    assert new.json()["email_verified"] is True
 
 
 def test_login_happy_path(client):

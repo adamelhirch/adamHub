@@ -529,6 +529,9 @@ class User(SQLModel, table=True):
     password_hash: str
     display_name: str
     is_active: bool = True
+    email_verified: bool = Field(default=False, index=True)
+    email_verification_token_hash: str | None = None
+    email_verification_sent_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

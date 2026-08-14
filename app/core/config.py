@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     linear_api_token: str | None = None
     linear_team_id: str | None = None
 
+    # Email verification via Resend. Without ADAMHUB_RESEND_API_KEY (dev/test)
+    # sending is a logged no-op and registration is never blocked.
+    resend_api_key: str | None = None
+    email_from: str = "AdamHUB <onboarding@resend.dev>"
+
     # Cookies-at-rest encryption. Generate with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # Required outside dev/test; see validate_security_config().
