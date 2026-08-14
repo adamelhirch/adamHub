@@ -1,0 +1,80 @@
+# Guide de capture live — Leclerc Drive & Auchan
+
+Objectif : fournir un fichier `.har` (HAR avec le corps des réponses) contenant le
+trafic réseau d'une recherche produit sur chaque enseigne, afin de câbler les
+vrais endpoints dans `app/services/scrapers/leclerc.py` et `auchan.py`.
+
+Le `.har` suffit : il contient toutes les requêtes XHR/Fetch + les réponses JSON.
+On n'a besoin de rien d'autre.
+
+---
+
+## Préparation DevTools (une seule fois, identique pour les deux)
+
+1. Ouvrir le navigateur (Chrome ou Firefox, connecté à ton compte perso).
+2. Ouvrir DevTools : `F12` (ou Cmd+Option+I sur Mac).
+3. Onglet **Network**.
+4. **Cocher « Preserve log »** (Chrome) pour garder le trafic quand la page
+   rechange.
+5. **Filtrer** sur `Fetch/XHR` (barre de filtre en haut du panneau Network).
+6. On va ensuite exporter : bouton **↓ (Export HAR…)** en haut du panneau Network,
+   ou clic droit → « Save all as HAR with content ». **Important : « with content »**
+   pour que les réponses JSON soient dedans.
+
+Fais les deux enseignes séparément (deux `.har`) : plus simple à trier.
+
+---
+
+## Leclerc Drive
+
+URL : https://www.leclercdrive.fr/
+
+Étapes :
+
+1. Ouvrir la page d'accueil, puis **se connecter** (bouton « Se connecter » en
+   haut à droite). Si pas de compte, en créer un.
+2. **Sélectionner un magasin Drive** : entrer ton code postal et choisir le drive
+   (les prix sont propres au magasin).
+3. Aller dans le champ **recherche** et taper un produit simple, ex. `lait`.
+4. Valider la recherche. La page de résultats charge les produits **via des
+   appels XHR/Fetch** — c'est eux qu'on veut.
+5. Optionnel mais utile : changer le tri (ex. « Prix croissant ») et scroller, pour
+   déclencher un ou deux appels de plus.
+6. Dans Network, tu dois voir apparaître des requêtes de type `json`/`fetch` vers
+   un domaine `*.leclercdrive.fr` (ou un sous-domaine api). Ce sont les appels de
+   recherche produit.
+7. Exporter le HAR (`Save all as HAR with content`).
+
+Ce qu'on cherche dedans : l'URL de l'endpoint de recherche, ses query params
+(`q=`, tri, etc.), les headers d'authentification, et un échantillon de la
+réponse JSON (champs nom/prix/image).
+
+---
+
+## Auchan
+
+URL : https://www.auchan.fr/
+
+Étapes :
+
+1. Ouvrir le site, puis **se connecter** (compte Auchan ou Auchan Drive).
+2. **Choisir un magasin** (bouton de sélection de magasin / localisation) pour
+   avoir les prix du drive.
+3. Dans la barre de recherche, taper `lait` et lancer la recherche.
+4. La page de résultats charge les produits via des appels XHR/Fetch.
+5. Éventuellement changer le tri / scroller pour déclencher d'autres appels.
+6. Repérer dans Network les requêtes `fetch/json` vers `*.auchan.fr` (ou un
+   sous-domaine d'API). Exporter le HAR avec contenu.
+
+Note : le domaine `api.drive.leclerc` qu'on avait mis dans le code était un
+placeholder faux — c'est pour ça qu'on capture le vrai endpoint. Pour Auchan, le
+path `/api/v1/products/search` actuel est aussi un placeholder à confirmer.
+
+---
+
+## Livraison
+
+- Sauvegarder deux fichiers, ex. `data/live-capture/leclerc.har` et
+  `data/live-capture/auchan.har`.
+- Les fournir à l'agent (ou les poser dans `data/live-capture/`), qui s'en sert
+  pour corriger les deux scrapers.

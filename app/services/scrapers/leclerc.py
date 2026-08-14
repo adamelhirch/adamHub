@@ -9,12 +9,14 @@ from typing import Any
 import httpx
 
 
-# Leclerc Drive exposes a public JSON search API (`api.drive.leclerc`). The exact
-# envelope has drifted across years and is only really validated with a live
-# session (cookies from a logged-in browser with a Drive store selected, so
-# prices are store-specific). This module follows the same plumbing contract as
-# `carrefour.py` — JSON API + cookies — and is defensive about the payload shape.
-LECLERC_BASE_URL = "https://api.drive.leclerc"
+# Leclerc Drive is a client-side SPA at www.leclercdrive.fr: the real search
+# endpoint is only visible in the network traffic of a logged-in session (with a
+# Drive store selected, so prices are store-specific). This module follows the
+# same plumbing contract as `carrefour.py` — JSON API + cookies — and is
+# defensive about the payload shape. The search path below is a placeholder that
+# must be replaced once the real endpoint is captured (see the live-capture
+# wizard in scripts/).
+LECLERC_BASE_URL = "https://www.leclercdrive.fr"
 LECLERC_API_VERSION = "v1"
 LECLERC_COOKIES_PATH = Path(__file__).resolve().parents[3] / "data" / "cookies_leclerc.json"
 
