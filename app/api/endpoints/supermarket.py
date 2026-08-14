@@ -46,9 +46,13 @@ from app.services.connections import (
     list_connections as list_supermarket_connections,
     upsert_connection as upsert_supermarket_connection,
 )
-from app.services.scraper_service import (
+from app.services.store_catalog import (
+    create_or_replace_mapping,
+    deactivate_mapping,
     fetch_search_results,
+    get_active_mapping,
     get_selected_store,
+    list_store_definitions,
     load_active_cookies,
     upsert_search_cache,
     upsert_selected_store,
@@ -79,12 +83,6 @@ from app.services.ubereats_orders import (
     extract_order_uuid,
     import_order_to_pantry as import_ubereats_order_to_pantry,
     list_past_orders as list_ubereats_past_orders,
-)
-from app.services.supermarket_registry import list_store_definitions
-from app.services.supermarket_mapping import (
-    create_or_replace_mapping,
-    deactivate_mapping,
-    get_active_mapping,
 )
 
 router = APIRouter(prefix="/supermarket", tags=["supermarket"], dependencies=[Depends(require_api_key)])

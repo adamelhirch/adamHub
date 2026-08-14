@@ -9,7 +9,7 @@ from app.models import (
     SupermarketSearchCache,
     SupermarketStore,
 )
-from app.services.scraper_service import normalize_search_result, upsert_search_cache
+from app.services.store_catalog import normalize_search_result, upsert_search_cache
 from app.services.scrapers.intermarche import (
     extract_category_from_tracking_code,
     extract_category_from_product_breadcrumb,

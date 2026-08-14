@@ -24,7 +24,7 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 | Patrimony | `/patrimony` | Oui | Oui | `app/api/patrimony.py`, `web/src/pages/FinancesPage.tsx`, `web/src/store/patrimonyStore.ts` | Comptes + objectifs d'epargne |
 | Groceries | `/groceries` | Oui | Oui | `app/api/groceries.py`, `web/src/pages/GroceriesPage.tsx`, `web/src/store/groceryStore.ts` | Peut etre store-backed ou generique |
 | Pantry | `/pantry` | Oui | Oui | `app/api/pantry.py`, `web/src/pages/GroceriesPage.tsx`, `web/src/store/groceryStore.ts` | Sync avec groceries et recettes |
-| Supermarket | `/supermarket` | Oui | Oui | `app/api/endpoints/supermarket.py`, `app/services/scraper_service.py`, `app/services/supermarket_mapping.py` | v1: Intermarche uniquement |
+| Supermarket | `/supermarket` | Oui | Oui | `app/api/endpoints/supermarket.py`, `app/services/store_catalog.py` | v1: Intermarche uniquement |
 | Recipes | `/recipes` | Oui | Oui | `app/api/recipes.py`, `web/src/pages/RecipesPage.tsx` | Creation manuelle cote front |
 | Meal plans | `/meal-plans` | Oui | Oui | `app/api/meal_plans.py`, `app/services/meal_planning.py`, `web/src/pages/RecipesPage.tsx`, `web/src/pages/CalendarPage.tsx` | Planification + sync groceries + consommation pantry |
 | Calendar | `/calendar` | Oui | Oui | `app/api/calendar.py`, `app/services/calendar_hub.py`, `web/src/pages/CalendarPage.tsx` | Timeline unifiee + anti-chevauchement |
@@ -91,6 +91,6 @@ Cette matrice remplace l'ancienne vue endpoint-par-endpoint devenue obsolète. E
 ## Chantiers probables ensuite
 
 1. Completer l'UI pour les domaines REST-only ou partiels: habits, goals, events, notes, subscriptions.
-2. Ajouter de nouvelles enseignes en reutilisant `supermarket_registry.py`.
+2. Ajouter de nouvelles enseignes en reutilisant `store_catalog.py`.
 3. Continuer la decoupe du frontend pour reduire la taille du bundle principal.
 4. Ajouter des skill playbooks plus fins pour les flows courses / recettes / fitness / patrimoine.

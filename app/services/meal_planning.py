@@ -16,7 +16,7 @@ from app.models import (
     RecipeIngredient,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
-from app.services.store_fields import resolve_store_fields
+from app.services.store_catalog import resolve_store_fields
 from app.services.units import from_base, normalize_name, to_base, unit_meta
 
 
