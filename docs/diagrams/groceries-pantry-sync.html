@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grocery ↔ pantry sync</title>
+  <!-- Type: State machine (sync relationship). Budget: 5 states, 6 transitions.
+       Cut: direct-consumption is shown as a terminal state; re-stocking after a
+       direct consume is the same CHECK transition and is not duplicated. -->
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-accent:  #eb6c36;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 900px; display: block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">State machine · Groceries &amp; pantry</p>
+    <h1>Grocery check restocks the pantry</h1>
+
+    <svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="groceries-pantry-sync-title groceries-pantry-sync-desc">
+      <title id="groceries-pantry-sync-title">Grocery check restocks the pantry</title>
+      <desc id="groceries-pantry-sync-desc">State machine of the GroceryItem to PantryItem sync: checking a grocery item restocks a matching pantry item through a GroceryPantrySync row, unchecking reverses the restock, and pantry stock is consumed either directly via PantryConsume or by cook confirmation, whose unconfirm restores stock.</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+      <!-- Transitions (drawn first, behind states) -->
+      <line x1="88" y1="132" x2="260" y2="132" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="460" y1="132" x2="560" y2="132" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <line x1="560" y1="156" x2="460" y2="156" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <line x1="440" y1="312" x2="440" y2="388" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <line x1="580" y1="312" x2="580" y2="388" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <path d="M 760,428 H 872 Q 880,428 880,420 V 280 Q 880,272 872,272 H 620"
+            fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+      <!-- Transition labels -->
+      <rect x="484" y="112" width="48" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="508" y="120" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CHECK</text>
+
+      <rect x="480" y="136" width="56" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="508" y="144" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">UNCHECK</text>
+
+      <rect x="448" y="340" width="40" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="468" y="348" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CONSUME</text>
+
+      <rect x="588" y="340" width="32" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="604" y="348" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">COOK</text>
+
+      <rect x="724" y="252" width="48" height="12" rx="2" fill="#f5f5f5"/>
+      <text x="748" y="260" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">UNCONFIRM</text>
+
+      <!-- Start dot -->
+      <circle cx="80" cy="132" r="6" fill="#2d3142"/>
+
+      <!-- State: Grocery · unchecked -->
+      <rect x="260" y="92" width="200" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="268" y="100" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="288" y="108" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="360" y="140" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Grocery · unchecked</text>
+      <text x="360" y="156" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">no GroceryPantrySync</text>
+
+      <!-- State: Grocery · checked (focal coral) -->
+      <rect x="560" y="92" width="200" height="80" rx="8" fill="rgba(235,108,54,0.08)" stroke="#eb6c36" stroke-width="1"/>
+      <rect x="568" y="100" width="40" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.50)" stroke-width="0.8"/>
+      <text x="588" y="108" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="660" y="140" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Grocery · checked</text>
+      <text x="660" y="156" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">GroceryPantrySync · added_qty</text>
+
+      <!-- State: Pantry · in stock -->
+      <rect x="380" y="232" width="240" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="388" y="240" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="408" y="248" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="500" y="280" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Pantry · in stock</text>
+      <text x="500" y="296" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">quantity on hand</text>
+
+      <!-- State: Pantry · consumed (direct) -->
+      <rect x="260" y="388" width="200" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="268" y="396" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="288" y="404" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="360" y="436" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Pantry · consumed</text>
+      <text x="360" y="452" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">direct · PantryConsume</text>
+
+      <!-- State: Pantry · consumed (cook) -->
+      <rect x="560" y="388" width="200" height="80" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <rect x="568" y="396" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.40)" stroke-width="0.8"/>
+      <text x="588" y="404" fill="#2d3142" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STATE</text>
+      <text x="660" y="436" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Pantry · consumed</text>
+      <text x="660" y="452" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">cook · lots stored</text>
+
+      <!-- Legend strip -->
+      <line x1="40" y1="548" x2="960" y2="548" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+      <text x="40" y="564" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+
+      <circle cx="48" cy="584" r="6" fill="#2d3142"/>
+      <text x="64" y="588" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">Start</text>
+
+      <rect x="120" y="576" width="24" height="12" rx="8" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+      <text x="152" y="588" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">State</text>
+
+      <line x1="232" y1="584" x2="260" y2="584" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <text x="268" y="588" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">Transition</text>
+
+      <line x1="356" y1="584" x2="384" y2="584" stroke="#eb6c36" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+      <text x="392" y="588" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">Happy path</text>
+
+      <line x1="496" y1="584" x2="524" y2="584" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+      <text x="532" y="588" fill="#4f5d75" font-size="8" font-family="'Geist', sans-serif">Return / reversal</text>
+    </svg>
+  </div>
+</body>
+</html>
