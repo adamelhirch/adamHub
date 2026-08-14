@@ -8,7 +8,7 @@ All examples assume:
 Use:
 
 - a public AdamHUB URL if the assistant runtime is external
-- `http://adamhub-api:8000` only if the assistant runtime shares the same Docker network
+- `http://adamhub-api:8000` only if the assistant runtime shares the same container network
 - never `127.0.0.1` for a remote assistant runtime
 - prefer `ADAMHUB_API_URL`; `ADAMHUB_URL` is only a compatibility fallback
 

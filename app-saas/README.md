@@ -15,7 +15,7 @@ codebase (react-native-web).
 - For iOS simulator: Xcode
 - For Android emulator: Android Studio + an AVD
 - The AdamHUB backend running locally at `http://localhost:8000` (see the repo
-  root `README.md` / `docker-compose.yml`)
+  root `README.md` / `docker-compose.yml` run with `podman-compose`)
 
 ## Install
 
