@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
 import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
 import { GroceryItemRead, listGroceryItems, updateGroceryItem } from "@/lib/api";
+import { deleteGroceryItem } from "@/lib/groceries";
 
 export default function GroceriesScreen() {
   const [items, setItems] = useState<GroceryItemRead[]>([]);
@@ -12,24 +14,31 @@ export default function GroceriesScreen() {
   const [error, setError] = useState<string | null>(null);
   const remaining = items.filter((item) => !item.checked).length;
 
-  useEffect(() => {
-    let active = true;
-    listGroceryItems()
-      .then((data) => {
-        if (active) setItems(data);
-      })
-      .catch((err) => {
-        if (active) {
-          setError(err instanceof Error ? err.message : "Une erreur est survenue");
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      async function load() {
+        setLoading(true);
+        setError(null);
+        try {
+          const data = await listGroceryItems();
+          if (!cancelled) setItems(data);
+        } catch (err) {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : "Une erreur est survenue");
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
         }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+      }
+
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   async function toggle(id: number) {
     const current = items.find((item) => item.id === id);
@@ -49,12 +58,39 @@ export default function GroceriesScreen() {
     }
   }
 
+  function handleDelete(id: number) {
+    Alert.alert("Supprimer l'article ?", "Cette action est irréversible.", [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Supprimer",
+        style: "destructive",
+        onPress: () => {
+          deleteGroceryItem(id)
+            .then(() => {
+              setItems((prev) => prev.filter((item) => item.id !== id));
+            })
+            .catch((err) => {
+              setError(err instanceof Error ? err.message : "Une erreur est survenue");
+            });
+        },
+      },
+    ]);
+  }
+
   return (
     <Screen>
-      <ScreenHeader
-        title="Courses"
-        subtitle={`${remaining} article${remaining > 1 ? "s" : ""} à acheter`}
-      />
+      <View className="mb-6 flex-row items-center justify-between">
+        <ScreenHeader
+          title="Courses"
+          subtitle={`${remaining} article${remaining > 1 ? "s" : ""} à acheter`}
+        />
+        <Pressable
+          onPress={() => router.push("/new-grocery")}
+          className="h-11 w-11 items-center justify-center rounded-full bg-emerald-600 active:bg-emerald-700"
+        >
+          <Ionicons name="add" size={24} color="#ffffff" />
+        </Pressable>
+      </View>
       {error ? (
         <View className="mb-4 rounded-xl bg-red-50 px-4 py-3">
           <Text className="text-sm text-red-600">{error}</Text>
@@ -93,6 +129,9 @@ export default function GroceriesScreen() {
             <Text className="text-sm font-medium text-slate-500">
               {item.quantity} {item.unit}
             </Text>
+            <Pressable onPress={() => handleDelete(item.id)} hitSlop={8} className="ml-3">
+              <Ionicons name="trash-outline" size={20} color="#94a3b8" />
+            </Pressable>
           </Pressable>
         ))
       )}
