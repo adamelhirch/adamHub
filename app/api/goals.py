@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import apply_updates, create, get_or_404, save
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import Goal, GoalMilestone, GoalStatus
 from app.schemas import (
     GoalCreate,
@@ -16,7 +15,7 @@ from app.schemas import (
     GoalUpdate,
 )
 
-router = APIRouter(prefix="/goals", tags=["goals"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/goals", tags=["goals"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("", response_model=GoalRead)

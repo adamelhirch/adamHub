@@ -4,13 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import delete, get_or_404
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import CalendarEvent, CalendarSource, EventType
 from app.schemas import EventCreate, EventRead, EventUpdate
 from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/events", tags=["events"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/events", tags=["events"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("", response_model=EventRead)

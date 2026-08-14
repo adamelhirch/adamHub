@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.api.deps import SessionDep
+from app.api.deps import SessionDep, owner_only_user
 from app.core.auth import resolve_current_or_owner_user
 from app.core.config import get_settings
-from app.core.security import require_api_key
 from app.schemas import SkillExecuteRequest, SkillExecuteResponse
 from app.skill.actions import action_catalog_manifest, execute_action
 
-router = APIRouter(prefix="/skill", tags=["skill"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/skill", tags=["skill"], dependencies=[Depends(owner_only_user)])
 
 
 @router.get("/manifest")
@@ -41,9 +40,10 @@ def skill_manifest() -> dict:
 def skill_execute(
     payload: SkillExecuteRequest, session: SessionDep, request: Request
 ) -> SkillExecuteResponse:
-    # The router-level require_api_key already authenticated the caller; resolve
-    # the acting user with the same dual-mode logic used by the domain routers so
-    # skill actions are scoped to the same tenant the HTTP calls are.
+    # The router-level require_owner_only already authenticated the caller (owner
+    # via X-API-Key or owner JWT); resolve the acting user with the same dual-mode
+    # logic used by the domain routers so skill actions are scoped to the same
+    # tenant the HTTP calls are.
     user = resolve_current_or_owner_user(request, session)
     try:
         data = execute_action(payload.action, payload.input, session, user=user)

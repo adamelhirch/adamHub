@@ -9,9 +9,8 @@ from fastapi.responses import PlainTextResponse
 from sqlmodel import select
 
 from app.api.calendar import list_calendar_items
-from app.api.deps import SessionDep
+from app.api.deps import SessionDep, owner_only_user
 from app.core.config import get_settings
-from app.core.security import require_api_key
 from app.models import CalendarFeed, CalendarSource
 from app.schemas import CalendarFeedCreate, CalendarFeedRead
 from app.services.calendar_hub import build_ics
@@ -20,7 +19,7 @@ from app.services.calendar_hub import build_ics
 private_router = APIRouter(
     prefix="/calendar/feeds",
     tags=["calendar-feeds"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(owner_only_user)],
 )
 
 public_router = APIRouter(tags=["calendar-feeds-public"])

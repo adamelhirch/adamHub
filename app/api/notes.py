@@ -4,12 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlmodel import select
 
 from app.api._crud import apply_updates, create, delete, get_or_404, save
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import Note, NoteKind
 from app.schemas import NoteCreate, NoteRead, NoteUpdate
 
-router = APIRouter(prefix="/notes", tags=["notes"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/notes", tags=["notes"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("", response_model=NoteRead)

@@ -2,8 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import LinearIssueCache
 from app.schemas import LinearIssueCreate, LinearIssueRead, LinearProjectRead, LinearSyncResult
 from app.services.linear_hub import (
@@ -16,7 +15,7 @@ from app.services.linear_hub import (
     sync_linear_cache,
 )
 
-router = APIRouter(prefix="/linear", tags=["linear"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/linear", tags=["linear"], dependencies=[Depends(owner_only_user)])
 
 
 @router.get("/projects", response_model=list[LinearProjectRead])

@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import get_or_404
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import CalendarSource, Subscription
 from app.schemas import (
     SubscriptionCreate,
@@ -16,7 +15,7 @@ from app.schemas import (
 from app.services.life import build_subscription_projection
 from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(owner_only_user)])
 
 
 def _subscription_slot_start(day: date) -> datetime:

@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import select
 
 from app.api._crud import apply_updates, create, delete, get_or_404, save
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import Account, SavingsGoal
 from app.schemas import (
     AccountCreate,
@@ -18,7 +17,7 @@ from app.schemas import (
 router = APIRouter(
     prefix="/patrimony",
     tags=["patrimony"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(owner_only_user)],
 )
 
 

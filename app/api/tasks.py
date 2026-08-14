@@ -4,13 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import create, delete, get_or_404, save
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api.deps import SessionDep, owner_only_user
 from app.models import CalendarSource, Task, TaskStatus
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 from app.services.calendar_hub import apply_task_update, validate_task_schedule_free
 
-router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(owner_only_user)])
 
 
 @router.post("", response_model=TaskRead)
