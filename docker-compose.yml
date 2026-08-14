@@ -1,3 +1,5 @@
+# Podman-compatible: standard Compose format, run with `podman-compose up -d`.
+# The Dockerfile below produces a standard OCI image, valid under Podman too.
 services:
   postgres:
     image: postgres:16-alpine
@@ -30,7 +32,7 @@ services:
     env_file:
       - .env
     environment:
-      # Explicit dev/test opt-in so `docker compose up` works even with a
+      # Explicit dev/test opt-in so `podman-compose up` works even with a
       # minimal .env (no ADAMHUB_ENV, empty JWT/cookie keys, change-me API key).
       - ADAMHUB_ENV=development
       - ADAMHUB_DB_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}

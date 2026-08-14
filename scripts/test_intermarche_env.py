@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Teste Intermarche en acces direct puis, en option, "
-            "l'API AdamHUB pour comparer Mac et VPS."
+            "l'API AdamHUB pour comparer les environnements."
         )
     )
     parser.add_argument("--query", default=DEFAULT_QUERY, help="Requete Intermarche a tester.")
@@ -585,8 +585,8 @@ def main() -> int:
 
     print(
         "\nInterprete le resultat comme suit:\n"
-        "- HTTP direct OK + API POST KO sur le VPS => probleme de conteneur/deploiement AdamHUB.\n"
-        "- HTTP direct KO seulement sur le VPS => probleme d'IP VPS, de cookies, ou de session Intermarche.\n"
+        "- HTTP direct OK + API POST KO => probleme de conteneur/deploiement AdamHUB.\n"
+        "- HTTP direct KO seulement en remote => probleme d'IP, de cookies, ou de session Intermarche.\n"
         "- HTTP direct KO partout => cookies invalides ou magasin non selectionne."
     )
     return 0

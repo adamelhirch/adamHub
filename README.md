@@ -78,12 +78,14 @@ Backend:
 
 ```bash
 cp .env.example .env
-docker compose up -d postgres
+podman-compose up -d postgres
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
+
+`docker-compose.yml` is Podman-compatible (standard Compose format, valid OCI images), so it runs with `podman-compose`. Only PostgreSQL is started for local dev — the app container image is not built until the MVP is complete.
 
 Frontend:
 
@@ -179,7 +181,6 @@ Keep these invariants in mind:
 
 - [Project tour](docs/project-tour.md)
 - [Coverage matrix](docs/phase2_1_matrix.md)
-- [VPS install + assistant hookup](docs/vps-install.md)
 - [Assistant master skill](adamhub-assistant/SKILL.md)
 - [Assistant env example](adamhub-assistant/.env.example)
 - [Assistant action catalog](adamhub-assistant/references/action-catalog.md)
