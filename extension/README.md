@@ -14,14 +14,25 @@ des cookies — un clic dans la popup, et le hub a une session valide.
 L'icône AdamHUB apparaît dans la barre. Épingle-la (clic sur la pièce de puzzle
 puis le pin).
 
-## Première configuration
+## Comment ça marche
 
-L'extension v0.2 n'a **plus aucune saisie**. Auth via le hub.
+L'extension est en v0.2 : les URLs sont **codées en dur** dans `popup.js` —
+hub sur `http://127.0.0.1:8000` (`HUB_URL`), frontend sur
+`http://127.0.0.1:5173` / `http://localhost:5173` (`FRONTEND_URLS`). Il n'y a
+**pas de page d'options** : rien n'est configurable depuis l'extension pour
+l'instant.
 
-1. Ouvre `http://127.0.0.1:5173` (l'app AdamHUB) dans Arc/Chrome
-2. Crée un compte ou connecte-toi
-3. Click sur l'icône AdamHUB Connect → la popup affiche automatiquement « ✓ ton prénom »
-4. Sinon : click sur **« Ouvrir AdamHUB »** dans la popup → connecte-toi → reviens dans la popup
+L'authentification se fait via le hub :
+
+1. Connecte-toi sur l'app AdamHUB dans un onglet (`http://127.0.0.1:5173`).
+2. L'extension lit le **JWT** `adamhub_token` dans le `localStorage` de cet
+   onglet (`chrome.scripting.executeScript`) puis le **met en cache** dans
+   `chrome.storage.local` (clé `token`).
+3. À l'ouverture de la popup, elle affiche ton prénom
+   (`GET /api/v1/auth/me` avec le token) ; sinon un bouton **« Ouvrir
+   AdamHUB »** invite à se connecter.
+4. Si le token est expiré ou invalide (HTTP 401 à l'import), le cache est
+   purgé et il faut se reconnecter sur AdamHUB.
 
 ## Connecter un magasin
 
@@ -30,30 +41,31 @@ L'extension v0.2 n'a **plus aucune saisie**. Auth via le hub.
    Carrefour/UE).
 2. Clique l'icône AdamHUB → bouton **Connecter** à côté du magasin.
 3. L'extension lit les cookies (y compris les `HttpOnly`) via l'API
-   `chrome.cookies` et les pousse vers `POST /supermarket/connections/import`.
+   `chrome.cookies` et les pousse vers
+   `POST /api/v1/supermarket/connections/import` avec le token du hub.
 4. La popup affiche `✓ Carrefour synchronisé` avec la date — c'est tout.
+   L'horodatage est mémorisé dans `chrome.storage.local` (clé `lastSync`).
 
-Tu peux refaire **Connecter** quand tu veux pour remplacer une session expirée
-(la déduplication backend se fait par `(store, label)`).
+Tu peux refaire **Connecter** quand tu veux pour remplacer une session
+expirée.
 
-## Multi-comptes
+## Plusieurs comptes
 
-Pour ajouter le compte de quelqu'un d'autre :
-
-1. La 2e personne installe l'extension de son côté (sideload, mêmes étapes)
-2. Configure l'URL + sa propre clé API + son étiquette (`Sophie`)
-3. Connecte ses magasins normalement
-
-Côté hub, on retrouve une connexion par étiquette ; on peut basculer entre
-elles via `PUT /supermarket/connections/{id}/activate` (ou un dropdown frontend
-à venir).
+Pas de configuration par utilisateur : chaque personne installe l'extension de
+son côté et se connecte à son **propre compte AdamHUB** dans un onglet.
+L'extension synchronise les magasins sous l'identité du token en cours ; une
+connexion est créée par magasin avec une étiquette vide (`label: ""`).
 
 ## Permissions demandées
 
 - `cookies` — pour lire les cookies des 3 domaines (HttpOnly inclus)
-- `storage` — pour mémoriser l'URL du hub + la clé API localement
-- `host_permissions` limitées à `*.carrefour.fr`, `*.intermarche.com`,
-  `*.ubereats.com`. L'extension ne touche **aucun** autre site.
+- `storage` — pour **mémoriser le token JWT et l'horodatage `lastSync`**
+  localement
+- `scripting` + `tabs` — pour lire le token depuis l'onglet AdamHUB ouvert
+- `host_permissions` limitées à `127.0.0.1:5173` / `localhost:5173` et
+  `127.0.0.1:8000` / `localhost:8000` (hub local), plus `*.carrefour.fr`,
+  `*.intermarche.com`, `*.ubereats.com`. L'extension ne touche **aucun**
+  autre site.
 
-L'extension n'envoie de données qu'au hub configuré (HTTPS recommandé pour la
-prod).
+L'extension n'envoie de données qu'au hub local codé en dur
+(`http://127.0.0.1:8000`).

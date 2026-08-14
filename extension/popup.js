@@ -1,4 +1,4 @@
-// Hard-coded for now — will become configurable when the hub ships to a VPS.
+// Hard-coded for now — TODO: make configurable once the hub has a stable URL.
 const HUB_URL = "http://127.0.0.1:8000";
 const FRONTEND_URLS = ["http://127.0.0.1:5173/", "http://localhost:5173/"];
 const TOKEN_LOCALSTORAGE_KEY = "adamhub_token";
