@@ -47,7 +47,10 @@ def skill_execute(
     user = resolve_current_or_owner_user(request, session)
     try:
         data = execute_action(payload.action, payload.input, session, user=user)
-    except ValueError as exc:
+    except (ValueError, TypeError, KeyError) as exc:
+        # ValueError is the skill layer's contract for actionable failures;
+        # TypeError/KeyError are also converted here so no residual parsing
+        # bug in a skill handler can leak a raw 500 to the assistant.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return SkillExecuteResponse(action=payload.action, ok=True, data=data)

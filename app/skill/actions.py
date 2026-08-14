@@ -22,6 +22,7 @@ from app.models import (
     GroceryItem,
     GroceryPantrySync,
     Habit,
+    HabitFrequency,
     HabitLog,
     LinearIssueCache,
     LinearProjectCache,
@@ -66,6 +67,7 @@ from app.schemas import (
     GroceryItemCreate,
     GroceryItemUpdate,
     HabitCreate,
+    HabitUpdate,
     LinearIssueCreate,
     MealPlanCreate,
     MealPlanUpdate,
@@ -82,6 +84,10 @@ from app.schemas import (
     SubscriptionUpdate,
     TaskCreate,
     TaskUpdate,
+)
+from app.schemas.dto import (
+    _normalize_schedule_times,
+    _normalize_schedule_weekdays,
 )
 from app.services.life import (
     build_dashboard_overview,
@@ -120,6 +126,7 @@ from app.services.calendar_hub import (
     build_calendar_item_read,
     list_due_reminders,
     sync_generated_calendar_items,
+    validate_habit_schedule_free,
     validate_task_schedule_free,
     validate_calendar_slot_free,
 )
@@ -160,7 +167,6 @@ from app.services.scrapers.ubereats import (
     list_grocery_stores as list_ubereats_grocery_stores,
 )
 from app.services.ubereats_orders import (
-    UbereatsOrderError,
     extract_order_uuid,
     import_order_to_pantry as import_ubereats_order_to_pantry,
     list_past_orders as list_ubereats_past_orders,
@@ -188,6 +194,31 @@ def _clamp_int(value, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def _int_id(payload: dict, field: str) -> int:
+    """Parse a scalar record id from a skill payload, raising ValueError on any
+    malformed input (missing, boolean, non-numeric string, or non-scalar JSON).
+
+    Unlike raw ``int(payload.get(field, 0))`` — which leaks a TypeError on a
+    list/dict value — this never raises outside ValueError, so skill_execute
+    converts every parsing failure into a clean 400.
+    """
+    value = payload.get(field)
+    if value is None:
+        raise ValueError(f"{field} is required")
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError as exc:
+            raise ValueError(f"{field} must be an integer") from exc
+    raise ValueError(f"{field} must be an integer")
 
 
 def _parse_datetime(value, field_name: str) -> datetime | None:
@@ -225,6 +256,11 @@ _SLOT_DEFAULT_TIME: dict[str, time] = {
     "lunch": time(hour=12, minute=30),
     "dinner": time(hour=19, minute=30),
 }
+
+
+def _subscription_slot_start(day: date) -> datetime:
+    """Mirror of app/api/subscriptions.py — subscriptions own the 9:00 slot."""
+    return datetime.combine(day, time(hour=9, minute=0)).replace(tzinfo=timezone.utc)
 
 
 def _resolve_meal_planned_at(payload: dict, current: datetime | None = None) -> datetime:
@@ -311,7 +347,7 @@ def _handle_task_list(payload, session, *, user, now, user_id):
 
 
 def _handle_task_update(payload, session, *, user, now, user_id):
-    task_id = int(payload.get("task_id", 0))
+    task_id = _int_id(payload, "task_id")
     task = session.get(Task, task_id)
     if not task:
         raise ValueError("task_id not found")
@@ -333,7 +369,7 @@ def _handle_task_update(payload, session, *, user, now, user_id):
 
 
 def _handle_task_complete(payload, session, *, user, now, user_id):
-    task_id = int(payload.get("task_id", 0))
+    task_id = _int_id(payload, "task_id")
     task = session.get(Task, task_id)
     if not task:
         raise ValueError("task_id not found")
@@ -341,6 +377,15 @@ def _handle_task_complete(payload, session, *, user, now, user_id):
     task.updated_at = now
     task = save(session, task)
     return {"task": task.model_dump(mode="json")}
+
+
+def _handle_task_delete(payload, session, *, user, now, user_id):
+    task_id = _int_id(payload, "task_id")
+    task = session.get(Task, task_id)
+    if not task:
+        raise ValueError("task_id not found")
+    delete(session, task)
+    return {"ok": True, "deleted_id": task_id}
 
 
 def _handle_finance_add_transaction(payload, session, *, user, now, user_id):
@@ -436,7 +481,7 @@ def _handle_fitness_create_session(payload, session, *, user, now, user_id):
 
 
 def _handle_fitness_update_session(payload, session, *, user, now, user_id):
-    session_id = int(payload.get("session_id", 0))
+    session_id = _int_id(payload, "session_id")
     row = session.get(FitnessSession, session_id)
     if not row:
         raise ValueError("session_id not found")
@@ -487,7 +532,7 @@ def _handle_fitness_update_session(payload, session, *, user, now, user_id):
 
 
 def _handle_fitness_complete_session(payload, session, *, user, now, user_id):
-    session_id = int(payload.get("session_id", 0))
+    session_id = _int_id(payload, "session_id")
     row = session.get(FitnessSession, session_id)
     if not row:
         raise ValueError("session_id not found")
@@ -512,7 +557,7 @@ def _handle_fitness_complete_session(payload, session, *, user, now, user_id):
 
 
 def _handle_fitness_delete_session(payload, session, *, user, now, user_id):
-    session_id = int(payload.get("session_id", 0))
+    session_id = _int_id(payload, "session_id")
     row = session.get(FitnessSession, session_id)
     if not row:
         raise ValueError("session_id not found")
@@ -550,7 +595,7 @@ def _handle_fitness_add_measurement(payload, session, *, user, now, user_id):
 
 
 def _handle_fitness_update_measurement(payload, session, *, user, now, user_id):
-    measurement_id = int(payload.get("measurement_id", 0))
+    measurement_id = _int_id(payload, "measurement_id")
     row = session.get(FitnessMeasurement, measurement_id)
     if not row:
         raise ValueError("measurement_id not found")
@@ -573,7 +618,7 @@ def _handle_fitness_update_measurement(payload, session, *, user, now, user_id):
 
 
 def _handle_fitness_delete_measurement(payload, session, *, user, now, user_id):
-    measurement_id = int(payload.get("measurement_id", 0))
+    measurement_id = _int_id(payload, "measurement_id")
     row = session.get(FitnessMeasurement, measurement_id)
     if not row:
         raise ValueError("measurement_id not found")
@@ -659,7 +704,7 @@ def _handle_supermarket_import_connection(payload, session, *, user, now, user_i
 
 
 def _handle_supermarket_activate_connection(payload, session, *, user, now, user_id):
-    connection_id = int(payload.get("connection_id", 0))
+    connection_id = _int_id(payload, "connection_id")
     if not connection_id:
         raise ValueError("connection_id is required")
     existing = session.get(SupermarketConnection, connection_id)
@@ -672,7 +717,7 @@ def _handle_supermarket_activate_connection(payload, session, *, user, now, user
 
 
 def _handle_supermarket_delete_connection(payload, session, *, user, now, user_id):
-    connection_id = int(payload.get("connection_id", 0))
+    connection_id = _int_id(payload, "connection_id")
     if not connection_id:
         raise ValueError("connection_id is required")
     existing = session.get(SupermarketConnection, connection_id)
@@ -699,16 +744,19 @@ def _handle_supermarket_search(payload, session, *, user, now, user_id):
         raise ValueError("queries must be a non-empty list")
     max_results = _clamp_int(payload.get("max_results"), default=10, minimum=1, maximum=30)
     promotions_only = _as_bool(payload.get("promotions_only"), default=False)
-    results = asyncio.run(
-        fetch_search_results(
-            store=store_enum,
-            queries=[str(query).strip() for query in queries if str(query).strip()],
-            max_results=max_results,
-            promotions_only=promotions_only,
-            session=session,
-            user_id=user_id,
+    try:
+        results = asyncio.run(
+            fetch_search_results(
+                store=store_enum,
+                queries=[str(query).strip() for query in queries if str(query).strip()],
+                max_results=max_results,
+                promotions_only=promotions_only,
+                session=session,
+                user_id=user_id,
+            )
         )
-    )
+    except RuntimeError as exc:
+        raise ValueError(f"supermarket.search failed: {exc}") from exc
     saved = upsert_search_cache(session, store_enum, results)
     return {"results": [row.model_dump(mode="json") for row in saved]}
 
@@ -724,7 +772,10 @@ def _handle_ubereats_geocode_address(payload, session, *, user, now, user_id):
     if not query:
         raise ValueError("query is required")
     limit = _clamp_int(payload.get("limit"), default=6, minimum=1, maximum=10)
-    results = asyncio.run(ubereats_geocode(query, limit=limit))
+    try:
+        results = asyncio.run(ubereats_geocode(query, limit=limit))
+    except RuntimeError as exc:
+        raise ValueError(f"Geocoding failed: {exc}") from exc
     return {"results": results}
 
 
@@ -733,8 +784,15 @@ def _handle_ubereats_save_address(payload, session, *, user, now, user_id):
     formatted = (payload.get("formatted_address") or "").strip()
     if not label or not formatted:
         raise ValueError("label and formatted_address are required")
-    latitude = float(payload["latitude"])
-    longitude = float(payload["longitude"])
+    latitude_raw = payload.get("latitude")
+    longitude_raw = payload.get("longitude")
+    if latitude_raw is None or longitude_raw is None:
+        raise ValueError("latitude and longitude are required")
+    try:
+        latitude = float(latitude_raw)
+        longitude = float(longitude_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("latitude and longitude must be numeric") from exc
     address = create_ubereats_address(
         session,
         label=label,
@@ -746,24 +804,30 @@ def _handle_ubereats_save_address(payload, session, *, user, now, user_id):
         reference_type=payload.get("reference_type") or "OSM_NOMINATIM",
     )
     if _as_bool(payload.get("activate"), default=False):
-        activated = asyncio.run(activate_ubereats_address(session, address.id))
+        try:
+            activated = asyncio.run(activate_ubereats_address(session, address.id))
+        except RuntimeError as exc:
+            raise ValueError(f"Failed to activate the Uber Eats address: {exc}") from exc
         if activated is not None:
             address = activated
     return {"address": address.model_dump(mode="json")}
 
 
 def _handle_ubereats_activate_address(payload, session, *, user, now, user_id):
-    address_id = int(payload.get("address_id", 0))
+    address_id = _int_id(payload, "address_id")
     if not address_id:
         raise ValueError("address_id is required")
-    address = asyncio.run(activate_ubereats_address(session, address_id))
+    try:
+        address = asyncio.run(activate_ubereats_address(session, address_id))
+    except RuntimeError as exc:
+        raise ValueError(f"Failed to activate the Uber Eats address: {exc}") from exc
     if address is None:
         raise ValueError("Address not found")
     return {"address": address.model_dump(mode="json")}
 
 
 def _handle_ubereats_delete_address(payload, session, *, user, now, user_id):
-    address_id = int(payload.get("address_id", 0))
+    address_id = _int_id(payload, "address_id")
     if not address_id:
         raise ValueError("address_id is required")
     address = delete_ubereats_address(session, address_id)
@@ -775,7 +839,10 @@ def _handle_ubereats_delete_address(payload, session, *, user, now, user_id):
 # ── Uber Eats: stores ────────────────────────────────────────────────────
 def _handle_ubereats_list_stores(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=25, minimum=1, maximum=50)
-    stores = asyncio.run(list_ubereats_grocery_stores(max_results=limit))
+    try:
+        stores = asyncio.run(list_ubereats_grocery_stores(max_results=limit))
+    except RuntimeError as exc:
+        raise ValueError(f"Failed to list Uber Eats stores: {exc}") from exc
     return {"stores": stores}
 
 
@@ -810,16 +877,19 @@ def _handle_ubereats_search_products(payload, session, *, user, now, user_id):
         raise ValueError("sort_by must be 'price_asc', 'price_desc', 'recommended', or null")
     if sort_by == "recommended":
         sort_by = None
-    results = asyncio.run(
-        fetch_search_results(
-            store=SupermarketStore.UBEREATS,
-            queries=[query],
-            max_results=max_results,
-            sort_by=sort_by,
-            session=session,
-            user_id=user_id,
+    try:
+        results = asyncio.run(
+            fetch_search_results(
+                store=SupermarketStore.UBEREATS,
+                queries=[query],
+                max_results=max_results,
+                sort_by=sort_by,
+                session=session,
+                user_id=user_id,
+            )
         )
-    )
+    except RuntimeError as exc:
+        raise ValueError(f"Uber Eats search failed: {exc}") from exc
     saved = upsert_search_cache(session, SupermarketStore.UBEREATS, results)
     return {
         "results": [
@@ -840,7 +910,7 @@ def _handle_ubereats_search_products(payload, session, *, user, now, user_id):
 
 
 def _handle_ubereats_add_to_cart(payload, session, *, user, now, user_id):
-    cache_id = int(payload.get("cache_id", 0))
+    cache_id = _int_id(payload, "cache_id")
     if not cache_id:
         raise ValueError("cache_id is required")
     quantity = _clamp_int(payload.get("quantity"), default=1, minimum=1, maximum=99)
@@ -863,18 +933,21 @@ def _handle_ubereats_add_to_cart(payload, session, *, user, now, user_id):
         else:
             raise ValueError("Cached product has no resolvable price — re-run the search")
 
-    cart = asyncio.run(
-        add_to_ubereats_cart(
-            store_uuid=store_uuid,
-            item_uuid=item_uuid,
-            section_uuid=section_uuid,
-            subsection_uuid=subsection_uuid,
-            title=cache_row.name,
-            price_cents=price_cents,
-            image_url=cache_row.image_url,
-            quantity=quantity,
+    try:
+        cart = asyncio.run(
+            add_to_ubereats_cart(
+                store_uuid=store_uuid,
+                item_uuid=item_uuid,
+                section_uuid=section_uuid,
+                subsection_uuid=subsection_uuid,
+                title=cache_row.name,
+                price_cents=price_cents,
+                image_url=cache_row.image_url,
+                quantity=quantity,
+            )
         )
-    )
+    except RuntimeError as exc:
+        raise ValueError(f"Failed to add to the Uber Eats cart: {exc}") from exc
 
     # Mirror to grocery list (same logic as the REST endpoint).
     existing_grocery: GroceryItem | None = None
@@ -920,16 +993,22 @@ def _handle_ubereats_list_carts(payload, session, *, user, now, user_id):
     if not store_uuid:
         sel = get_selected_supermarket_store(session, SupermarketStore.UBEREATS)
         store_uuid = sel.external_store_id if sel else None
-    summary = asyncio.run(
-        fetch_ubereats_cart_summary(store_uuid, include_details=include_details)
-    )
+    try:
+        summary = asyncio.run(
+            fetch_ubereats_cart_summary(store_uuid, include_details=include_details)
+        )
+    except RuntimeError as exc:
+        raise ValueError(f"Failed to read Uber Eats carts: {exc}") from exc
     return summary
 
 
 # ── Uber Eats: orders ───────────────────────────────────────────────────
 def _handle_ubereats_list_past_orders(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=10, minimum=1, maximum=50)
-    orders = asyncio.run(list_ubereats_past_orders(limit=limit))
+    try:
+        orders = asyncio.run(list_ubereats_past_orders(limit=limit))
+    except RuntimeError as exc:
+        raise ValueError(f"Failed to list Uber Eats orders: {exc}") from exc
     return {"orders": orders}
 
 
@@ -942,7 +1021,7 @@ def _handle_ubereats_import_order_to_pantry(payload, session, *, user, now, user
         result = asyncio.run(
             import_ubereats_order_to_pantry(session, order_uuid, user_id=user_id)
         )
-    except UbereatsOrderError as exc:
+    except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
     return result
 
@@ -1009,7 +1088,7 @@ def _handle_grocery_list_items(payload, session, *, user, now, user_id):
 
 
 def _handle_grocery_update_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(GroceryItem, item_id)
     if not item or item.user_id != user_id:
         raise ValueError("item_id not found")
@@ -1029,7 +1108,7 @@ def _handle_grocery_update_item(payload, session, *, user, now, user_id):
 
 
 def _handle_grocery_check_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     checked = _as_bool(payload.get("checked"), default=True)
     item = session.get(GroceryItem, item_id)
     if not item or item.user_id != user_id:
@@ -1045,7 +1124,7 @@ def _handle_grocery_check_item(payload, session, *, user, now, user_id):
 
 
 def _handle_grocery_delete_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(GroceryItem, item_id)
     if not item or item.user_id != user_id:
         raise ValueError("item_id not found")
@@ -1100,7 +1179,7 @@ def _handle_recipe_add(payload, session, *, user, now, user_id):
 
 
 def _handle_recipe_update(payload, session, *, user, now, user_id):
-    recipe_id = int(payload.get("recipe_id", 0))
+    recipe_id = _int_id(payload, "recipe_id")
     recipe = session.get(Recipe, recipe_id)
     if not recipe or recipe.user_id != user_id:
         raise ValueError("recipe_id not found")
@@ -1144,7 +1223,7 @@ def _handle_recipe_list(payload, session, *, user, now, user_id):
 
 
 def _handle_recipe_get(payload, session, *, user, now, user_id):
-    recipe_id = int(payload.get("recipe_id", 0))
+    recipe_id = _int_id(payload, "recipe_id")
     recipe = session.get(Recipe, recipe_id)
     if not recipe or recipe.user_id != user_id:
         raise ValueError("recipe_id not found")
@@ -1152,11 +1231,16 @@ def _handle_recipe_get(payload, session, *, user, now, user_id):
 
 
 def _handle_recipe_confirm_cooked(payload, session, *, user, now, user_id):
-    recipe_id = int(payload.get("recipe_id", 0))
+    recipe_id = _int_id(payload, "recipe_id")
     recipe = session.get(Recipe, recipe_id)
     if not recipe or recipe.user_id != user_id:
         raise ValueError("recipe_id not found")
-    servings_override = _clamp_int(payload.get("servings_override"), default=None, minimum=1, maximum=100) if payload.get("servings_override") is not None else None
+    servings_override = None
+    if payload.get("servings_override") is not None:
+        try:
+            servings_override = int(payload["servings_override"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("servings_override must be an integer") from exc
     result = confirm_recipe_cooked(session, recipe, servings_override, payload.get("note"), user_id=user_id)
     return {
         "recipe_id": recipe.id,
@@ -1171,7 +1255,7 @@ def _handle_recipe_confirm_cooked(payload, session, *, user, now, user_id):
 
 
 def _handle_recipe_unconfirm_cooked(payload, session, *, user, now, user_id):
-    recipe_id = int(payload.get("recipe_id", 0))
+    recipe_id = _int_id(payload, "recipe_id")
     recipe = session.get(Recipe, recipe_id)
     if not recipe or recipe.user_id != user_id:
         raise ValueError("recipe_id not found")
@@ -1187,7 +1271,7 @@ def _handle_recipe_unconfirm_cooked(payload, session, *, user, now, user_id):
 
 
 def _handle_recipe_delete(payload, session, *, user, now, user_id):
-    recipe_id = int(payload.get("recipe_id", 0))
+    recipe_id = _int_id(payload, "recipe_id")
     recipe = session.get(Recipe, recipe_id)
     if not recipe or recipe.user_id != user_id:
         raise ValueError("recipe_id not found")
@@ -1261,7 +1345,7 @@ def _handle_meal_plan_list(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_update(payload, session, *, user, now, user_id):
-    meal_plan_id = int(payload.get("meal_plan_id", 0))
+    meal_plan_id = _int_id(payload, "meal_plan_id")
     plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
     patch = MealPlanUpdate.model_validate({k: v for k, v in payload.items() if k != "meal_plan_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1306,7 +1390,7 @@ def _handle_meal_plan_update(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_delete(payload, session, *, user, now, user_id):
-    meal_plan_id = int(payload.get("meal_plan_id", 0))
+    meal_plan_id = _int_id(payload, "meal_plan_id")
     plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
     confirmation = session.exec(
         select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
@@ -1320,7 +1404,7 @@ def _handle_meal_plan_delete(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_sync_groceries(payload, session, *, user, now, user_id):
-    meal_plan_id = int(payload.get("meal_plan_id", 0))
+    meal_plan_id = _int_id(payload, "meal_plan_id")
     plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
     created, missing = sync_meal_plan_to_grocery(session, plan, user_id=user_id)
     return {
@@ -1331,7 +1415,7 @@ def _handle_meal_plan_sync_groceries(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_confirm_cooked(payload, session, *, user, now, user_id):
-    meal_plan_id = int(payload.get("meal_plan_id", 0))
+    meal_plan_id = _int_id(payload, "meal_plan_id")
     plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
     result = confirm_meal_plan_cooked(session, plan, note=payload.get("note"), user_id=user_id)
     return {
@@ -1344,7 +1428,7 @@ def _handle_meal_plan_confirm_cooked(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_log_cooked(payload, session, *, user, now, user_id):
-    recipe_id = int(payload.get("recipe_id", 0))
+    recipe_id = _int_id(payload, "recipe_id")
     _get_owned_recipe(session, recipe_id, user_id)
     cooked_at = _parse_datetime(payload.get("cooked_at"), "cooked_at") or now
     plan = MealPlan(
@@ -1367,7 +1451,7 @@ def _handle_meal_plan_log_cooked(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_unconfirm_cooked(payload, session, *, user, now, user_id):
-    meal_plan_id = int(payload.get("meal_plan_id", 0))
+    meal_plan_id = _int_id(payload, "meal_plan_id")
     plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
     result = unconfirm_meal_plan_cooked(session, plan, user_id=user_id)
     return {
@@ -1417,7 +1501,7 @@ def _handle_calendar_list_items(payload, session, *, user, now, user_id):
 
 
 def _handle_calendar_update_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(CalendarItem, item_id)
     if not item:
         raise ValueError("item_id not found")
@@ -1445,7 +1529,7 @@ def _handle_calendar_update_item(payload, session, *, user, now, user_id):
 
 
 def _handle_calendar_delete_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(CalendarItem, item_id)
     if not item:
         raise ValueError("item_id not found")
@@ -1482,7 +1566,7 @@ def _handle_calendar_due_reminders(payload, session, *, user, now, user_id):
 
 
 def _handle_calendar_ack_reminder(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(CalendarItem, item_id)
     if not item:
         raise ValueError("item_id not found")
@@ -1496,6 +1580,63 @@ def _handle_calendar_ack_reminder(payload, session, *, user, now, user_id):
 def _handle_habit_create(payload, session, *, user, now, user_id):
     data = HabitCreate.model_validate(payload)
     habit = Habit(**data.model_dump())
+    validate_habit_schedule_free(session, habit)
+    session.add(habit)
+    session.commit()
+    session.refresh(habit)
+    return {"habit": habit.model_dump(mode="json")}
+
+
+def _handle_habit_update(payload, session, *, user, now, user_id):
+    habit_id = _int_id(payload, "habit_id")
+    habit = session.get(Habit, habit_id)
+    if not habit:
+        raise ValueError("habit_id not found")
+
+    patch = HabitUpdate.model_validate({k: v for k, v in payload.items() if k != "habit_id"})
+    updates = patch.model_dump(exclude_unset=True)
+    if not updates:
+        raise ValueError("No habit fields to update")
+
+    if "schedule_time" in updates or "schedule_times" in updates:
+        schedule_time, schedule_times = _normalize_schedule_times(
+            updates.get("schedule_time", habit.schedule_time),
+            updates.get("schedule_times", habit.schedule_times),
+        )
+        updates["schedule_time"] = schedule_time
+        updates["schedule_times"] = schedule_times
+    if "schedule_weekday" in updates or "schedule_weekdays" in updates:
+        schedule_weekday, schedule_weekdays = _normalize_schedule_weekdays(
+            updates.get("schedule_weekday", habit.schedule_weekday),
+            updates.get("schedule_weekdays", habit.schedule_weekdays),
+        )
+        updates["schedule_weekday"] = schedule_weekday
+        updates["schedule_weekdays"] = schedule_weekdays
+
+    next_frequency = updates.get("frequency", habit.frequency)
+    if "schedule_time" in updates and updates["schedule_time"] is None:
+        updates["schedule_times"] = []
+        updates["schedule_weekday"] = None
+        updates["schedule_weekdays"] = []
+    if next_frequency == HabitFrequency.DAILY and "schedule_weekday" not in updates:
+        if updates.get("frequency") == HabitFrequency.DAILY:
+            updates["schedule_weekday"] = None
+            updates["schedule_weekdays"] = []
+
+    for key, value in updates.items():
+        setattr(habit, key, value)
+
+    if habit.schedule_time is None:
+        habit.schedule_times = []
+        habit.schedule_weekday = None
+        habit.schedule_weekdays = []
+    if habit.frequency == HabitFrequency.DAILY:
+        habit.schedule_weekday = None
+        habit.schedule_weekdays = []
+
+    validate_habit_schedule_free(session, habit, ignore_habit_id=habit.id)
+
+    habit.updated_at = now
     session.add(habit)
     session.commit()
     session.refresh(habit)
@@ -1512,7 +1653,7 @@ def _handle_habit_list(payload, session, *, user, now, user_id):
 
 
 def _handle_habit_set_active(payload, session, *, user, now, user_id):
-    habit_id = int(payload.get("habit_id", 0))
+    habit_id = _int_id(payload, "habit_id")
     active = _as_bool(payload.get("active"), default=True)
     habit = session.get(Habit, habit_id)
     if not habit:
@@ -1526,7 +1667,7 @@ def _handle_habit_set_active(payload, session, *, user, now, user_id):
 
 
 def _handle_habit_log(payload, session, *, user, now, user_id):
-    habit_id = int(payload.get("habit_id", 0))
+    habit_id = _int_id(payload, "habit_id")
     habit = session.get(Habit, habit_id)
     if not habit:
         raise ValueError("habit_id not found")
@@ -1545,7 +1686,7 @@ def _handle_habit_log(payload, session, *, user, now, user_id):
 
 
 def _handle_habit_list_logs(payload, session, *, user, now, user_id):
-    habit_id = int(payload.get("habit_id", 0))
+    habit_id = _int_id(payload, "habit_id")
     habit = session.get(Habit, habit_id)
     if not habit:
         raise ValueError("habit_id not found")
@@ -1576,7 +1717,7 @@ def _handle_goal_list(payload, session, *, user, now, user_id):
 
 
 def _handle_goal_get(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
+    goal_id = _int_id(payload, "goal_id")
     goal = session.get(Goal, goal_id)
     if not goal:
         raise ValueError("goal_id not found")
@@ -1584,7 +1725,7 @@ def _handle_goal_get(payload, session, *, user, now, user_id):
 
 
 def _handle_goal_update(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
+    goal_id = _int_id(payload, "goal_id")
     goal = session.get(Goal, goal_id)
     if not goal:
         raise ValueError("goal_id not found")
@@ -1600,7 +1741,7 @@ def _handle_goal_update(payload, session, *, user, now, user_id):
 
 
 def _handle_goal_add_milestone(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
+    goal_id = _int_id(payload, "goal_id")
     goal = session.get(Goal, goal_id)
     if not goal:
         raise ValueError("goal_id not found")
@@ -1611,7 +1752,7 @@ def _handle_goal_add_milestone(payload, session, *, user, now, user_id):
 
 
 def _handle_goal_list_milestones(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
+    goal_id = _int_id(payload, "goal_id")
     goal = session.get(Goal, goal_id)
     if not goal:
         raise ValueError("goal_id not found")
@@ -1627,8 +1768,8 @@ def _handle_goal_list_milestones(payload, session, *, user, now, user_id):
 
 
 def _handle_goal_update_milestone(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
-    milestone_id = int(payload.get("milestone_id", 0))
+    goal_id = _int_id(payload, "goal_id")
+    milestone_id = _int_id(payload, "milestone_id")
     goal = session.get(Goal, goal_id)
     if not goal:
         raise ValueError("goal_id not found")
@@ -1658,6 +1799,12 @@ def _handle_event_create(payload, session, *, user, now, user_id):
     data = EventCreate.model_validate(payload)
     if data.end_at <= data.start_at:
         raise ValueError("end_at must be after start_at")
+    validate_calendar_slot_free(
+        session,
+        data.start_at,
+        data.end_at,
+        source=CalendarSource.EVENT,
+    )
     event = CalendarEvent(**data.model_dump())
     session.add(event)
     session.commit()
@@ -1689,7 +1836,7 @@ def _handle_event_upcoming(payload, session, *, user, now, user_id):
 
 
 def _handle_event_get(payload, session, *, user, now, user_id):
-    event_id = int(payload.get("event_id", 0))
+    event_id = _int_id(payload, "event_id")
     event = session.get(CalendarEvent, event_id)
     if not event:
         raise ValueError("event_id not found")
@@ -1697,7 +1844,7 @@ def _handle_event_get(payload, session, *, user, now, user_id):
 
 
 def _handle_event_update(payload, session, *, user, now, user_id):
-    event_id = int(payload.get("event_id", 0))
+    event_id = _int_id(payload, "event_id")
     event = session.get(CalendarEvent, event_id)
     if not event:
         raise ValueError("event_id not found")
@@ -1711,6 +1858,13 @@ def _handle_event_update(payload, session, *, user, now, user_id):
         setattr(event, key, value)
     if event.end_at <= event.start_at:
         raise ValueError("end_at must be after start_at")
+    validate_calendar_slot_free(
+        session,
+        event.start_at,
+        event.end_at,
+        source=CalendarSource.EVENT,
+        source_ref_id=event.id,
+    )
     event.updated_at = now
 
     session.add(event)
@@ -1720,7 +1874,7 @@ def _handle_event_update(payload, session, *, user, now, user_id):
 
 
 def _handle_event_delete(payload, session, *, user, now, user_id):
-    event_id = int(payload.get("event_id", 0))
+    event_id = _int_id(payload, "event_id")
     event = session.get(CalendarEvent, event_id)
     if not event:
         raise ValueError("event_id not found")
@@ -1730,6 +1884,13 @@ def _handle_event_delete(payload, session, *, user, now, user_id):
 
 def _handle_subscription_create(payload, session, *, user, now, user_id):
     data = SubscriptionCreate.model_validate(payload)
+    slot_start = _subscription_slot_start(data.next_due_date)
+    validate_calendar_slot_free(
+        session,
+        slot_start,
+        slot_start + timedelta(minutes=30),
+        source=CalendarSource.SUBSCRIPTION,
+    )
     subscription = Subscription(**data.model_dump())
     session.add(subscription)
     session.commit()
@@ -1748,7 +1909,7 @@ def _handle_subscription_list(payload, session, *, user, now, user_id):
 
 
 def _handle_subscription_get(payload, session, *, user, now, user_id):
-    subscription_id = int(payload.get("subscription_id", 0))
+    subscription_id = _int_id(payload, "subscription_id")
     subscription = session.get(Subscription, subscription_id)
     if not subscription:
         raise ValueError("subscription_id not found")
@@ -1756,7 +1917,7 @@ def _handle_subscription_get(payload, session, *, user, now, user_id):
 
 
 def _handle_subscription_update(payload, session, *, user, now, user_id):
-    subscription_id = int(payload.get("subscription_id", 0))
+    subscription_id = _int_id(payload, "subscription_id")
     subscription = session.get(Subscription, subscription_id)
     if not subscription:
         raise ValueError("subscription_id not found")
@@ -1765,6 +1926,16 @@ def _handle_subscription_update(payload, session, *, user, now, user_id):
     updates = patch.model_dump(exclude_unset=True)
     if not updates:
         raise ValueError("No subscription fields to update")
+
+    next_due_date = updates.get("next_due_date", subscription.next_due_date)
+    slot_start = _subscription_slot_start(next_due_date)
+    validate_calendar_slot_free(
+        session,
+        slot_start,
+        slot_start + timedelta(minutes=30),
+        source=CalendarSource.SUBSCRIPTION,
+        source_ref_id=subscription.id,
+    )
 
     for key, value in updates.items():
         setattr(subscription, key, value)
@@ -1822,7 +1993,7 @@ def _handle_patrimony_add_account(payload, session, *, user, now, user_id):
 
 
 def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
-    account_id = int(payload.get("account_id", 0))
+    account_id = _int_id(payload, "account_id")
     row = session.get(Account, account_id)
     if not row:
         raise ValueError("account_id not found")
@@ -1838,7 +2009,7 @@ def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
 
 
 def _handle_patrimony_delete_account(payload, session, *, user, now, user_id):
-    account_id = int(payload.get("account_id", 0))
+    account_id = _int_id(payload, "account_id")
     row = session.get(Account, account_id)
     if not row:
         raise ValueError("account_id not found")
@@ -1872,7 +2043,7 @@ def _handle_patrimony_add_goal(payload, session, *, user, now, user_id):
 
 
 def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
+    goal_id = _int_id(payload, "goal_id")
     row = session.get(SavingsGoal, goal_id)
     if not row:
         raise ValueError("goal_id not found")
@@ -1893,7 +2064,7 @@ def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
 
 
 def _handle_patrimony_delete_goal(payload, session, *, user, now, user_id):
-    goal_id = int(payload.get("goal_id", 0))
+    goal_id = _int_id(payload, "goal_id")
     row = session.get(SavingsGoal, goal_id)
     if not row:
         raise ValueError("goal_id not found")
@@ -1930,7 +2101,7 @@ def _handle_pantry_list_items(payload, session, *, user, now, user_id):
 
 
 def _handle_pantry_update_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(PantryItem, item_id)
     if not item or item.user_id != user_id:
         raise ValueError("item_id not found")
@@ -1946,7 +2117,7 @@ def _handle_pantry_update_item(payload, session, *, user, now, user_id):
 
 
 def _handle_pantry_consume_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     amount = float(payload.get("amount", 0))
     if amount <= 0:
         raise ValueError("amount must be > 0")
@@ -1962,7 +2133,7 @@ def _handle_pantry_consume_item(payload, session, *, user, now, user_id):
 
 
 def _handle_pantry_delete_item(payload, session, *, user, now, user_id):
-    item_id = int(payload.get("item_id", 0))
+    item_id = _int_id(payload, "item_id")
     item = session.get(PantryItem, item_id)
     if not item or item.user_id != user_id:
         raise ValueError("item_id not found")
@@ -2010,7 +2181,7 @@ def _handle_note_list(payload, session, *, user, now, user_id):
 
 
 def _handle_note_get(payload, session, *, user, now, user_id):
-    note_id = int(payload.get("note_id", 0))
+    note_id = _int_id(payload, "note_id")
     note = session.get(Note, note_id)
     if not note:
         raise ValueError("note_id not found")
@@ -2018,7 +2189,7 @@ def _handle_note_get(payload, session, *, user, now, user_id):
 
 
 def _handle_note_update(payload, session, *, user, now, user_id):
-    note_id = int(payload.get("note_id", 0))
+    note_id = _int_id(payload, "note_id")
     note = session.get(Note, note_id)
     if not note:
         raise ValueError("note_id not found")
@@ -2034,7 +2205,7 @@ def _handle_note_update(payload, session, *, user, now, user_id):
 
 
 def _handle_note_delete(payload, session, *, user, now, user_id):
-    note_id = int(payload.get("note_id", 0))
+    note_id = _int_id(payload, "note_id")
     note = session.get(Note, note_id)
     if not note:
         raise ValueError("note_id not found")
@@ -2158,6 +2329,7 @@ ACTION_CATALOG = [
     {"action": "task.list", "description": "List tasks with optional status filter", "input_schema": {"status": "todo|in_progress|done|blocked?", "only_open": "bool?", "limit": "int?"}, "handler": _handle_task_list},
     {"action": "task.update", "description": "Update an existing task. Use this to change title, description, checklist, timing, duration, or status. Keep task scheduling inside task.update, not calendar.update_item.", "input_schema": {"task_id": "int", "title": "string?", "description": "string?", "subtasks": "[{id?, title, completed}]?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent?", "status": "todo|in_progress|done|blocked?", "estimated_minutes": "int?", "tags": "string[]?"}, "handler": _handle_task_update},
     {"action": "task.complete", "description": "Mark a task as done", "input_schema": {"task_id": "int"}, "handler": _handle_task_complete},
+    {"action": "task.delete", "description": "Delete a task", "input_schema": {"task_id": "int"}, "handler": _handle_task_delete},
     {"action": "finance.add_transaction", "description": "Add an income or expense transaction", "input_schema": {"kind": "income|expense", "amount": "float", "currency": "string?", "category": "string", "note": "string?", "occurred_at": "datetime?", "is_recurring": "bool?"}, "handler": _handle_finance_add_transaction},
     {"action": "finance.list_transactions", "description": "List transactions", "input_schema": {"kind": "income|expense?", "year": "int?", "month": "int?", "limit": "int?"}, "handler": _handle_finance_list_transactions},
     {"action": "finance.create_budget", "description": "Create a monthly category budget", "input_schema": {"month": "YYYY-MM", "category": "string", "monthly_limit": "float", "currency": "string?", "alert_threshold": "float?"}, "handler": _handle_finance_create_budget},
@@ -2228,6 +2400,7 @@ ACTION_CATALOG = [
     {"action": "calendar.ack_reminder", "description": "Acknowledge reminders for a calendar item", "input_schema": {"item_id": "int"}, "handler": _handle_calendar_ack_reminder},
     {"action": "habit.create", "description": "Create a habit", "input_schema": {"name": "string", "description": "string?", "frequency": "daily|weekly?", "target_per_period": "int?", "schedule_time": "HH:MM?", "schedule_times": "HH:MM[]?", "schedule_weekday": "0=Monday..6=Sunday?", "schedule_weekdays": "0..6[]?", "duration_minutes": "int?"}, "handler": _handle_habit_create},
     {"action": "habit.list", "description": "List habits", "input_schema": {"active_only": "bool?"}, "handler": _handle_habit_list},
+    {"action": "habit.update", "description": "Update a habit", "input_schema": {"habit_id": "int", "name": "string?", "description": "string?", "frequency": "daily|weekly?", "target_per_period": "int?", "schedule_time": "HH:MM?", "schedule_times": "HH:MM[]?", "schedule_weekday": "0=Monday..6=Sunday?", "schedule_weekdays": "0..6[]?", "duration_minutes": "int?", "active": "bool?"}, "handler": _handle_habit_update},
     {"action": "habit.set_active", "description": "Activate or deactivate a habit", "input_schema": {"habit_id": "int", "active": "bool"}, "handler": _handle_habit_set_active},
     {"action": "habit.log", "description": "Log completion for a habit", "input_schema": {"habit_id": "int", "value": "int?", "note": "string?"}, "handler": _handle_habit_log},
     {"action": "habit.list_logs", "description": "List logs for one habit", "input_schema": {"habit_id": "int", "limit": "int?"}, "handler": _handle_habit_list_logs},
