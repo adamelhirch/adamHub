@@ -18,11 +18,11 @@ from app.schemas import (
 from app.services.meal_planning import (
     build_meal_plan_read,
     confirm_meal_plan_cooked,
-    exclude_recipe_confirm_marker_plans,
     reset_meal_plan_cook_confirmation,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
     validate_meal_plan_slot_free,
+    visible_meal_plans,
 )
 
 router = APIRouter(prefix="/meal-plans", tags=["meal-plans"])
@@ -97,20 +97,14 @@ def list_meal_plans(
     slot: MealSlot | None = None,
     limit: int = Query(default=100, ge=1, le=400),
 ) -> list[MealPlanRead]:
-    statement = (
-        exclude_recipe_confirm_marker_plans(select(MealPlan))
-        .where(MealPlan.user_id == user.id)
-        .order_by(MealPlan.planned_at.asc())
-        .limit(limit)
+    rows = visible_meal_plans(
+        session,
+        user_id=user.id,
+        date_from=date_from,
+        date_to=date_to,
+        slot=slot,
+        limit=limit,
     )
-    if date_from is not None:
-        statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
-    if date_to is not None:
-        statement = statement.where(MealPlan.planned_at <= datetime.combine(date_to, time.max).replace(tzinfo=timezone.utc))
-    if slot is not None:
-        statement = statement.where(MealPlan.slot == slot)
-
-    rows = session.exec(statement).all()
     return [build_meal_plan_read(session, row, user_id=user.id) for row in rows]
 
 

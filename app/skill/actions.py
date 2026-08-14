@@ -104,13 +104,13 @@ from app.services.meal_planning import (
     build_meal_plan_read,
     confirm_meal_plan_cooked,
     confirm_recipe_cooked,
-    exclude_recipe_confirm_marker_plans,
     reset_meal_plan_cook_confirmation,
     resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
     unconfirm_recipe_cooked,
     validate_meal_plan_slot_free,
+    visible_meal_plans,
 )
 from app.services.calendar_hub import (
     apply_task_update,
@@ -1321,21 +1321,17 @@ def execute_action(
 
     if action == "meal_plan.list":
         limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=400)
-        statement = (
-            exclude_recipe_confirm_marker_plans(select(MealPlan))
-            .where(MealPlan.user_id == user_id)
-            .order_by(MealPlan.planned_at.asc())
-            .limit(limit)
+        date_from = _parse_date(payload.get("date_from"), "date_from") if payload.get("date_from") else None
+        date_to = _parse_date(payload.get("date_to"), "date_to") if payload.get("date_to") else None
+        slot = MealSlot(payload.get("slot")) if payload.get("slot") else None
+        plans = visible_meal_plans(
+            session,
+            user_id=user_id,
+            date_from=date_from,
+            date_to=date_to,
+            slot=slot,
+            limit=limit,
         )
-        if payload.get("date_from"):
-            date_from = _parse_date(payload.get("date_from"), "date_from")
-            statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
-        if payload.get("date_to"):
-            date_to = _parse_date(payload.get("date_to"), "date_to")
-            statement = statement.where(MealPlan.planned_at <= datetime.combine(date_to, time.max).replace(tzinfo=timezone.utc))
-        if payload.get("slot"):
-            statement = statement.where(MealPlan.slot == MealSlot(payload.get("slot")))
-        plans = session.exec(statement).all()
         return {
             "meal_plans": [
                 build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json")
