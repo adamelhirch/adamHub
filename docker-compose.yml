@@ -30,6 +30,9 @@ services:
     env_file:
       - .env
     environment:
+      # Explicit dev/test opt-in so `docker compose up` works even with a
+      # minimal .env (no ADAMHUB_ENV, empty JWT/cookie keys, change-me API key).
+      - ADAMHUB_ENV=development
       - ADAMHUB_DB_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     volumes:
       - ./data:/app/data:ro

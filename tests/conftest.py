@@ -1,8 +1,15 @@
+import os
 from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, Session, create_engine, select
+
+# Tests must run in the explicit "test" environment: this is the single source
+# of truth that lets the suite keep using insecure dev defaults (change-me API
+# key, derived JWT/cookie keys). Must be set before app.main is imported, since
+# module-level get_settings() validates the startup security configuration.
+os.environ["ADAMHUB_ENV"] = "test"
 
 from app.core import db as db_module
 from app.core.auth import create_token, hash_password

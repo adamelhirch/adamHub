@@ -12,7 +12,7 @@ import jwt
 from fastapi import HTTPException, Request
 from sqlmodel import Session, select
 
-from app.core.config import get_settings
+from app.core.config import get_settings, is_dev_or_test
 from app.models import User
 
 
@@ -40,7 +40,11 @@ def _jwt_secret() -> str:
     raw = (settings.jwt_secret or "").strip()
     if raw:
         return raw
-    # Dev fallback: derive deterministic secret so tokens persist across reloads.
+    # get_settings() already refuses to start without ADAMHUB_JWT_SECRET outside
+    # dev/test, so reaching this fallback only happens in an explicit dev/test
+    # context: derive a deterministic secret so tokens persist across reloads.
+    if not is_dev_or_test():
+        raise RuntimeError("ADAMHUB_JWT_SECRET is not configured")
     seed = "adamhub-dev-jwt-secret"
     digest = hashlib.sha256(seed.encode()).digest()
     return base64.urlsafe_b64encode(digest).decode()
