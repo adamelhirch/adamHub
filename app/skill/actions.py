@@ -109,6 +109,7 @@ from app.services.cook import (
 )
 from app.services.meal_planning import (
     build_meal_plan_read,
+    build_meal_plan_reads,
     resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
     validate_meal_plan_slot_free,
@@ -1254,8 +1255,7 @@ def _handle_meal_plan_list(payload, session, *, user, now, user_id):
     )
     return {
         "meal_plans": [
-            build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json")
-            for plan in plans
+            read.model_dump(mode="json") for read in build_meal_plan_reads(session, plans, user_id=user_id)
         ]
     }
 
