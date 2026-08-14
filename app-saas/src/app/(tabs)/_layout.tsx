@@ -18,6 +18,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="recipes"
+        options={{
+          title: "Recettes",
+          tabBarIcon: ({ color, size }) => <Ionicons name="restaurant" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="groceries"
         options={{
           title: "Courses",
