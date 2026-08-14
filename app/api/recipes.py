@@ -15,12 +15,12 @@ from app.schemas import (
     RecipeUpdate,
 )
 from app.services.calendar_hub import sync_generated_calendar_items
-from app.services.life import build_recipe_read
-from app.services.meal_planning import (
+from app.services.cook import (
     confirm_recipe_cooked as confirm_recipe_cooked_service,
-    resolve_recipe_ingredient_fields,
     unconfirm_recipe_cooked as unconfirm_recipe_cooked_service,
 )
+from app.services.life import build_recipe_read
+from app.services.meal_planning import resolve_recipe_ingredient_fields
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
 
