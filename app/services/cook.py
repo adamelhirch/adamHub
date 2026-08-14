@@ -47,15 +47,11 @@ class ConsumptionResult:
     lots: list[dict] = field(default_factory=list)
 
 
-def _scaled_recipe_ingredients(
-    session: Session,
+def _scale_recipe_ingredients(
+    ingredients: list[RecipeIngredient],
     recipe: Recipe,
     servings_override: int | None = None,
 ) -> list[tuple[RecipeIngredient, float, float, str]]:
-    ingredients = session.exec(
-        select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)
-    ).all()
-
     ratio = 1.0
     if servings_override and recipe.servings > 0:
         ratio = servings_override / recipe.servings
@@ -68,27 +64,48 @@ def _scaled_recipe_ingredients(
     return scaled
 
 
-def compute_recipe_missing_ingredients(
+def _scaled_recipe_ingredients(
     session: Session,
     recipe: Recipe,
     servings_override: int | None = None,
-    *,
-    user_id: int | None = None,
-) -> list[MissingIngredientRead]:
-    statement = select(PantryItem)
-    if user_id is not None:
-        statement = statement.where(PantryItem.user_id == user_id)
-    pantry = session.exec(statement).all()
+) -> list[tuple[RecipeIngredient, float, float, str]]:
+    ingredients = session.exec(
+        select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)
+    ).all()
+    return _scale_recipe_ingredients(ingredients, recipe, servings_override)
+
+
+def build_pantry_stock_index(pantry_items: list[PantryItem]) -> dict[tuple[str, str], float]:
+    """Index pantry rows by (normalized name, base unit) summed over all rows.
+
+    This is the in-memory stock snapshot shared by the single-row and batch read
+    paths, so a batch list never rescans the pantry table per meal plan.
+    """
     pantry_stock: dict[tuple[str, str], float] = {}
-    for item in pantry:
+    for item in pantry_items:
         key_name = normalize_name(item.name)
         qty, base_unit = to_base(item.quantity or 0.0, item.unit or "item")
         key = (key_name, base_unit)
         pantry_stock[key] = pantry_stock.get(key, 0.0) + qty
+    return pantry_stock
 
+
+def compute_missing_ingredients(
+    ingredients: list[RecipeIngredient],
+    recipe: Recipe,
+    servings_override: int | None,
+    pantry_stock: dict[tuple[str, str], float],
+) -> list[MissingIngredientRead]:
+    """Compute missing ingredients from already-loaded recipe rows and a stock index.
+
+    Pure math over in-memory data: the batch read path loads the user's pantry and
+    every listed recipe's ingredients once, then calls this per meal plan instead
+    of re-running queries. Produces the same MissingIngredientRead list as
+    compute_recipe_missing_ingredients.
+    """
     missing: list[MissingIngredientRead] = []
-    for ingredient, needed_qty_raw, needed_qty, base_unit in _scaled_recipe_ingredients(
-        session, recipe, servings_override
+    for ingredient, needed_qty_raw, needed_qty, base_unit in _scale_recipe_ingredients(
+        ingredients, recipe, servings_override
     ):
         key = (normalize_name(ingredient.name), base_unit)
         available = pantry_stock.get(key, 0.0)
@@ -113,6 +130,34 @@ def compute_recipe_missing_ingredients(
             )
 
     return missing
+
+
+def compute_recipe_missing_ingredients(
+    session: Session,
+    recipe: Recipe,
+    servings_override: int | None = None,
+    *,
+    user_id: int | None = None,
+) -> list[MissingIngredientRead]:
+    """Session-backed single-plan missing-ingredient computation.
+
+    Loads the user's pantry and the recipe's ingredients, then defers the math to
+    compute_missing_ingredients so single-row reads share the same pure logic as
+    the batch list path.
+    """
+    statement = select(PantryItem)
+    if user_id is not None:
+        statement = statement.where(PantryItem.user_id == user_id)
+    pantry = session.exec(statement).all()
+    ingredients = session.exec(
+        select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)
+    ).all()
+    return compute_missing_ingredients(
+        ingredients,
+        recipe,
+        servings_override,
+        build_pantry_stock_index(pantry),
+    )
 
 
 def consume_recipe_ingredients(

@@ -10,10 +10,17 @@ from app.models import (
     MealPlan,
     MealPlanCookConfirmation,
     MealSlot,
+    PantryItem,
     Recipe,
+    RecipeIngredient,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
-from app.services.cook import RECIPE_CONFIRM_MARKER, compute_recipe_missing_ingredients
+from app.services.cook import (
+    RECIPE_CONFIRM_MARKER,
+    build_pantry_stock_index,
+    compute_missing_ingredients,
+    compute_recipe_missing_ingredients,
+)
 from app.services.store_catalog import resolve_store_fields
 from app.services.units import normalize_name
 
@@ -107,38 +114,90 @@ def build_meal_plan_read(
     *,
     user_id: int | None = None,
 ) -> MealPlanRead:
-    confirmation = session.exec(
-        select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == meal_plan.id)
-    ).first()
+    """Build one MealPlanRead (single-row path, e.g. create/get/update)."""
+    return build_meal_plan_reads(session, [meal_plan], user_id=user_id)[0]
 
-    recipe = session.get(Recipe, meal_plan.recipe_id)
-    if not recipe:
-        recipe_name = "[missing recipe]"
-        missing: list[MissingIngredientRead] = []
-    else:
-        recipe_name = recipe.name
-        missing = compute_recipe_missing_ingredients(
-            session, recipe, meal_plan.servings_override, user_id=user_id
+
+def build_meal_plan_reads(
+    session: Session,
+    meal_plans: list[MealPlan],
+    *,
+    user_id: int | None = None,
+) -> list[MealPlanRead]:
+    """Build MealPlanRead for many plans with a constant number of queries.
+
+    The meal-plan list endpoint can return up to ``limit`` plans; building each
+    read with per-plan queries would rescale to the whole pantry table and run a
+    RecipeIngredient fetch and a cook-confirmation lookup per plan (an N+1). This
+    loads the user's pantry, every involved recipe, every involved recipe's
+    ingredients, and every involved plan's cook confirmation in one pass each,
+    then computes missing ingredients from the in-memory pantry stock index.
+    """
+    if not meal_plans:
+        return []
+
+    plan_ids = [plan.id for plan in meal_plans]
+    recipe_ids = list({plan.recipe_id for plan in meal_plans})
+
+    confirmations = session.exec(
+        select(MealPlanCookConfirmation).where(
+            MealPlanCookConfirmation.meal_plan_id.in_(plan_ids)
         )
+    ).all()
+    confirmation_by_plan = {confirmation.meal_plan_id: confirmation for confirmation in confirmations}
 
-    return MealPlanRead(
-        id=meal_plan.id,
-        planned_at=meal_plan.planned_at,
-        planned_for=meal_plan.planned_for,
-        slot=meal_plan.slot,
-        recipe_id=meal_plan.recipe_id,
-        recipe_name=recipe_name,
-        servings_override=meal_plan.servings_override,
-        note=meal_plan.note,
-        auto_add_missing_ingredients=meal_plan.auto_add_missing_ingredients,
-        synced_grocery_at=meal_plan.synced_grocery_at,
-        cooked=confirmation is not None,
-        cooked_at=confirmation.confirmed_at if confirmation else None,
-        cooked_note=confirmation.note if confirmation else None,
-        missing_ingredients=missing,
-        created_at=meal_plan.created_at,
-        updated_at=meal_plan.updated_at,
-    )
+    recipes = session.exec(select(Recipe).where(Recipe.id.in_(recipe_ids))).all()
+    recipe_by_id = {recipe.id: recipe for recipe in recipes}
+
+    ingredients = session.exec(
+        select(RecipeIngredient).where(RecipeIngredient.recipe_id.in_(recipe_ids))
+    ).all()
+    ingredients_by_recipe: dict[int, list[RecipeIngredient]] = {}
+    for ingredient in ingredients:
+        ingredients_by_recipe.setdefault(ingredient.recipe_id, []).append(ingredient)
+
+    pantry_statement = select(PantryItem)
+    if user_id is not None:
+        pantry_statement = pantry_statement.where(PantryItem.user_id == user_id)
+    pantry_stock = build_pantry_stock_index(session.exec(pantry_statement).all())
+
+    reads: list[MealPlanRead] = []
+    for meal_plan in meal_plans:
+        confirmation = confirmation_by_plan.get(meal_plan.id)
+        recipe = recipe_by_id.get(meal_plan.recipe_id)
+        if recipe is None:
+            recipe_name = "[missing recipe]"
+            missing: list[MissingIngredientRead] = []
+        else:
+            recipe_name = recipe.name
+            missing = compute_missing_ingredients(
+                ingredients_by_recipe.get(meal_plan.recipe_id, []),
+                recipe,
+                meal_plan.servings_override,
+                pantry_stock,
+            )
+
+        reads.append(
+            MealPlanRead(
+                id=meal_plan.id,
+                planned_at=meal_plan.planned_at,
+                planned_for=meal_plan.planned_for,
+                slot=meal_plan.slot,
+                recipe_id=meal_plan.recipe_id,
+                recipe_name=recipe_name,
+                servings_override=meal_plan.servings_override,
+                note=meal_plan.note,
+                auto_add_missing_ingredients=meal_plan.auto_add_missing_ingredients,
+                synced_grocery_at=meal_plan.synced_grocery_at,
+                cooked=confirmation is not None,
+                cooked_at=confirmation.confirmed_at if confirmation else None,
+                cooked_note=confirmation.note if confirmation else None,
+                missing_ingredients=missing,
+                created_at=meal_plan.created_at,
+                updated_at=meal_plan.updated_at,
+            )
+        )
+    return reads
 
 
 def sync_meal_plan_to_grocery(

@@ -22,6 +22,7 @@ from app.services.cook import (
 )
 from app.services.meal_planning import (
     build_meal_plan_read,
+    build_meal_plan_reads,
     sync_meal_plan_to_grocery,
     validate_meal_plan_slot_free,
     visible_meal_plans,
@@ -107,7 +108,7 @@ def list_meal_plans(
         slot=slot,
         limit=limit,
     )
-    return [build_meal_plan_read(session, row, user_id=user.id) for row in rows]
+    return build_meal_plan_reads(session, rows, user_id=user.id)
 
 
 @router.get("/{meal_plan_id}", response_model=MealPlanRead)
