@@ -1,9 +1,11 @@
-from app.schemas.dto import (
-    AccountCreate,
-    AccountRead,
-    AccountUpdate,
-    BudgetCreate,
-    BudgetRead,
+"""Public DTO surface for the API and skill contracts.
+
+Definitions live in per-domain modules; this package re-exports the public
+names so ``from app.schemas import X`` keeps working regardless of which
+domain module owns ``X``.
+"""
+
+from app.schemas.calendar import (
     CalendarItemCreate,
     CalendarFeedCreate,
     CalendarFeedRead,
@@ -11,13 +13,30 @@ from app.schemas.dto import (
     CalendarItemUpdate,
     CalendarReminderRead,
     CalendarSyncResult,
-    DashboardOverview,
     EventCreate,
     EventRead,
     EventUpdate,
+)
+from app.schemas.dashboard import DashboardOverview
+from app.schemas.finance import (
+    AccountCreate,
+    AccountRead,
+    AccountUpdate,
+    BudgetCreate,
+    BudgetRead,
     FinanceMonthSummary,
     FinanceTransactionCreate,
     FinanceTransactionRead,
+    PatrimoineOverview,
+    SavingsGoalCreate,
+    SavingsGoalRead,
+    SavingsGoalUpdate,
+    SubscriptionCreate,
+    SubscriptionProjection,
+    SubscriptionRead,
+    SubscriptionUpdate,
+)
+from app.schemas.fitness import (
     FitnessMeasurementCreate,
     FitnessMeasurementRead,
     FitnessMeasurementUpdate,
@@ -29,24 +48,19 @@ from app.schemas.dto import (
     FitnessSessionRead,
     FitnessSessionUpdate,
     FitnessStatsRead,
+)
+from app.schemas.goals import (
     GoalCreate,
     GoalMilestoneCreate,
     GoalMilestoneRead,
     GoalMilestoneUpdate,
     GoalRead,
     GoalUpdate,
-    GroceryItemCreate,
-    GroceryItemRead,
-    GroceryItemUpdate,
-    HabitCreate,
-    HabitLogCreate,
-    HabitLogRead,
-    HabitRead,
-    HabitUpdate,
-    LinearIssueCreate,
-    LinearIssueRead,
-    LinearProjectRead,
-    LinearSyncResult,
+)
+from app.schemas.groceries import GroceryItemCreate, GroceryItemRead, GroceryItemUpdate
+from app.schemas.habits import HabitCreate, HabitLogCreate, HabitLogRead, HabitRead, HabitUpdate
+from app.schemas.linear import LinearIssueCreate, LinearIssueRead, LinearProjectRead, LinearSyncResult
+from app.schemas.meal_planning import (
     MealPlanCreate,
     MealPlanConfirmCooked,
     MealPlanConfirmResult,
@@ -60,28 +74,22 @@ from app.schemas.dto import (
     RecipeCookResult,
     RecipeUncookResult,
     MissingIngredientRead,
-    NoteCreate,
-    NoteRead,
-    NoteUpdate,
-    PantryConsume,
-    PantryItemCreate,
-    PantryItemRead,
-    PantryItemUpdate,
-    PantryOverview,
-    PatrimoineOverview,
     RecipeCreate,
     RecipeIngredientIn,
     RecipeIngredientRead,
     RecipeRead,
     RecipeUpdate,
-    TranscriptSegmentRead,
-    VideoSourceRead,
-    VideoSourceRequest,
-    SkillExecuteRequest,
-    SkillExecuteResponse,
-    SavingsGoalCreate,
-    SavingsGoalRead,
-    SavingsGoalUpdate,
+)
+from app.schemas.notes import NoteCreate, NoteRead, NoteUpdate
+from app.schemas.pantry import (
+    PantryConsume,
+    PantryItemCreate,
+    PantryItemRead,
+    PantryItemUpdate,
+    PantryOverview,
+)
+from app.schemas.skills import SkillExecuteRequest, SkillExecuteResponse
+from app.schemas.supermarket import (
     SupermarketConnectionImport,
     SupermarketConnectionRead,
     SupermarketMappingCreate,
@@ -106,15 +114,9 @@ from app.schemas.dto import (
     UbereatsStoreOption,
     UbereatsStoreSelectionRead,
     UbereatsStoreSelectionRequest,
-    SubscriptionCreate,
-    SubscriptionProjection,
-    SubscriptionRead,
-    SubscriptionUpdate,
-    TaskCreate,
-    TaskRead,
-    TaskSubtask,
-    TaskUpdate,
 )
+from app.schemas.tasks import TaskCreate, TaskRead, TaskSubtask, TaskUpdate
+from app.schemas.video import TranscriptSegmentRead, VideoSourceRead, VideoSourceRequest
 
 __all__ = [
     "AccountCreate",
