@@ -115,8 +115,8 @@ export const useFitnessStore = create<FitnessStore>((set, get) => ({
     try {
       const response = await api.get('/fitness');
       set({ overview: response.data, isLoading: false });
-    } catch (error: any) {
-      set({ error: error.message ?? 'Failed to fetch fitness overview', isLoading: false });
+    } catch (error) {
+      set({ error: (error as Error).message ?? 'Failed to fetch fitness overview', isLoading: false });
       console.error('Failed to fetch fitness overview', error);
       throw error;
     }

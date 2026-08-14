@@ -25,6 +25,7 @@ from app.models import (
     TaskStatus,
 )
 from app.schemas import CalendarItemRead, CalendarReminderRead
+from app.services.meal_planning import exclude_recipe_confirm_marker_plans
 
 RECURRING_LOOKBACK_DAYS = 14
 RECURRING_LOOKAHEAD_DAYS = 120
@@ -329,7 +330,7 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             }
         )
 
-    meal_plans = session.exec(select(MealPlan)).all()
+    meal_plans = session.exec(exclude_recipe_confirm_marker_plans(select(MealPlan))).all()
     cooked_by_plan = {
         row.meal_plan_id: row for row in session.exec(select(MealPlanCookConfirmation)).all()
     }

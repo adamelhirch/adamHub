@@ -20,4 +20,17 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      // New React Compiler rules (eslint-plugin-react-hooks v7) predate this app;
+      // keep visible as warnings until a dedicated cleanup lands.
+      'react-hooks/purity': 'warn',
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-refresh/only-export-components': [
+        'error',
+        { allowExportNames: ['useAuth'] },
+      ],
+    },
+  },
 ])

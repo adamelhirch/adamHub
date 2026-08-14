@@ -65,7 +65,32 @@ interface HabitStore {
   fetchHabitLogs: (habitId: number, limit?: number) => Promise<void>;
 }
 
-function mapHabit(b: any): HabitItem {
+interface HabitRow {
+  id: number;
+  name: string;
+  frequency: HabitFrequency;
+  target_per_period: number;
+  description?: string | null;
+  schedule_time?: string | null;
+  schedule_times?: string[] | null;
+  schedule_weekday?: number | null;
+  schedule_weekdays?: number[] | null;
+  duration_minutes?: number | null;
+  streak?: number | null;
+  active?: boolean | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface HabitLogRow {
+  id: number;
+  habit_id: number;
+  logged_at: string;
+  value: number;
+  note?: string | null;
+}
+
+function mapHabit(b: HabitRow): HabitItem {
   return {
     id: b.id,
     name: b.name,
@@ -85,7 +110,7 @@ function mapHabit(b: any): HabitItem {
   };
 }
 
-function mapLog(b: any): HabitLog {
+function mapLog(b: HabitLogRow): HabitLog {
   return {
     id: b.id,
     habitId: b.habit_id,
@@ -111,8 +136,8 @@ export const useHabitStore = create<HabitStore>((set, get) => ({
         habits: response.data.map(mapHabit),
         isLoading: false,
       });
-    } catch (error: any) {
-      set({ error: error.message ?? "Failed to fetch habits", isLoading: false });
+    } catch (error) {
+      set({ error: (error as Error).message ?? "Failed to fetch habits", isLoading: false });
       console.error("Failed to fetch habits", error);
     }
   },

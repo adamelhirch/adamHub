@@ -292,6 +292,7 @@ def test_supermarket_search_and_mapping_endpoints(client, auth_headers, monkeypa
         f"/api/v1/supermarket/mappings/pantry-items/{pantry_id}",
         headers=auth_headers,
         json={
+            "cache_id": cache_id,
             "store": "intermarche",
             "external_id": "sku-lait",
             "store_label": "Intermarché",
@@ -311,10 +312,13 @@ def test_supermarket_search_and_mapping_endpoints(client, auth_headers, monkeypa
     assert read_recipe_mapping.status_code == 200
     assert read_recipe_mapping.json()["external_id"] == "sku-lait"
 
+    # Snapshot fields are resolved from the cache row, so the fabricated
+    # external_id below is ignored in favor of the cache's value.
     replaced = client.put(
         f"/api/v1/supermarket/mappings/recipe-ingredients/{ingredient_id}",
         headers=auth_headers,
         json={
+            "cache_id": cache_id,
             "store": "intermarche",
             "external_id": "sku-lait-2",
             "store_label": "Intermarché",
@@ -322,18 +326,42 @@ def test_supermarket_search_and_mapping_endpoints(client, auth_headers, monkeypa
         },
     )
     assert replaced.status_code == 200
-    assert replaced.json()["external_id"] == "sku-lait-2"
+    assert replaced.json()["external_id"] == "sku-lait"
+    assert replaced.json()["name_snapshot"] == "Candia - Lait demi-ecreme"
 
     deleted = client.delete(f"/api/v1/supermarket/mappings/{recipe_mapping_id}", headers=auth_headers)
     assert deleted.status_code == 200
     assert deleted.json()["active"] is False
 
 
-def test_mapping_rejects_invalid_target_and_store(client, auth_headers):
+def _seed_search_cache(test_engine, external_id="sku-x", name="Produit"):
+    now = datetime.now(UTC)
+    with Session(test_engine) as session:
+        row = SupermarketSearchCache(
+            store=SupermarketStore.INTERMARCHE,
+            query="produit",
+            external_id=external_id,
+            name=name,
+            packaging="1 pièce",
+            price_amount=1.0,
+            price_text="1,00 €",
+            fetched_at=now,
+            expires_at=now + timedelta(days=1),
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row.id
+
+
+def test_mapping_rejects_invalid_target_and_store(client, auth_headers, test_engine):
+    cache_id = _seed_search_cache(test_engine)
+
     invalid_target = client.put(
         "/api/v1/supermarket/mappings/pantry-items/9999",
         headers=auth_headers,
         json={
+            "cache_id": cache_id,
             "store": "intermarche",
             "external_id": "sku-x",
             "store_label": "Intermarché",
@@ -352,6 +380,7 @@ def test_mapping_rejects_invalid_target_and_store(client, auth_headers):
         f"/api/v1/supermarket/mappings/pantry-items/{pantry_id}",
         headers=auth_headers,
         json={
+            "cache_id": cache_id,
             "store": "leclerc",
             "external_id": "sku-x",
             "store_label": "Leclerc",
@@ -359,3 +388,25 @@ def test_mapping_rejects_invalid_target_and_store(client, auth_headers):
         },
     )
     assert invalid_store.status_code == 422
+
+
+def test_mapping_rejects_fabricated_snapshot_without_cache_id(client, auth_headers):
+    pantry = client.post(
+        "/api/v1/pantry/items",
+        headers=auth_headers,
+        json={"name": "Farine", "quantity": 1, "unit": "kg", "min_quantity": 0},
+    )
+    assert pantry.status_code == 200
+    pantry_id = pantry.json()["id"]
+
+    no_cache = client.put(
+        f"/api/v1/supermarket/mappings/pantry-items/{pantry_id}",
+        headers=auth_headers,
+        json={
+            "store": "intermarche",
+            "external_id": "sku-fake",
+            "store_label": "Intermarché",
+            "name_snapshot": "Farine",
+        },
+    )
+    assert no_cache.status_code == 422

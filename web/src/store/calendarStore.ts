@@ -81,8 +81,8 @@ export const useCalendarStore = create<CalendarStore>((set, get) => ({
         },
       });
       set({ items: response.data, isLoading: false });
-    } catch (error: any) {
-      set({ error: error.message ?? 'Failed to fetch calendar items', isLoading: false });
+    } catch (error) {
+      set({ error: (error as Error).message ?? 'Failed to fetch calendar items', isLoading: false });
       console.error('Failed to fetch calendar items', error);
     }
   },

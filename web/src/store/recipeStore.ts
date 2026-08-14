@@ -71,14 +71,9 @@ export type RecipeIngredientInput = {
   quantity: number;
   unit: string;
   note: string | null;
-  store: string | null;
-  store_label: string | null;
-  external_id: string | null;
   category: string | null;
-  packaging: string | null;
-  price_text: string | null;
-  product_url: string | null;
-  image_url: string | null;
+  /** SupermarketSearchCache id; store metadata is resolved server-side from it. */
+  cache_id: number | null;
 };
 
 export type RecipeInput = {
@@ -146,8 +141,8 @@ export const useRecipeStore = create<RecipeStore>((set, get) => ({
     try {
       const response = await api.get('/recipes');
       set({ recipes: response.data, recipesLoading: false });
-    } catch (error: any) {
-      set({ error: error.message ?? 'Failed to fetch recipes', recipesLoading: false });
+    } catch (error) {
+      set({ error: (error as Error).message ?? 'Failed to fetch recipes', recipesLoading: false });
       console.error('Failed to fetch recipes', error);
       throw error;
     }
@@ -198,8 +193,8 @@ export const useRecipeStore = create<RecipeStore>((set, get) => ({
     try {
       const response = await api.get('/meal-plans', { params: { limit } });
       set({ mealPlans: response.data, mealPlansLoading: false });
-    } catch (error: any) {
-      set({ error: error.message ?? 'Failed to fetch meal plans', mealPlansLoading: false });
+    } catch (error) {
+      set({ error: (error as Error).message ?? 'Failed to fetch meal plans', mealPlansLoading: false });
       console.error('Failed to fetch meal plans', error);
       throw error;
     }

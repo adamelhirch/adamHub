@@ -36,11 +36,13 @@ from app.models import (
     SavingsGoal,
     Subscription,
     SubscriptionInterval,
+    SupermarketConnection,
     SupermarketSearchCache,
     SupermarketStore,
     Task,
     TaskStatus,
     TransactionKind,
+    User,
 )
 from app.schemas import (
     AccountCreate,
@@ -100,11 +102,15 @@ from app.services.linear_hub import (
 )
 from app.services.meal_planning import (
     build_meal_plan_read,
-    compute_recipe_missing_ingredients,
-    consume_recipe_ingredients,
     confirm_meal_plan_cooked,
+    confirm_recipe_cooked,
+    exclude_recipe_confirm_marker_plans,
+    reset_meal_plan_cook_confirmation,
+    resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
     unconfirm_meal_plan_cooked,
+    unconfirm_recipe_cooked,
+    validate_meal_plan_slot_free,
 )
 from app.services.calendar_hub import (
     apply_task_update,
@@ -208,11 +214,12 @@ ACTION_CATALOG = [
     {"action": "grocery.check_item", "description": "Mark grocery item checked or unchecked", "input_schema": {"item_id": "int", "checked": "bool?"}},
     {"action": "grocery.delete_item", "description": "Delete a grocery item", "input_schema": {"item_id": "int"}},
     {"action": "video.fetch", "description": "Fetch transcript and description from a YouTube, Instagram, or TikTok URL", "input_schema": {"url": "string"}},
-    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
+    {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}},
     {"action": "recipe.list", "description": "List recipes", "input_schema": {"limit": "int?"}},
     {"action": "recipe.get", "description": "Get one recipe by id", "input_schema": {"recipe_id": "int"}},
-    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, store, store_label, external_id, category, packaging, price_text, product_url, image_url}]?"}},
-    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}},
+    {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}},
+    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients (idempotent; undo with recipe.unconfirm_cooked)", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}},
+    {"action": "recipe.unconfirm_cooked", "description": "Undo a recipe-level cooked confirmation and restore pantry stock", "input_schema": {"recipe_id": "int"}},
     {"action": "recipe.delete", "description": "Delete a recipe and its dependent recipe ingredients / meal plans", "input_schema": {"recipe_id": "int"}},
     {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}},
     {"action": "meal_plan.log_cooked", "description": "Log a recipe as cooked without pre-planning", "input_schema": {"recipe_id": "int", "cooked_at": "datetime?", "servings_override": "int?", "note": "string?"}},
@@ -369,8 +376,49 @@ def _build_savings_goal_read_payload(goal: SavingsGoal, accounts_by_id: dict[int
     return read.model_dump(mode="json")
 
 
-def execute_action(action: str, payload: dict, session) -> dict:
+def _get_owned_recipe(session, recipe_id: int, user_id: int) -> Recipe:
+    recipe = session.get(Recipe, recipe_id)
+    if not recipe or recipe.user_id != user_id:
+        raise ValueError("recipe_id not found")
+    return recipe
+
+
+def _get_owned_meal_plan(session, meal_plan_id: int, user_id: int) -> MealPlan:
+    plan = session.get(MealPlan, meal_plan_id)
+    if not plan or plan.user_id != user_id:
+        raise ValueError("meal_plan_id not found")
+    return plan
+
+
+def _is_owner_user(user: User | None) -> bool:
+    """True when the acting user is the configured ADAMHUB_OWNER_EMAIL user."""
+    if user is None:
+        return False
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    owner_email = (settings.owner_email or "").strip().lower()
+    return bool(owner_email) and (user.email or "").strip().lower() == owner_email
+
+
+def _connection_is_operable(connection, user: User | None) -> bool:
+    """A connection can be listed/activated/deleted by the acting user."""
+    if connection is None:
+        return True
+    if connection.user_id is not None:
+        return user is not None and connection.user_id == user.id
+    return _is_owner_user(user)
+
+
+def execute_action(
+    action: str,
+    payload: dict,
+    session,
+    *,
+    user: User | None = None,
+) -> dict:
     now = datetime.now(timezone.utc)
+    user_id = user.id if user is not None else None
 
     if action == "task.create":
         data = TaskCreate.model_validate(payload)
@@ -648,7 +696,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "grocery.add_item":
         data = GroceryItemCreate.model_validate(payload)
-        item = create(session, GroceryItem(**data.model_dump()))
+        item = create(session, GroceryItem(**data.model_dump(), user_id=user_id))
         return {"item": item.model_dump(mode="json")}
 
     if action == "supermarket.list_stores":
@@ -670,7 +718,11 @@ def execute_action(action: str, payload: dict, session) -> dict:
     if action == "supermarket.list_connections":
         store_key = payload.get("store")
         store_enum = SupermarketStore(store_key.lower()) if store_key else None
-        rows = list_supermarket_connections(session, store_enum)
+        rows = list_supermarket_connections(session, store_enum, user_id=user_id)
+        if _is_owner_user(user):
+            # Legacy (pre-scoping) connections with a NULL user_id belong to the
+            # single-user owner and must remain visible to the legacy path.
+            rows += list_supermarket_connections(session, store_enum, user_id=None)
 
         def _read(row):
             try:
@@ -703,6 +755,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             cookies=cookies,
             activate=_as_bool(payload.get("activate"), default=True),
             connection_id=payload.get("connection_id"),
+            user_id=user_id,
         )
         return {
             "connection": {
@@ -718,7 +771,10 @@ def execute_action(action: str, payload: dict, session) -> dict:
         connection_id = int(payload.get("connection_id", 0))
         if not connection_id:
             raise ValueError("connection_id is required")
-        connection = activate_supermarket_connection(session, connection_id)
+        existing = session.get(SupermarketConnection, connection_id)
+        if not _connection_is_operable(existing, user):
+            raise ValueError("Connection not found")
+        connection = activate_supermarket_connection(session, connection_id, user_id=user_id)
         if connection is None:
             raise ValueError("Connection not found")
         return {"connection": {"id": connection.id, "store": connection.store.value, "is_active": True}}
@@ -727,7 +783,10 @@ def execute_action(action: str, payload: dict, session) -> dict:
         connection_id = int(payload.get("connection_id", 0))
         if not connection_id:
             raise ValueError("connection_id is required")
-        connection = delete_supermarket_connection(session, connection_id)
+        existing = session.get(SupermarketConnection, connection_id)
+        if not _connection_is_operable(existing, user):
+            raise ValueError("Connection not found")
+        connection = delete_supermarket_connection(session, connection_id, user_id=user_id)
         if connection is None:
             raise ValueError("Connection not found")
         return {"deleted": True, "id": connection_id}
@@ -754,6 +813,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                 max_results=max_results,
                 promotions_only=promotions_only,
                 session=session,
+                user_id=user_id,
             )
         )
         saved = upsert_search_cache(session, store_enum, results)
@@ -855,6 +915,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                 max_results=max_results,
                 sort_by=sort_by,
                 session=session,
+                user_id=user_id,
             )
         )
         saved = upsert_search_cache(session, SupermarketStore.UBEREATS, results)
@@ -916,6 +977,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
         existing_grocery: GroceryItem | None = None
         if cache_row.external_id:
             stmt = select(GroceryItem).where(GroceryItem.external_id == cache_row.external_id)
+            if user_id is not None:
+                stmt = stmt.where(GroceryItem.user_id == user_id)
             existing_grocery = session.exec(stmt).first()
         if existing_grocery is not None:
             existing_grocery.quantity = (existing_grocery.quantity or 0) + quantity
@@ -941,6 +1004,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                     note=note,
                     created_at=now,
                     updated_at=now,
+                    user_id=user_id,
                 )
             )
         session.commit()
@@ -969,7 +1033,9 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if not order_uuid:
             raise ValueError("Could not extract an order UUID from the input")
         try:
-            result = asyncio.run(import_ubereats_order_to_pantry(session, order_uuid))
+            result = asyncio.run(
+                import_ubereats_order_to_pantry(session, order_uuid, user_id=user_id)
+            )
         except UbereatsOrderError as exc:
             raise ValueError(str(exc)) from exc
         return result
@@ -1006,6 +1072,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                 note=f"Importé depuis {store_label}{note_suffix}",
                 created_at=now,
                 updated_at=now,
+                user_id=user_id,
             )
             session.add(pantry)
             session.commit()
@@ -1025,7 +1092,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "grocery.list_items":
         limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
-        statement = select(GroceryItem).order_by(GroceryItem.checked.asc(), GroceryItem.priority.asc()).limit(limit)
+        statement = select(GroceryItem).where(GroceryItem.user_id == user_id).order_by(GroceryItem.checked.asc(), GroceryItem.priority.asc()).limit(limit)
         if payload.get("checked") is not None:
             statement = statement.where(GroceryItem.checked == _as_bool(payload.get("checked")))
 
@@ -1035,7 +1102,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
     if action == "grocery.update_item":
         item_id = int(payload.get("item_id", 0))
         item = session.get(GroceryItem, item_id)
-        if not item:
+        if not item or item.user_id != user_id:
             raise ValueError("item_id not found")
 
         was_checked = item.checked
@@ -1048,14 +1115,14 @@ def execute_action(action: str, payload: dict, session) -> dict:
         item = save(session, item)
         pantry_sync = None
         if not was_checked and item.checked:
-            pantry_sync = sync_checked_grocery_item_to_pantry(session, item)
+            pantry_sync = sync_checked_grocery_item_to_pantry(session, item, user_id=user_id)
         return {"item": item.model_dump(mode="json"), "pantry_sync": pantry_sync}
 
     if action == "grocery.check_item":
         item_id = int(payload.get("item_id", 0))
         checked = _as_bool(payload.get("checked"), default=True)
         item = session.get(GroceryItem, item_id)
-        if not item:
+        if not item or item.user_id != user_id:
             raise ValueError("item_id not found")
         was_checked = item.checked
         item.checked = checked
@@ -1063,13 +1130,13 @@ def execute_action(action: str, payload: dict, session) -> dict:
         item = save(session, item)
         pantry_sync = None
         if not was_checked and item.checked:
-            pantry_sync = sync_checked_grocery_item_to_pantry(session, item)
+            pantry_sync = sync_checked_grocery_item_to_pantry(session, item, user_id=user_id)
         return {"item": item.model_dump(mode="json"), "pantry_sync": pantry_sync}
 
     if action == "grocery.delete_item":
         item_id = int(payload.get("item_id", 0))
         item = session.get(GroceryItem, item_id)
-        if not item:
+        if not item or item.user_id != user_id:
             raise ValueError("item_id not found")
         sync_rows = session.exec(
             select(GroceryPantrySync).where(GroceryPantrySync.grocery_item_id == item_id)
@@ -1104,13 +1171,14 @@ def execute_action(action: str, payload: dict, session) -> dict:
             source_title=data.source_title,
             source_description=data.source_description,
             source_transcript=data.source_transcript,
+            user_id=user_id,
         )
         session.add(recipe)
         session.commit()
         session.refresh(recipe)
 
         for ing in data.ingredients:
-            ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+            ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
             session.add(ingredient)
         session.commit()
 
@@ -1120,7 +1188,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
     if action == "recipe.update":
         recipe_id = int(payload.get("recipe_id", 0))
         recipe = session.get(Recipe, recipe_id)
-        if not recipe:
+        if not recipe or recipe.user_id != user_id:
             raise ValueError("recipe_id not found")
 
         patch = RecipeUpdate.model_validate({k: v for k, v in payload.items() if k != "recipe_id"})
@@ -1139,7 +1207,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
                 session.delete(row)
             session.commit()
             for ing in ingredients:
-                ingredient = RecipeIngredient(recipe_id=recipe.id, **ing.model_dump())
+                ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
                 session.add(ingredient)
             recipe.updated_at = now
             session.add(recipe)
@@ -1150,38 +1218,59 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "recipe.list":
         limit = _clamp_int(payload.get("limit"), default=20, minimum=1, maximum=100)
-        recipes = session.exec(select(Recipe).order_by(Recipe.created_at.desc()).limit(limit)).all()
+        recipes = session.exec(
+            select(Recipe)
+            .where(Recipe.user_id == user_id)
+            .order_by(Recipe.created_at.desc())
+            .limit(limit)
+        ).all()
         data = [build_recipe_read(session, recipe).model_dump(mode="json") for recipe in recipes]
         return {"recipes": data}
 
     if action == "recipe.get":
         recipe_id = int(payload.get("recipe_id", 0))
         recipe = session.get(Recipe, recipe_id)
-        if not recipe:
+        if not recipe or recipe.user_id != user_id:
             raise ValueError("recipe_id not found")
         return {"recipe": build_recipe_read(session, recipe).model_dump(mode="json")}
 
     if action == "recipe.confirm_cooked":
         recipe_id = int(payload.get("recipe_id", 0))
         recipe = session.get(Recipe, recipe_id)
-        if not recipe:
+        if not recipe or recipe.user_id != user_id:
             raise ValueError("recipe_id not found")
         servings_override = _clamp_int(payload.get("servings_override"), default=None, minimum=1, maximum=100) if payload.get("servings_override") is not None else None
-        missing = compute_recipe_missing_ingredients(session, recipe, servings_override)
-        consumption = consume_recipe_ingredients(session, recipe, servings_override)
+        result = confirm_recipe_cooked(session, recipe, servings_override, payload.get("note"), user_id=user_id)
         return {
             "recipe_id": recipe.id,
             "recipe_name": recipe.name,
-            "cooked_at": now,
-            "note": payload.get("note"),
-            "missing_ingredients": [item.model_dump(mode="json") for item in missing],
-            "pantry_consumption": consumption,
+            "cooked_at": result.get("confirmed_at"),
+            "note": result.get("note"),
+            "missing_ingredients": [item.model_dump(mode="json") for item in result.get("missing_ingredients", [])],
+            "pantry_consumption": result.get("pantry_consumption", []),
+            "meal_plan_id": result.get("meal_plan_id"),
+            "already_confirmed": bool(result.get("already_confirmed")),
+        }
+
+    if action == "recipe.unconfirm_cooked":
+        recipe_id = int(payload.get("recipe_id", 0))
+        recipe = session.get(Recipe, recipe_id)
+        if not recipe or recipe.user_id != user_id:
+            raise ValueError("recipe_id not found")
+        result = unconfirm_recipe_cooked(session, recipe, user_id=user_id)
+        return {
+            "recipe_id": recipe.id,
+            "recipe_name": recipe.name,
+            "already_unconfirmed": bool(result.get("already_unconfirmed")),
+            "previously_confirmed_at": result.get("previously_confirmed_at"),
+            "note": result.get("note"),
+            "pantry_restore": result.get("pantry_restore", []),
         }
 
     if action == "recipe.delete":
         recipe_id = int(payload.get("recipe_id", 0))
         recipe = session.get(Recipe, recipe_id)
-        if not recipe:
+        if not recipe or recipe.user_id != user_id:
             raise ValueError("recipe_id not found")
         ingredient_rows = session.exec(select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)).all()
         for row in ingredient_rows:
@@ -1189,7 +1278,9 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if ingredient_rows:
             session.commit()
 
-        meal_plans = session.exec(select(MealPlan).where(MealPlan.recipe_id == recipe.id)).all()
+        meal_plans = session.exec(
+            select(MealPlan).where(MealPlan.recipe_id == recipe.id, MealPlan.user_id == user_id)
+        ).all()
         for plan in meal_plans:
             confirmation = session.exec(
                 select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
@@ -1206,12 +1297,18 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.add":
         data = MealPlanCreate.model_validate(payload)
-        recipe = session.get(Recipe, data.recipe_id)
-        if not recipe:
-            raise ValueError("recipe_id not found")
+        _get_owned_recipe(session, data.recipe_id, user_id)
 
         planned_at = _resolve_meal_planned_at(payload)
-        plan = MealPlan(**data.model_dump(), planned_at=planned_at)
+        planned_for = _parse_date(payload.get("planned_for"), "planned_for") or planned_at.date()
+        slot = payload.slot
+        validate_meal_plan_slot_free(
+            session,
+            user_id=user_id,
+            planned_for=planned_for,
+            slot=slot,
+        )
+        plan = MealPlan(**data.model_dump(), planned_at=planned_at, user_id=user_id)
         if plan.planned_for is None:
             plan.planned_for = planned_at.date()
         session.add(plan)
@@ -1219,12 +1316,17 @@ def execute_action(action: str, payload: dict, session) -> dict:
         session.refresh(plan)
 
         if plan.auto_add_missing_ingredients:
-            sync_meal_plan_to_grocery(session, plan)
-        return {"meal_plan": build_meal_plan_read(session, plan).model_dump(mode="json")}
+            sync_meal_plan_to_grocery(session, plan, user_id=user_id)
+        return {"meal_plan": build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json")}
 
     if action == "meal_plan.list":
         limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=400)
-        statement = select(MealPlan).order_by(MealPlan.planned_at.asc()).limit(limit)
+        statement = (
+            exclude_recipe_confirm_marker_plans(select(MealPlan))
+            .where(MealPlan.user_id == user_id)
+            .order_by(MealPlan.planned_at.asc())
+            .limit(limit)
+        )
         if payload.get("date_from"):
             date_from = _parse_date(payload.get("date_from"), "date_from")
             statement = statement.where(MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc))
@@ -1234,19 +1336,35 @@ def execute_action(action: str, payload: dict, session) -> dict:
         if payload.get("slot"):
             statement = statement.where(MealPlan.slot == MealSlot(payload.get("slot")))
         plans = session.exec(statement).all()
-        return {"meal_plans": [build_meal_plan_read(session, plan).model_dump(mode="json") for plan in plans]}
+        return {
+            "meal_plans": [
+                build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json")
+                for plan in plans
+            ]
+        }
 
     if action == "meal_plan.update":
         meal_plan_id = int(payload.get("meal_plan_id", 0))
-        plan = session.get(MealPlan, meal_plan_id)
-        if not plan:
-            raise ValueError("meal_plan_id not found")
+        plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
         patch = MealPlanUpdate.model_validate({k: v for k, v in payload.items() if k != "meal_plan_id"})
         updates = patch.model_dump(exclude_unset=True)
         if not updates:
             raise ValueError("No meal plan fields to update")
-        if "recipe_id" in updates and not session.get(Recipe, updates["recipe_id"]):
-            raise ValueError("recipe_id not found")
+        if "recipe_id" in updates:
+            _get_owned_recipe(session, updates["recipe_id"], user_id)
+
+        next_planned_at = _resolve_meal_planned_at({**payload, **updates}, current=plan.planned_at)
+        next_planned_for = updates.get("planned_for", plan.planned_for)
+        if next_planned_for is None:
+            next_planned_for = next_planned_at.date()
+        next_slot = updates.get("slot", plan.slot)
+        validate_meal_plan_slot_free(
+            session,
+            user_id=user_id,
+            planned_for=next_planned_for,
+            slot=next_slot,
+            exclude_plan_id=plan.id,
+        )
 
         reset_cook_confirmation = (
             ("planned_at" in updates and updates.get("planned_at") != plan.planned_at)
@@ -1259,26 +1377,19 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
         for key, value in updates.items():
             setattr(plan, key, value)
-        plan.planned_at = _resolve_meal_planned_at({**payload, **updates}, current=plan.planned_at)
-        if plan.planned_for is None:
-            plan.planned_for = plan.planned_at.date()
+        plan.planned_at = next_planned_at
+        plan.planned_for = next_planned_for
         if reset_cook_confirmation:
-            confirmation = session.exec(
-                select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
-            ).first()
-            if confirmation:
-                session.delete(confirmation)
+            reset_meal_plan_cook_confirmation(session, plan)
         plan.updated_at = now
         session.add(plan)
         session.commit()
         session.refresh(plan)
-        return {"meal_plan": build_meal_plan_read(session, plan).model_dump(mode="json")}
+        return {"meal_plan": build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json")}
 
     if action == "meal_plan.delete":
         meal_plan_id = int(payload.get("meal_plan_id", 0))
-        plan = session.get(MealPlan, meal_plan_id)
-        if not plan:
-            raise ValueError("meal_plan_id not found")
+        plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
         confirmation = session.exec(
             select(MealPlanCookConfirmation).where(MealPlanCookConfirmation.meal_plan_id == plan.id)
         ).first()
@@ -1291,10 +1402,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.sync_groceries":
         meal_plan_id = int(payload.get("meal_plan_id", 0))
-        plan = session.get(MealPlan, meal_plan_id)
-        if not plan:
-            raise ValueError("meal_plan_id not found")
-        created, missing = sync_meal_plan_to_grocery(session, plan)
+        plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
+        created, missing = sync_meal_plan_to_grocery(session, plan, user_id=user_id)
         return {
             "meal_plan_id": meal_plan_id,
             "created_grocery_items": created,
@@ -1303,10 +1412,8 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.confirm_cooked":
         meal_plan_id = int(payload.get("meal_plan_id", 0))
-        plan = session.get(MealPlan, meal_plan_id)
-        if not plan:
-            raise ValueError("meal_plan_id not found")
-        result = confirm_meal_plan_cooked(session, plan, note=payload.get("note"))
+        plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
+        result = confirm_meal_plan_cooked(session, plan, note=payload.get("note"), user_id=user_id)
         return {
             "meal_plan_id": meal_plan_id,
             "already_confirmed": bool(result.get("already_confirmed")),
@@ -1317,9 +1424,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "meal_plan.log_cooked":
         recipe_id = int(payload.get("recipe_id", 0))
-        recipe = session.get(Recipe, recipe_id)
-        if not recipe:
-            raise ValueError("recipe_id not found")
+        _get_owned_recipe(session, recipe_id, user_id)
         cooked_at = _parse_datetime(payload.get("cooked_at"), "cooked_at") or now
         plan = MealPlan(
             recipe_id=recipe_id,
@@ -1328,22 +1433,21 @@ def execute_action(action: str, payload: dict, session) -> dict:
             servings_override=payload.get("servings_override"),
             note=payload.get("note") or "cooked without explicit planning",
             auto_add_missing_ingredients=False,
+            user_id=user_id,
         )
         session.add(plan)
         session.commit()
         session.refresh(plan)
-        result = confirm_meal_plan_cooked(session, plan, note=payload.get("note"))
+        result = confirm_meal_plan_cooked(session, plan, note=payload.get("note"), user_id=user_id)
         return {
-            "meal_plan": build_meal_plan_read(session, plan).model_dump(mode="json"),
+            "meal_plan": build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json"),
             "confirmation": result,
         }
 
     if action == "meal_plan.unconfirm_cooked":
         meal_plan_id = int(payload.get("meal_plan_id", 0))
-        plan = session.get(MealPlan, meal_plan_id)
-        if not plan:
-            raise ValueError("meal_plan_id not found")
-        result = unconfirm_meal_plan_cooked(session, plan)
+        plan = _get_owned_meal_plan(session, meal_plan_id, user_id)
+        result = unconfirm_meal_plan_cooked(session, plan, user_id=user_id)
         return {
             "meal_plan_id": meal_plan_id,
             "already_unconfirmed": bool(result.get("already_unconfirmed")),
@@ -1835,7 +1939,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "pantry.add_item":
         data = PantryItemCreate.model_validate(payload)
-        item = create(session, PantryItem(**data.model_dump()))
+        item = create(session, PantryItem(**data.model_dump(), user_id=user_id))
         return {"item": item.model_dump(mode="json")}
 
     if action == "pantry.list_items":
@@ -1843,7 +1947,12 @@ def execute_action(action: str, payload: dict, session) -> dict:
         low_stock_only = _as_bool(payload.get("low_stock_only"), default=False)
         expiring_in_days = payload.get("expiring_in_days")
 
-        statement = select(PantryItem).order_by(PantryItem.updated_at.desc()).limit(limit)
+        statement = (
+            select(PantryItem)
+            .where(PantryItem.user_id == user_id)
+            .order_by(PantryItem.updated_at.desc())
+            .limit(limit)
+        )
         if low_stock_only:
             statement = statement.where(PantryItem.quantity <= PantryItem.min_quantity)
         if expiring_in_days is not None:
@@ -1857,7 +1966,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
     if action == "pantry.update_item":
         item_id = int(payload.get("item_id", 0))
         item = session.get(PantryItem, item_id)
-        if not item:
+        if not item or item.user_id != user_id:
             raise ValueError("item_id not found")
 
         patch = PantryItemUpdate.model_validate({k: v for k, v in payload.items() if k != "item_id"})
@@ -1876,7 +1985,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
             raise ValueError("amount must be > 0")
 
         item = session.get(PantryItem, item_id)
-        if not item:
+        if not item or item.user_id != user_id:
             raise ValueError("item_id not found")
 
         item.quantity = max(0.0, item.quantity - amount)
@@ -1887,7 +1996,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
     if action == "pantry.delete_item":
         item_id = int(payload.get("item_id", 0))
         item = session.get(PantryItem, item_id)
-        if not item:
+        if not item or item.user_id != user_id:
             raise ValueError("item_id not found")
         sync_rows = session.exec(
             select(GroceryPantrySync).where(GroceryPantrySync.pantry_item_id == item_id)
@@ -1901,7 +2010,7 @@ def execute_action(action: str, payload: dict, session) -> dict:
 
     if action == "pantry.overview":
         days = _clamp_int(payload.get("days"), default=7, minimum=1, maximum=365)
-        overview = build_pantry_overview(session, days=days)
+        overview = build_pantry_overview(session, days=days, user_id=user_id)
         return {"overview": overview.model_dump(mode="json")}
 
     if action == "note.create":

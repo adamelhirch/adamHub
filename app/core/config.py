@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     def api_keys_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
 
+    # Email of the single legacy "owner" user that API-key-only requests (the
+    # personal web frontend) resolve to. Must be set for the shared X-API-Key
+    # path to scope data to a real user; no default on purpose.
+    owner_email: str | None = None
+
     db_url: str = "postgresql+psycopg://adamhub:adamhub@localhost:5432/adamhub"
     db_connect_retries: int = 20
     db_connect_retry_delay: float = 1.5

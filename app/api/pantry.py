@@ -3,9 +3,8 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query
 from sqlmodel import select
 
-from app.api._crud import apply_updates, create, delete, get_or_404, save
-from app.api.deps import SessionDep
-from app.core.security import require_api_key
+from app.api._crud import apply_updates, create, delete, get_owned_or_404, save
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import GroceryPantrySync, PantryItem
 from app.schemas import (
     PantryConsume,
@@ -15,24 +14,34 @@ from app.schemas import (
     PantryOverview,
 )
 from app.services.life import build_pantry_overview
+from app.services.grocery_pantry import resolve_store_metadata
 
-router = APIRouter(prefix="/pantry", tags=["pantry"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/pantry", tags=["pantry"])
 
 
 @router.post("/items", response_model=PantryItemRead)
-def create_pantry_item(payload: PantryItemCreate, session: SessionDep) -> PantryItemRead:
-    item = create(session, PantryItem(**payload.model_dump()))
+def create_pantry_item(
+    payload: PantryItemCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> PantryItemRead:
+    data = resolve_store_metadata(session, payload.model_dump())
+    item = create(session, PantryItem(**data, user_id=user.id))
     return PantryItemRead.model_validate(item, from_attributes=True)
 
 
 @router.get("/items", response_model=list[PantryItemRead])
 def list_pantry_items(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     low_stock_only: bool = False,
     expiring_in_days: int | None = Query(default=None, ge=1, le=3650),
     limit: int = Query(default=500, ge=1, le=1000),
 ) -> list[PantryItemRead]:
-    statement = select(PantryItem).order_by(PantryItem.updated_at.desc()).limit(limit)
+    statement = (
+        select(PantryItem)
+        .where(PantryItem.user_id == user.id)
+        .order_by(PantryItem.updated_at.desc())
+        .limit(limit)
+    )
     if low_stock_only:
         statement = statement.where(PantryItem.quantity <= PantryItem.min_quantity)
     if expiring_in_days is not None:
@@ -44,18 +53,27 @@ def list_pantry_items(
 
 
 @router.patch("/items/{item_id}", response_model=PantryItemRead)
-def update_pantry_item(item_id: int, payload: PantryItemUpdate, session: SessionDep) -> PantryItemRead:
-    item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
+def update_pantry_item(
+    item_id: int,
+    payload: PantryItemUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> PantryItemRead:
+    item = get_owned_or_404(session, PantryItem, item_id, user_id=user.id, detail="Pantry item not found")
 
     updates = payload.model_dump(exclude_unset=True)
+    if "cache_id" in updates:
+        updates = resolve_store_metadata(session, updates)
     apply_updates(item, updates, touch=True)
     item = save(session, item)
     return PantryItemRead.model_validate(item, from_attributes=True)
 
 
 @router.post("/items/{item_id}/consume", response_model=PantryItemRead)
-def consume_pantry_item(item_id: int, payload: PantryConsume, session: SessionDep) -> PantryItemRead:
-    item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
+def consume_pantry_item(
+    item_id: int, payload: PantryConsume, session: SessionDep, user: CurrentOrOwnerUser
+) -> PantryItemRead:
+    item = get_owned_or_404(session, PantryItem, item_id, user_id=user.id, detail="Pantry item not found")
 
     item.quantity = max(0.0, item.quantity - payload.amount)
     item.updated_at = datetime.now(timezone.utc)
@@ -64,8 +82,10 @@ def consume_pantry_item(item_id: int, payload: PantryConsume, session: SessionDe
 
 
 @router.delete("/items/{item_id}")
-def delete_pantry_item(item_id: int, session: SessionDep) -> dict:
-    item = get_or_404(session, PantryItem, item_id, detail="Pantry item not found")
+def delete_pantry_item(
+    item_id: int, session: SessionDep, user: CurrentOrOwnerUser
+) -> dict:
+    item = get_owned_or_404(session, PantryItem, item_id, user_id=user.id, detail="Pantry item not found")
 
     # Keep sync table consistent (important with PostgreSQL FK checks).
     sync_rows = session.exec(
@@ -82,5 +102,9 @@ def delete_pantry_item(item_id: int, session: SessionDep) -> dict:
 
 
 @router.get("/overview", response_model=PantryOverview)
-def pantry_overview(session: SessionDep, days: int = Query(default=7, ge=1, le=365)) -> PantryOverview:
-    return build_pantry_overview(session, days=days)
+def pantry_overview(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+    days: int = Query(default=7, ge=1, le=365),
+) -> PantryOverview:
+    return build_pantry_overview(session, days=days, user_id=user.id)

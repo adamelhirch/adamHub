@@ -56,12 +56,13 @@ def create_or_replace_mapping(
     if definition is None or not definition.supports_mapping:
         raise HTTPException(status_code=400, detail=f"Unsupported supermarket store: {payload.store.value}")
 
-    if payload.cache_id is not None:
-        cache_row = session.get(SupermarketSearchCache, payload.cache_id)
-        if cache_row is None:
-            raise HTTPException(status_code=404, detail="Search cache entry not found")
-        if cache_row.store != payload.store:
-            raise HTTPException(status_code=400, detail="cache_id store does not match payload store")
+    # cache_id is mandatory: the snapshot fields are resolved from the cache row
+    # server-side instead of trusting client-supplied strings.
+    cache_row = session.get(SupermarketSearchCache, payload.cache_id)
+    if cache_row is None:
+        raise HTTPException(status_code=404, detail="Search cache entry not found")
+    if cache_row.store != payload.store:
+        raise HTTPException(status_code=400, detail="cache_id store does not match payload store")
 
     previous = get_active_mapping(session, target_type, target_id, payload.store)
     if previous is not None:
@@ -74,14 +75,14 @@ def create_or_replace_mapping(
         target_type=target_type,
         target_id=target_id,
         store=payload.store,
-        external_id=payload.external_id,
-        store_label=payload.store_label,
-        name_snapshot=payload.name_snapshot,
-        category_snapshot=payload.category_snapshot,
-        packaging_snapshot=payload.packaging_snapshot,
-        price_snapshot=payload.price_snapshot,
-        product_url=payload.product_url,
-        image_url=payload.image_url,
+        external_id=cache_row.external_id,
+        store_label=definition.label if definition else payload.store.value,
+        name_snapshot=cache_row.name,
+        category_snapshot=cache_row.category,
+        packaging_snapshot=cache_row.packaging,
+        price_snapshot=cache_row.price_text,
+        product_url=cache_row.product_url,
+        image_url=cache_row.image_url,
         last_verified_at=verified_at,
         active=True,
         created_at=datetime.now(UTC),

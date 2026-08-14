@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
-from app.api.deps import OptionalUser, SessionDep
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.core.security import require_api_key
 from app.models import (
     GroceryItem,
@@ -90,6 +90,28 @@ from app.services.supermarket_mapping import (
 router = APIRouter(prefix="/supermarket", tags=["supermarket"], dependencies=[Depends(require_api_key)])
 
 
+def _is_owner_user(user) -> bool:
+    """True when the acting user is the configured ADAMHUB_OWNER_EMAIL user.
+
+    The owner is the legacy single-user path: connections with a NULL user_id
+    (created before per-user scoping) belong to it and must stay visible/usable.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    owner_email = (settings.owner_email or "").strip().lower()
+    return bool(owner_email) and (getattr(user, "email", "") or "").strip().lower() == owner_email
+
+
+def _connection_is_operable(existing, user) -> bool:
+    """A connection can be listed/activated/deleted by the acting user."""
+    if existing is None:
+        return True
+    if existing.user_id is not None:
+        return existing.user_id == user.id
+    return _is_owner_user(user)
+
+
 def _to_result(row: SupermarketSearchCache) -> SupermarketSearchResult:
     return SupermarketSearchResult(
         cache_id=row.id,
@@ -144,30 +166,28 @@ def list_supported_stores() -> list[SupermarketStoreRead]:
 @router.get("/connections", response_model=list[SupermarketConnectionRead])
 def list_connections_endpoint(
     session: SessionDep,
-    user: OptionalUser,
+    user: CurrentOrOwnerUser,
     store: SupermarketStore | None = Query(default=None),
 ) -> list[SupermarketConnectionRead]:
-    user_id = user.id if user else None
-    return [
-        _connection_to_read(row)
-        for row in list_supermarket_connections(session, store, user_id=user_id)
-    ]
+    rows = list_supermarket_connections(session, store, user_id=user.id)
+    if _is_owner_user(user):
+        # Legacy (pre-scoping) connections with a NULL user_id belong to the
+        # single-user owner and must remain visible to the personal frontend.
+        rows += list_supermarket_connections(session, store, user_id=None)
+    return [_connection_to_read(row) for row in rows]
 
 
 @router.post("/connections/import", response_model=SupermarketConnectionRead)
 def import_connection_endpoint(
     payload: SupermarketConnectionImport,
     session: SessionDep,
-    user: OptionalUser,
+    user: CurrentOrOwnerUser,
 ) -> SupermarketConnectionRead:
     if not payload.cookies:
         raise HTTPException(status_code=400, detail="cookies must be a non-empty list")
-    user_id = user.id if user else None
-    # If the caller is authenticated, pin the connection to them and use their
-    # display name as the label by default.
     label = payload.label.strip()
     if not label:
-        label = (user.display_name if user else f"{payload.store.value}-connection").strip()
+        label = (user.display_name or f"{payload.store.value}-connection").strip()
     connection = upsert_supermarket_connection(
         session,
         store=payload.store,
@@ -175,32 +195,34 @@ def import_connection_endpoint(
         cookies=payload.cookies,
         activate=payload.activate,
         connection_id=payload.connection_id,
-        user_id=user_id,
+        user_id=user.id,
     )
     return _connection_to_read(connection)
 
 
 @router.put("/connections/{connection_id}/activate", response_model=SupermarketConnectionRead)
 def activate_connection_endpoint(
-    connection_id: int, session: SessionDep, user: OptionalUser
+    connection_id: int, session: SessionDep, user: CurrentOrOwnerUser
 ) -> SupermarketConnectionRead:
-    connection = activate_supermarket_connection(session, connection_id)
+    # Check ownership BEFORE mutating: activating deactivates every other active
+    # connection for that store, so a cross-user 404 must not leave side effects.
+    existing = session.get(SupermarketConnection, connection_id)
+    if not _connection_is_operable(existing, user):
+        raise HTTPException(status_code=404, detail="Connection not found")
+    connection = activate_supermarket_connection(session, connection_id, user_id=user.id)
     if connection is None:
         raise HTTPException(status_code=404, detail="Connection not found")
-    if user and connection.user_id and connection.user_id != user.id:
-        raise HTTPException(status_code=403, detail="Cette connexion appartient à un autre compte")
     return _connection_to_read(connection)
 
 
 @router.delete("/connections/{connection_id}", response_model=SupermarketConnectionRead)
 def delete_connection_endpoint(
-    connection_id: int, session: SessionDep, user: OptionalUser
+    connection_id: int, session: SessionDep, user: CurrentOrOwnerUser
 ) -> SupermarketConnectionRead:
-    if user:
-        existing = session.get(SupermarketConnection, connection_id)
-        if existing and existing.user_id and existing.user_id != user.id:
-            raise HTTPException(status_code=403, detail="Cette connexion appartient à un autre compte")
-    connection = delete_supermarket_connection(session, connection_id)
+    existing = session.get(SupermarketConnection, connection_id)
+    if not _connection_is_operable(existing, user):
+        raise HTTPException(status_code=404, detail="Connection not found")
+    connection = delete_supermarket_connection(session, connection_id, user_id=user.id)
     if connection is None:
         raise HTTPException(status_code=404, detail="Connection not found")
     return _connection_to_read(connection)
@@ -208,7 +230,7 @@ def delete_connection_endpoint(
 
 @router.post("/search", response_model=list[SupermarketSearchResult])
 async def run_search(
-    payload: SupermarketSearchRequest, session: SessionDep, user: OptionalUser
+    payload: SupermarketSearchRequest, session: SessionDep, user: CurrentOrOwnerUser
 ) -> list[SupermarketSearchResult]:
     try:
         normalized = await fetch_search_results(
@@ -218,7 +240,7 @@ async def run_search(
             promotions_only=payload.promotions_only,
             sort_by=payload.sort_by,
             session=session,
-            user_id=user.id if user else None,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -454,7 +476,7 @@ async def list_past_orders(
 
 @router.post("/ubereats/orders/import-to-pantry", response_model=UbereatsImportResult)
 async def import_ubereats_order(
-    payload: UbereatsImportRequest, session: SessionDep
+    payload: UbereatsImportRequest, session: SessionDep, user: CurrentOrOwnerUser
 ) -> UbereatsImportResult:
     order_uuid = extract_order_uuid(payload.tracking_url_or_uuid)
     if not order_uuid:
@@ -464,7 +486,9 @@ async def import_ubereats_order(
         )
     cookies = load_active_cookies(session, SupermarketStore.UBEREATS)
     try:
-        result = await import_ubereats_order_to_pantry(session, order_uuid, cookies=cookies)
+        result = await import_ubereats_order_to_pantry(
+            session, order_uuid, cookies=cookies, user_id=user.id
+        )
     except UbereatsAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except UbereatsOrderError as exc:
@@ -538,17 +562,23 @@ async def get_ubereats_cart(
 
 
 def _upsert_grocery_item_for_cache(
-    session: SessionDep, cache_row: SupermarketSearchCache, quantity: int
+    session: SessionDep,
+    cache_row: SupermarketSearchCache,
+    quantity: int,
+    user_id: int | None = None,
 ) -> None:
     """Mirror a cached UE product into the local grocery list.
 
-    If a row with the same `external_id` already exists, increments quantity.
-    Otherwise creates a new GroceryItem with the cache metadata.
+    If a row with the same `external_id` (for this user) already exists,
+    increments quantity. Otherwise creates a new GroceryItem with the cache
+    metadata, scoped to `user_id`.
     """
     now = datetime.now(UTC)
     existing: GroceryItem | None = None
     if cache_row.external_id:
         statement = select(GroceryItem).where(GroceryItem.external_id == cache_row.external_id)
+        if user_id is not None:
+            statement = statement.where(GroceryItem.user_id == user_id)
         existing = session.exec(statement).first()
 
     if existing is not None:
@@ -580,6 +610,7 @@ def _upsert_grocery_item_for_cache(
         note=note,
         created_at=now,
         updated_at=now,
+        user_id=user_id,
     )
     session.add(item)
     session.commit()
@@ -587,7 +618,7 @@ def _upsert_grocery_item_for_cache(
 
 @router.post("/ubereats/cart/items", response_model=UbereatsCartRead)
 async def add_ubereats_cart_item(
-    payload: UbereatsCartAddRequest, session: SessionDep
+    payload: UbereatsCartAddRequest, session: SessionDep, user: CurrentOrOwnerUser
 ) -> UbereatsCartRead:
     cache_row = session.get(SupermarketSearchCache, payload.cache_id)
     if cache_row is None or cache_row.store != SupermarketStore.UBEREATS:
@@ -636,6 +667,6 @@ async def add_ubereats_cart_item(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # Mirror the item into the local grocery list so the hub stays in sync.
-    _upsert_grocery_item_for_cache(session, cache_row, payload.quantity)
+    _upsert_grocery_item_for_cache(session, cache_row, payload.quantity, user_id=user.id)
 
     return _serialize_cart(cart)

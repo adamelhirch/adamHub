@@ -200,6 +200,7 @@ export interface SupermarketMapping {
   target_type: 'recipe_ingredient' | 'pantry_item';
   target_id: number;
   store: string;
+  cache_id?: number | null;
   external_id: string;
   store_label: string;
   name_snapshot: string;
@@ -249,6 +250,7 @@ interface GroceryStore {
     unit?: string;
     category?: string;
     image_url?: string;
+    cache_id?: number;
     store_label?: string;
     external_id?: string;
     packaging?: string;
@@ -257,7 +259,7 @@ interface GroceryStore {
     priority?: number;
     note?: string;
   }) => Promise<void>;
-  updateItem: (id: number, data: Partial<Pick<GroceryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url' | 'priority' | 'note' | 'checked'>>) => Promise<void>;
+  updateItem: (id: number, data: Partial<Pick<GroceryItem, 'name' | 'quantity' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url' | 'priority' | 'note' | 'checked'>> & { cache_id?: number }) => Promise<void>;
   toggleCheck: (id: number, checked: boolean) => Promise<void>;
   deleteItem: (id: number) => Promise<void>;
   clearChecked: () => Promise<void>;
@@ -275,6 +277,7 @@ interface GroceryStore {
     unit?: string;
     category?: string;
     image_url?: string;
+    cache_id?: number;
     store_label?: string;
     external_id?: string;
     packaging?: string;
@@ -285,7 +288,7 @@ interface GroceryStore {
     location?: string;
     note?: string;
   }) => Promise<PantryItem>;
-  updatePantryItem: (id: number, data: Partial<Pick<PantryItem, 'name' | 'quantity' | 'min_quantity' | 'expires_at' | 'location' | 'note' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url'>>) => Promise<void>;
+  updatePantryItem: (id: number, data: Partial<Pick<PantryItem, 'name' | 'quantity' | 'min_quantity' | 'expires_at' | 'location' | 'note' | 'unit' | 'category' | 'image_url' | 'store_label' | 'external_id' | 'packaging' | 'price_text' | 'product_url'>> & { cache_id?: number }) => Promise<void>;
   deletePantryItem: (id: number) => Promise<void>;
   consumePantryItem: (id: number, amount: number) => Promise<void>;
 

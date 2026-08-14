@@ -122,7 +122,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
       if (month) params.month = month;
       const res = await api.get('/finances/transactions', { params });
       set({ transactions: res.data });
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to fetch transactions' });
     }
   },
@@ -131,7 +131,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
     try {
       const res = await api.post('/finances/transactions', data);
       set((state) => ({ transactions: [res.data, ...state.transactions] }));
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to add transaction' });
     }
   },
@@ -141,7 +141,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
       const params = month ? { month } : {};
       const res = await api.get('/finances/budgets', { params });
       set({ budgets: res.data });
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to fetch budgets' });
     }
   },
@@ -150,7 +150,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
     try {
       const res = await api.post('/finances/budgets', data);
       set((state) => ({ budgets: [...state.budgets, res.data] }));
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to add budget' });
     }
   },
@@ -159,7 +159,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
     try {
       const res = await api.get('/finances/summary', { params: { year, month } });
       set({ summary: res.data });
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to fetch summary' });
     }
   },
@@ -168,7 +168,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
     try {
       const res = await api.get('/subscriptions', { params: { active_only: false } });
       set({ subscriptions: res.data });
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to fetch subscriptions' });
     }
   },
@@ -194,7 +194,7 @@ export const useFinanceStore = create<FinanceStore>((set, get) => ({
     try {
       const res = await api.get('/subscriptions/projection');
       set({ projection: res.data });
-    } catch (e) {
+    } catch {
       set({ error: 'Failed to fetch projection' });
     }
   },
