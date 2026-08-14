@@ -11,6 +11,7 @@ Use for recipe storage, transcript-to-recipe drafting, and pantry-aware cooking 
 - `recipe.get`
 - `recipe.update`
 - `recipe.confirm_cooked`
+- `recipe.unconfirm_cooked`
 - `recipe.delete`
 - `meal_plan.add`
 - `meal_plan.log_cooked`

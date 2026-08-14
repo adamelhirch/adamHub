@@ -11,6 +11,7 @@ If the user is describing something recurring like a routine, a ritual, or a hab
 - `task.list`
 - `task.update`
 - `task.complete`
+- `task.delete`
 <!-- END GENERATED: action-list -->
 
 ## Minimal decision rules
