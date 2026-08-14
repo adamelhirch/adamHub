@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
@@ -67,7 +68,11 @@ def register(payload: RegisterPayload, session: SessionDep) -> AuthResponse:
         display_name=payload.display_name.strip(),
     )
     session.add(user)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Cet email est déjà inscrit") from exc
     session.refresh(user)
 
     return AuthResponse(token=create_token(user), user=_to_user_read(user))
