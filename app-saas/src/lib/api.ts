@@ -31,7 +31,7 @@ interface ErrorPayload {
   detail?: string | { msg: string }[];
 }
 
-async function request<T>(
+export async function request<T>(
   path: string,
   options: { method?: string; body?: unknown } = {},
 ): Promise<T> {
