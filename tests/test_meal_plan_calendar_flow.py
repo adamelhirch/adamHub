@@ -423,6 +423,47 @@ def test_store_backed_recipe_ingredients_sync_to_groceries(client, auth_headers,
     assert grocery["product_url"] == "https://shop.test/chicken-001"
 
 
+def test_visible_meal_plans_owns_marker_exclusion(test_engine, owner_id):
+    from app.models import MealPlan, MealSlot, Recipe
+    from app.services.meal_planning import RECIPE_CONFIRM_MARKER, visible_meal_plans
+
+    now = datetime.now(timezone.utc)
+    yesterday = (now - timedelta(days=1)).replace(hour=19, minute=30)
+    with Session(test_engine) as session:
+        recipe = Recipe(name="Riz", instructions="Cuire", servings=1, user_id=owner_id)
+        session.add(recipe)
+        session.commit()
+        session.refresh(recipe)
+
+        session.add(MealPlan(user_id=owner_id, planned_at=now, planned_for=now.date(), slot=MealSlot.DINNER, recipe_id=recipe.id, note="real plan"))
+        session.add(MealPlan(user_id=owner_id, planned_at=yesterday, planned_for=yesterday.date(), slot=MealSlot.DINNER, recipe_id=recipe.id, note="yesterday plan"))
+        session.add(MealPlan(user_id=owner_id, planned_at=now, planned_for=now.date(), slot=MealSlot.DINNER, recipe_id=recipe.id, note=RECIPE_CONFIRM_MARKER))
+        session.add(MealPlan(user_id=None, planned_at=now, planned_for=now.date(), slot=MealSlot.DINNER, recipe_id=recipe.id, note=None))
+        session.commit()
+
+        # Marker carrier rows are invisible; real plans (including NULL notes) are kept.
+        all_notes = {plan.note for plan in visible_meal_plans(session)}
+        assert all_notes == {"real plan", "yesterday plan", None}
+
+        # User scoping applies when requested.
+        owner_notes = [plan.note for plan in visible_meal_plans(session, user_id=owner_id)]
+        assert owner_notes == ["yesterday plan", "real plan"]
+
+        # planned_for + slot scoping (the slot-free validation shape).
+        slot_notes = [
+            plan.note
+            for plan in visible_meal_plans(session, user_id=owner_id, planned_for=now.date(), slot=MealSlot.DINNER)
+        ]
+        assert slot_notes == ["real plan"]
+
+        # date_from/date_to bound planned_at (UTC day edges) after the marker exclusion.
+        day_notes = {plan.note for plan in visible_meal_plans(session, user_id=owner_id, date_from=now.date(), date_to=now.date())}
+        assert day_notes == {"real plan"}
+
+        # limit applies after the marker exclusion.
+        assert len(visible_meal_plans(session, limit=2)) == 2
+
+
 def test_recipe_ingredient_rejects_unknown_cache_id(client, auth_headers):
     recipe = client.post(
         "/api/v1/recipes",
@@ -433,7 +474,7 @@ def test_recipe_ingredient_rejects_unknown_cache_id(client, auth_headers):
             "ingredients": [{"name": "Lait", "quantity": 1, "unit": "L", "cache_id": 999999}],
         },
     )
-    assert recipe.status_code == 400
+    assert recipe.status_code == 404
 
 
 def test_recipe_ingredient_store_metadata_dropped_without_cache_id(client, auth_headers):

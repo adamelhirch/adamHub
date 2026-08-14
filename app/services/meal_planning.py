@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from sqlalchemy import or_
 from sqlmodel import Session, select
@@ -14,17 +14,10 @@ from app.models import (
     PantryItem,
     Recipe,
     RecipeIngredient,
-    SupermarketSearchCache,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead
-from app.services.supermarket_registry import get_store_definition
-
-_UNIT_BASE: dict[str, tuple[str, float]] = {
-    "kg": ("g", 1000.0),
-    "g": ("g", 1.0),
-    "l": ("ml", 1000.0),
-    "ml": ("ml", 1.0),
-}
+from app.services.store_fields import resolve_store_fields
+from app.services.units import from_base, normalize_name, to_base, unit_meta
 
 
 @dataclass
@@ -37,35 +30,6 @@ class ConsumptionResult:
 
     summary: list[dict] = field(default_factory=list)
     lots: list[dict] = field(default_factory=list)
-
-
-def _normalize_name(value: str) -> str:
-    return " ".join(value.strip().lower().split())
-
-
-def _to_base(quantity: float, unit: str) -> tuple[float, str]:
-    normalized_unit = unit.strip().lower() if unit else "item"
-    base = _UNIT_BASE.get(normalized_unit)
-    if not base:
-        return quantity, normalized_unit
-    base_unit, factor = base
-    return quantity * factor, base_unit
-
-
-def _unit_meta(unit: str) -> tuple[str, float]:
-    normalized_unit = unit.strip().lower() if unit else "item"
-    base = _UNIT_BASE.get(normalized_unit)
-    if not base:
-        return normalized_unit, 1.0
-    base_unit, factor = base
-    return base_unit, factor
-
-
-def _from_base(quantity: float, unit: str) -> float:
-    _, factor = _unit_meta(unit)
-    if factor == 0:
-        return quantity
-    return quantity / factor
 
 
 def _scaled_recipe_ingredients(
@@ -84,7 +48,7 @@ def _scaled_recipe_ingredients(
     scaled: list[tuple[RecipeIngredient, float, float, str]] = []
     for ingredient in ingredients:
         needed_qty_raw = (ingredient.quantity or 0.0) * ratio
-        needed_qty_base, base_unit = _to_base(needed_qty_raw, ingredient.unit or "item")
+        needed_qty_base, base_unit = to_base(needed_qty_raw, ingredient.unit or "item")
         scaled.append((ingredient, needed_qty_raw, needed_qty_base, base_unit))
     return scaled
 
@@ -101,22 +65,17 @@ def validate_meal_plan_slot_free(
 
     This replaces the generic cross-domain calendar overlap check for meal plans:
     planning lunch must not be blocked by an unrelated task/event at the same hour.
-    Recipe.confirm_cooked marker plans are excluded — they are internal records of
-    a past cook, not scheduled meals.
+    Reads through visible_meal_plans, which keeps recipe.confirm_cooked marker rows
+    (internal records of a past cook, not scheduled meals) out of the check.
     """
-    statement = (
-        exclude_recipe_confirm_marker_plans(select(MealPlan))
-        .where(
-            MealPlan.user_id == user_id,
-            MealPlan.planned_for == planned_for,
-            MealPlan.slot == slot,
-        )
-    )
-    if exclude_plan_id is not None:
-        statement = statement.where(MealPlan.id != exclude_plan_id)
-    existing = session.exec(statement).first()
-    if existing is not None:
-        raise ValueError("Vous avez déjà un repas planifié pour ce créneau")
+    for plan in visible_meal_plans(
+        session,
+        user_id=user_id,
+        planned_for=planned_for,
+        slot=slot,
+    ):
+        if plan.id != exclude_plan_id:
+            raise ValueError("Vous avez déjà un repas planifié pour ce créneau")
 
 
 def compute_recipe_missing_ingredients(
@@ -132,8 +91,8 @@ def compute_recipe_missing_ingredients(
     pantry = session.exec(statement).all()
     pantry_stock: dict[tuple[str, str], float] = {}
     for item in pantry:
-        key_name = _normalize_name(item.name)
-        qty, base_unit = _to_base(item.quantity or 0.0, item.unit or "item")
+        key_name = normalize_name(item.name)
+        qty, base_unit = to_base(item.quantity or 0.0, item.unit or "item")
         key = (key_name, base_unit)
         pantry_stock[key] = pantry_stock.get(key, 0.0) + qty
 
@@ -141,7 +100,7 @@ def compute_recipe_missing_ingredients(
     for ingredient, needed_qty_raw, needed_qty, base_unit in _scaled_recipe_ingredients(
         session, recipe, servings_override
     ):
-        key = (_normalize_name(ingredient.name), base_unit)
+        key = (normalize_name(ingredient.name), base_unit)
         available = pantry_stock.get(key, 0.0)
 
         if available + 1e-9 < needed_qty:
@@ -182,12 +141,12 @@ def add_missing_to_grocery(
     existing_unchecked = session.exec(existing_statement).all()
     indexed: dict[tuple[str, str], GroceryItem] = {}
     for item in existing_unchecked:
-        indexed[(_normalize_name(item.name), (item.unit or "item").strip().lower())] = item
+        indexed[(normalize_name(item.name), (item.unit or "item").strip().lower())] = item
 
     added = 0
     now = datetime.now(timezone.utc)
     for ing in missing:
-        key = (_normalize_name(ing.name), (ing.unit or "item").strip().lower())
+        key = (normalize_name(ing.name), (ing.unit or "item").strip().lower())
         current = indexed.get(key)
         if current:
             current.quantity = round((current.quantity or 0.0) + (ing.missing_quantity or 0.0), 3)
@@ -244,19 +203,19 @@ def consume_recipe_ingredients(
     ):
         remaining = max(0.0, needed_base)
         consumed_base = 0.0
-        normalized_name = _normalize_name(ingredient.name)
+        normalized_name = normalize_name(ingredient.name)
 
         matching = [
             item
             for item in pantry_items
-            if _normalize_name(item.name) == normalized_name and _to_base(item.quantity or 0.0, item.unit or "item")[1] == base_unit
+            if normalize_name(item.name) == normalized_name and to_base(item.quantity or 0.0, item.unit or "item")[1] == base_unit
         ]
         matching.sort(key=lambda x: x.updated_at)
 
         for item in matching:
             if remaining <= 1e-9:
                 break
-            available_base, _ = _to_base(item.quantity or 0.0, item.unit or "item")
+            available_base, _ = to_base(item.quantity or 0.0, item.unit or "item")
             if available_base <= 1e-9:
                 continue
 
@@ -265,7 +224,7 @@ def consume_recipe_ingredients(
                 continue
 
             new_available = max(0.0, available_base - consume_base)
-            item.quantity = round(max(0.0, _from_base(new_available, item.unit or "item")), 3)
+            item.quantity = round(max(0.0, from_base(new_available, item.unit or "item")), 3)
             item.updated_at = now
             session.add(item)
 
@@ -276,12 +235,12 @@ def consume_recipe_ingredients(
                     "name": ingredient.name,
                     "unit": ingredient.unit or "item",
                     "pantry_item_id": item.id,
-                    "consumed_quantity": round(max(0.0, _from_base(consume_base, ingredient.unit or "item")), 3),
+                    "consumed_quantity": round(max(0.0, from_base(consume_base, ingredient.unit or "item")), 3),
                 }
             )
 
-        consumed_raw = _from_base(consumed_base, ingredient.unit or "item")
-        missing_raw = _from_base(max(0.0, remaining), ingredient.unit or "item")
+        consumed_raw = from_base(consumed_base, ingredient.unit or "item")
+        missing_raw = from_base(max(0.0, remaining), ingredient.unit or "item")
         summary.append(
             {
                 "name": ingredient.name,
@@ -438,19 +397,19 @@ def _restore_consumption_lot(
         target = next((item for item in pantry_items if item.id == pantry_item_id), None)
 
     if target is None:
-        consumed_base, base_unit = _to_base(consumed_quantity, unit)
-        normalized_name = _normalize_name(name)
+        consumed_base, base_unit = to_base(consumed_quantity, unit)
+        normalized_name = normalize_name(name)
         matching = [
             item
             for item in pantry_items
-            if _normalize_name(item.name) == normalized_name
-            and _unit_meta(item.unit or "item")[0] == base_unit
+            if normalize_name(item.name) == normalized_name
+            and unit_meta(item.unit or "item")[0] == base_unit
         ]
         matching.sort(key=lambda x: x.updated_at, reverse=True)
         target = matching[0] if matching else None
 
     if target:
-        restore_in_item_unit = _from_base(_to_base(consumed_quantity, unit)[0], target.unit or "item")
+        restore_in_item_unit = from_base(to_base(consumed_quantity, unit)[0], target.unit or "item")
         target.quantity = round((target.quantity or 0.0) + restore_in_item_unit, 3)
         target.updated_at = now
         session.add(target)
@@ -554,7 +513,7 @@ def reset_meal_plan_cook_confirmation(session: Session, meal_plan: MealPlan) -> 
 RECIPE_CONFIRM_MARKER = "recipe.confirm_cooked"
 
 
-def exclude_recipe_confirm_marker_plans(statement):
+def _exclude_recipe_confirm_marker_plans(statement):
     """Filter recipe.confirm_cooked carrier plans out of a MealPlan select.
 
     Marker rows only exist to carry a MealPlanCookConfirmation for recipe-level
@@ -565,6 +524,45 @@ def exclude_recipe_confirm_marker_plans(statement):
     return statement.where(
         or_(MealPlan.note.is_(None), MealPlan.note != RECIPE_CONFIRM_MARKER)
     )
+
+
+def visible_meal_plans(
+    session: Session,
+    *,
+    user_id: int | None = None,
+    planned_for: date | None = None,
+    slot: MealSlot | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int | None = None,
+) -> list[MealPlan]:
+    """The one safe way to read MealPlan rows for display or calendar projection.
+
+    Owns the recipe.confirm_cooked marker exclusion: ad-hoc MealPlan rows that only
+    carry a recipe-level cook confirmation are internal bookkeeping and must never
+    surface in meal-plan listings or calendar feeds. Callers pass their filters and
+    get back only rows that are safe to show — the marker never needs mentioning.
+    ``date_from``/``date_to`` bound ``planned_at`` (UTC day edges).
+    """
+    statement = _exclude_recipe_confirm_marker_plans(select(MealPlan))
+    if user_id is not None:
+        statement = statement.where(MealPlan.user_id == user_id)
+    if planned_for is not None:
+        statement = statement.where(MealPlan.planned_for == planned_for)
+    if slot is not None:
+        statement = statement.where(MealPlan.slot == slot)
+    if date_from is not None:
+        statement = statement.where(
+            MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        statement = statement.where(
+            MealPlan.planned_at <= datetime.combine(date_to, time.max).replace(tzinfo=timezone.utc)
+        )
+    statement = statement.order_by(MealPlan.planned_at.asc())
+    if limit is not None:
+        statement = statement.limit(limit)
+    return session.exec(statement).all()
 
 
 def _recipe_confirmation_plan(session: Session, recipe: Recipe) -> MealPlan | None:
@@ -656,9 +654,10 @@ def unconfirm_recipe_cooked(
 def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     """Return the fields to persist on a RecipeIngredient for validated input.
 
-    Store metadata is never taken from the client: it is resolved server-side from
-    the SupermarketSearchCache row referenced by ``cache_id`` (the same mechanism
-    used by create_or_replace_mapping). Client-supplied store fields are ignored.
+    Store metadata is never taken from the client: it is resolved server-side
+    from the SupermarketSearchCache row referenced by ``cache_id`` (the same
+    mechanism used by create_or_replace_mapping). Client-supplied store fields
+    are ignored.
     """
     fields: dict = {
         "name": ingredient_in.name,
@@ -678,21 +677,17 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     if cache_id is None:
         return fields
 
-    cache_row = session.get(SupermarketSearchCache, cache_id)
-    if cache_row is None:
-        raise ValueError(f"cache_id {cache_id} does not reference a known supermarket search result")
-
-    definition = get_store_definition(cache_row.store)
+    resolved = resolve_store_fields(session, cache_id)
     fields.update(
         {
-            "store": cache_row.store,
-            "store_label": definition.label if definition else cache_row.store.value,
-            "external_id": cache_row.external_id,
-            "category": cache_row.category or fields["category"],
-            "packaging": cache_row.packaging,
-            "price_text": cache_row.price_text,
-            "product_url": cache_row.product_url,
-            "image_url": cache_row.image_url,
+            "store": resolved["store"],
+            "store_label": resolved["store_label"],
+            "external_id": resolved["external_id"],
+            "category": resolved["category"] or fields["category"],
+            "packaging": resolved["packaging"],
+            "price_text": resolved["price_text"],
+            "product_url": resolved["product_url"],
+            "image_url": resolved["image_url"],
         }
     )
     return fields

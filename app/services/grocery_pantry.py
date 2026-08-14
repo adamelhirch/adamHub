@@ -2,20 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from app.models import GroceryItem, GroceryPantrySync, PantryItem, SupermarketSearchCache
-from app.services.meal_planning import _from_base, _to_base
-from app.services.supermarket_registry import get_store_definition
-
-# Client-facing store metadata fields that must never be fabricated: they are
-# only ever populated server-side from a SupermarketSearchCache row.
-STORE_METADATA_FIELDS = ("external_id", "store_label", "price_text", "product_url")
-
-
-def _normalize(value: str) -> str:
-    return " ".join((value or "").strip().lower().split())
+from app.models import GroceryItem, GroceryPantrySync, PantryItem
+from app.services.store_fields import reject_fabricated_store_fields, resolve_store_fields
+from app.services.units import from_base, normalize_name, to_base
 
 
 def resolve_store_metadata(session: Session, data: dict) -> dict:
@@ -28,35 +19,14 @@ def resolve_store_metadata(session: Session, data: dict) -> dict:
     """
     cache_id = data.pop("cache_id", None)
 
-    fabricated = [field for field in STORE_METADATA_FIELDS if data.get(field)]
     if cache_id is None:
-        if fabricated:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Store metadata fields (external_id, store_label, price_text, "
-                    "product_url) require a valid cache_id"
-                ),
-            )
+        reject_fabricated_store_fields(data)
         return data
 
-    cache_row = session.get(SupermarketSearchCache, cache_id)
-    if cache_row is None:
-        raise HTTPException(status_code=404, detail="Search cache entry not found")
-
-    definition = get_store_definition(cache_row.store)
-    data["external_id"] = cache_row.external_id
-    data["store_label"] = definition.label if definition else cache_row.store.value
-    data["price_text"] = cache_row.price_text
-    data["product_url"] = cache_row.product_url
-    data["packaging"] = cache_row.packaging
-    data["image_url"] = cache_row.image_url
+    resolved = resolve_store_fields(session, cache_id)
+    for field in ("external_id", "store_label", "price_text", "product_url", "packaging", "image_url"):
+        data[field] = resolved[field]
     return data
-
-
-def _quantity_and_base(quantity: float, unit: str) -> tuple[float, str]:
-    base_quantity, base_unit = _to_base(max(0.0, float(quantity or 0.0)), unit or "item")
-    return base_quantity, base_unit
 
 
 def sync_checked_grocery_item_to_pantry(
@@ -83,15 +53,15 @@ def sync_checked_grocery_item_to_pantry(
         statement = statement.where(PantryItem.user_id == user_id)
     pantry_items = session.exec(statement).all()
     target = None
-    normalized_name = _normalize(grocery_item.name)
+    normalized_name = normalize_name(grocery_item.name)
     quantity = max(0.0, float(grocery_item.quantity or 0.0))
-    grocery_base_quantity, grocery_base_unit = _quantity_and_base(quantity, grocery_item.unit or "item")
+    grocery_base_quantity, grocery_base_unit = to_base(quantity, grocery_item.unit or "item")
 
     # Match on normalized name + base unit so "2 kg" merges into a "2000 g"
     # pantry row instead of creating a duplicate.
     for item in pantry_items:
-        if _normalize(item.name) == normalized_name:
-            _, pantry_base_unit = _quantity_and_base(1.0, item.unit or "item")
+        if normalize_name(item.name) == normalized_name:
+            _, pantry_base_unit = to_base(1.0, item.unit or "item")
             if pantry_base_unit == grocery_base_unit:
                 target = item
                 break
@@ -99,7 +69,7 @@ def sync_checked_grocery_item_to_pantry(
     now = datetime.now(timezone.utc)
 
     if target:
-        added_quantity = _from_base(grocery_base_quantity, target.unit or "item")
+        added_quantity = from_base(grocery_base_quantity, target.unit or "item")
         target.quantity = round((target.quantity or 0.0) + added_quantity, 3)
         if not target.image_url and grocery_item.image_url:
             target.image_url = grocery_item.image_url
