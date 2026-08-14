@@ -32,8 +32,9 @@ Ce document sert de point de reprise pour les futures modifications. Il decrit l
   - enums partages
   - centre de gravite des donnees metier
 
-- `app/schemas/dto.py`
-  - contrats REST et skill
+- `app/schemas/`
+  - un module par domaine (tasks, habits, finance, groceries, pantry, supermarket, meal_planning, video, fitness, goals, calendar, notes, linear, skills, dashboard)
+  - `__init__.py` re-exporte la surface publique ; `dto.py` reste un facade de compatibilite
   - a modifier quand la surface publique change
 
 - `app/services/`
@@ -313,7 +314,7 @@ Pour toute extension UI sur ces domaines:
 ### Ajouter un nouveau domaine metier
 
 1. modeles: `app/models/entities.py`
-2. schemas: `app/schemas/dto.py`
+2. schemas: `app/schemas/<domaine>.py` + re-export dans `app/schemas/__init__.py`
 3. logique: `app/services/...`
 4. routeur: `app/api/...`
 5. agregation: `app/api/router.py`

@@ -64,7 +64,7 @@ REST modules available even when the UI is partial or missing:
 - `app/api/`: FastAPI routers per domain
 - `app/services/`: business rules and cross-domain orchestration
 - `app/models/entities.py`: SQLModel tables and enums
-- `app/schemas/dto.py`: public API and skill contracts
+- `app/schemas/`: public API and skill contracts (one module per domain, re-exported via the package `__init__`; `dto.py` is a backwards-compatible facade)
 - `app/skill/actions.py`: skill manifest + execution backend
 - `web/src/pages/`: main app screens
 - `web/src/store/`: frontend domain stores
