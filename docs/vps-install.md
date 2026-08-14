@@ -31,8 +31,14 @@ cp .env.vps.example .env
 Remplis au minimum:
 
 ```env
+ADAMHUB_ENV=production
 ADAMHUB_API_KEYS=un_secret_long_et_random
 ADAMHUB_API_KEY=un_secret_long_et_random
+ADAMHUB_OWNER_EMAIL=you@example.com
+# Generate with: python -c "import secrets; print(secrets.token_urlsafe(64))"
+ADAMHUB_JWT_SECRET=un_secret_jwt_long_et_random
+# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+ADAMHUB_COOKIE_ENCRYPTION_KEY=une_cle_fernet
 ADAMHUB_PUBLIC_BASE_URL=https://adamhub.ton-domaine.com
 ADAMHUB_ALLOW_ORIGINS=https://adamhub.ton-domaine.com
 VITE_API_URL=https://adamhub.ton-domaine.com/api/v1
@@ -46,6 +52,8 @@ ADAMHUB_PORT=8000
 ```
 
 Important:
+
+- en production (`ADAMHUB_ENV=production`), le backend refuse de demarrer si `ADAMHUB_API_KEYS` manque ou vaut `change-me`, si `ADAMHUB_JWT_SECRET` ou `ADAMHUB_COOKIE_ENCRYPTION_KEY` sont vides, ou si `ADAMHUB_ALLOW_ORIGINS` vaut `*`. C'est voulu: on ne veut aucun repli non securise silencieux.
 
 - le backend AdamHUB valide les requetes avec `ADAMHUB_API_KEYS`
 - `ADAMHUB_API_KEY` est juste un miroir de confort pour la doc et certains outils
