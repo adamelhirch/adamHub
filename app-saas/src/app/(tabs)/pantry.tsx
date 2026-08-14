@@ -88,12 +88,23 @@ export default function PantryScreen() {
     <Screen>
       <View className="mb-6 flex-row items-center justify-between">
         <ScreenHeader title="Garde-manger" subtitle="Vos stocks actuels" />
-        <Pressable
-          onPress={() => router.push("/new-pantry")}
-          className="h-11 w-11 items-center justify-center rounded-full bg-emerald-600 active:bg-emerald-700"
-        >
-          <Ionicons name="add" size={24} color="#ffffff" />
-        </Pressable>
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: "/supermarket-search", params: { returnTo: "pantry" } })
+            }
+            hitSlop={8}
+            className="h-11 w-11 items-center justify-center rounded-full bg-slate-200 active:bg-slate-300"
+          >
+            <Ionicons name="storefront-outline" size={22} color="#0f172a" />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push("/new-pantry")}
+            className="h-11 w-11 items-center justify-center rounded-full bg-emerald-600 active:bg-emerald-700"
+          >
+            <Ionicons name="add" size={24} color="#ffffff" />
+          </Pressable>
+        </View>
       </View>
 
       {error ? (

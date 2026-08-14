@@ -84,12 +84,23 @@ export default function GroceriesScreen() {
           title="Courses"
           subtitle={`${remaining} article${remaining > 1 ? "s" : ""} à acheter`}
         />
-        <Pressable
-          onPress={() => router.push("/new-grocery")}
-          className="h-11 w-11 items-center justify-center rounded-full bg-emerald-600 active:bg-emerald-700"
-        >
-          <Ionicons name="add" size={24} color="#ffffff" />
-        </Pressable>
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: "/supermarket-search", params: { returnTo: "grocery" } })
+            }
+            hitSlop={8}
+            className="h-11 w-11 items-center justify-center rounded-full bg-slate-200 active:bg-slate-300"
+          >
+            <Ionicons name="storefront-outline" size={22} color="#0f172a" />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push("/new-grocery")}
+            className="h-11 w-11 items-center justify-center rounded-full bg-emerald-600 active:bg-emerald-700"
+          >
+            <Ionicons name="add" size={24} color="#ffffff" />
+          </Pressable>
+        </View>
       </View>
       {error ? (
         <View className="mb-4 rounded-xl bg-red-50 px-4 py-3">
