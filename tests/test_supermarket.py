@@ -16,7 +16,7 @@ from app.services.connections import (
     upsert_connection,
 )
 from app.services.store_catalog import list_store_definitions, normalize_search_result, upsert_search_cache
-from app.services.scrapers.auchan import parse_auchan_search, search_auchan
+from app.services.scrapers.auchan import parse_auchan_search_html, search_auchan
 from app.services.scrapers.intermarche import (
     extract_category_from_tracking_code,
     extract_category_from_product_breadcrumb,
@@ -24,7 +24,7 @@ from app.services.scrapers.intermarche import (
     parse_intermarche_html,
     requires_intermarche_store_selection,
 )
-from app.services.scrapers.leclerc import parse_leclerc_search, search_leclerc
+from app.services.scrapers.leclerc import parse_leclerc_search_html, search_leclerc
 
 
 def test_parse_intermarche_html_handles_missing_fields():
@@ -443,46 +443,69 @@ def test_store_registry_lists_five_stores_including_leclerc_and_auchan():
     assert auchan.scraper_name == "auchan"
 
 
-def test_leclerc_and_auchan_parsers_normalize_mock_results():
-    leclerc_items = parse_leclerc_search(
-        {
-            "data": [
-                {
-                    "id": "L1",
-                    "name": "Lait entier",
-                    "brand": "Marque Repère",
-                    "price": 1.29,
-                    "packaging": "1 L",
-                },
-                {"id": "L2", "name": "Pâtes", "price": {"amount": 0.99, "currency": "EUR"}},
-                {"id": "L3", "name": "", "price": 2.0},
-            ]
-        },
-        max_results=10,
-    )
-    assert len(leclerc_items) == 2
+def test_leclerc_parser_extracts_embedded_json_from_search_html():
+    html = """
+    <script>
+      Utilitaires.widget.initOptions('ctl00_ctl00_mainMutiUnivers_main_ctl04_pnlElementProduit',
+        {"objContenu":{"lstElements":[
+          {"objElement":{"iIdProduit":32452,"sId":"32452",
+            "sLibelleLigne1":"Lait de montagne D&#233;lisse",
+            "sLibelleLigne2":"UHT Bouteille - 6x1L",
+            "sPrixUnitaire":"6,72 €","nrPVUnitaireTTC":6.72,
+            "sPrixParUniteDeMesure":"1,12 € / l",
+            "sUrlVignetteProduit":"https://fd7-photos.leclercdrive.fr/image.ashx?id=2929937",
+            "sUrlPageProduit":"https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran/fiche-produits-32452-Lait-de-montagne-Delisse.aspx",
+            "sCategorie":30}},
+          {"objElement":{"iIdProduit":2612,
+            "sLibelleLigne1":"Lait demi-&#233;cr&#233;m&#233; UHT D&#233;lisse",
+            "sLibelleLigne2":"Brique - 6x1L","sPrixUnitaire":"5,94 €",
+            "sUrlVignetteProduit":"https://fd7-photos.leclercdrive.fr/image.ashx?id=2970545",
+            "sCategorie":40}}
+        ]}});
+    </script>
+    """
+    items = parse_leclerc_search_html(html, max_results=10)
+    assert len(items) == 2
     normalized = [
-        normalize_search_result(SupermarketStore.LECLERC, "lait", item) for item in leclerc_items
+        normalize_search_result(SupermarketStore.LECLERC, "lait", item) for item in items
     ]
-    assert normalized[0]["name"] == "Lait entier"
-    assert normalized[0]["price_amount"] == 1.29
-    assert normalized[1]["price_amount"] == 0.99
+    assert normalized[0]["name"] == "Lait de montagne Délisse"
+    assert normalized[0]["external_id"] == "32452"
+    assert normalized[0]["price_text"] == "6,72 €"
+    assert normalized[0]["price_amount"] == 6.72
+    assert normalized[0]["product_url"].endswith("fiche-produits-32452-Lait-de-montagne-Delisse.aspx")
+    assert normalized[0]["image_url"] == "https://fd7-photos.leclercdrive.fr/image.ashx?id=2929937"
+    assert normalized[1]["name"] == "Lait demi-écrémé UHT Délisse"
 
-    auchan_items = parse_auchan_search(
-        {
-            "products": [
-                {"id": "A1", "name": "Eau minérale", "price": {"value": 0.45, "currency": "EUR"}},
-                {"id": "A2", "name": "Café", "price": "4,95 €", "brand": "Auchan"},
-            ]
-        },
-        max_results=10,
-    )
-    assert len(auchan_items) == 2
-    normalized_auchan = [
-        normalize_search_result(SupermarketStore.AUCHAN, "eau", item) for item in auchan_items
+
+def test_auchan_parser_extracts_product_cards_from_search_html():
+    html = """
+    <article itemscope itemtype="http://schema.org/Product"
+             class="product-thumbnail list__item" data-id="130ef860-aa6d-46f1-abb4-76ea4fce5214">
+      <a class="product-thumbnail__details-wrapper"
+         href="/lait-de-savoie-lait-demi-ecreme-uht/pr-C1799228"
+         data-id="130ef860-aa6d-46f1-abb4-76ea4fce5214">
+        <p class="product-thumbnail__description" itemprop="name description">
+          <strong itemprop="brand">LAIT DE SAVOIE</strong>
+          Lait demi-écrémé UHT 6x1l
+        </p>
+        <div class="product-thumbnail__attributes">
+          <span class="product-attribute" aria-label="Contenance : 6x1l">6x1l</span>
+        </div>
+        <meta itemprop="image" content="https://cdn.auchan.fr/media/S01000000040V28PRIMARY_0x0/B2CD/">
+      </a>
+    </article>
+    """
+    items = parse_auchan_search_html(html, max_results=10)
+    assert len(items) == 1
+    normalized = [
+        normalize_search_result(SupermarketStore.AUCHAN, "lait", item) for item in items
     ]
-    assert normalized_auchan[0]["price_amount"] == 0.45
-    assert normalized_auchan[1]["price_amount"] == 4.95
+    assert normalized[0]["name"] == "Lait demi-écrémé UHT 6x1l"
+    assert normalized[0]["external_id"] == "130ef860-aa6d-46f1-abb4-76ea4fce5214"
+    assert normalized[0]["product_url"] == "https://www.auchan.fr/lait-de-savoie-lait-demi-ecreme-uht/pr-C1799228"
+    assert normalized[0]["image_url"] == "https://cdn.auchan.fr/media/S01000000040V28PRIMARY_0x0/B2CD/"
+    assert normalized[0]["price_text"] is None  # price is lazy-loaded, not in HTML
 
 
 def test_leclerc_and_auchan_search_raise_without_cookies_offline():
