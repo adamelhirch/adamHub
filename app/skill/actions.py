@@ -1104,6 +1104,7 @@ def _handle_grocery_update_item(payload, session, *, user, now, user_id):
     pantry_sync = None
     if not was_checked and item.checked:
         pantry_sync = sync_checked_grocery_item_to_pantry(session, item, user_id=user_id)
+        session.refresh(item)
     return {"item": item.model_dump(mode="json"), "pantry_sync": pantry_sync}
 
 
@@ -1120,6 +1121,7 @@ def _handle_grocery_check_item(payload, session, *, user, now, user_id):
     pantry_sync = None
     if not was_checked and item.checked:
         pantry_sync = sync_checked_grocery_item_to_pantry(session, item, user_id=user_id)
+        session.refresh(item)
     return {"item": item.model_dump(mode="json"), "pantry_sync": pantry_sync}
 
 
@@ -1305,14 +1307,14 @@ def _handle_meal_plan_add(payload, session, *, user, now, user_id):
 
     planned_at = _resolve_meal_planned_at(payload)
     planned_for = _parse_date(payload.get("planned_for"), "planned_for") or planned_at.date()
-    slot = payload.slot
+    slot = data.slot
     validate_meal_plan_slot_free(
         session,
         user_id=user_id,
         planned_for=planned_for,
         slot=slot,
     )
-    plan = MealPlan(**data.model_dump(), planned_at=planned_at, user_id=user_id)
+    plan = MealPlan(**data.model_dump(exclude={"planned_at"}), planned_at=planned_at, user_id=user_id)
     if plan.planned_for is None:
         plan.planned_for = planned_at.date()
     session.add(plan)
