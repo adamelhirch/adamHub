@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
 import { listMealPlans, type MealPlanRead } from "@/lib/api";
+import { toISODate } from "@/lib/date";
 
 const SLOT_LABELS: Record<string, string> = {
   breakfast: "Petit-déjeuner",
@@ -16,13 +19,6 @@ type MealPlanDay = {
   date: string;
   meals: { label: string; recipe: string }[];
 };
-
-function toISODate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function formatDayLabel(dateKey: string): { day: string; date: string } {
   const label = new Intl.DateTimeFormat("fr-FR", {
@@ -65,39 +61,49 @@ export default function MealPlanScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const today = new Date();
-        const end = new Date(today);
-        end.setDate(today.getDate() + 6);
-        const plans = await listMealPlans({
-          date_from: toISODate(today),
-          date_to: toISODate(end),
-        });
-        if (!cancelled) setDays(groupMealPlans(plans));
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Une erreur est survenue");
+      async function load() {
+        setLoading(true);
+        setError(null);
+        try {
+          const today = new Date();
+          const end = new Date(today);
+          end.setDate(today.getDate() + 6);
+          const plans = await listMealPlans({
+            date_from: toISODate(today),
+            date_to: toISODate(end),
+          });
+          if (!cancelled) setDays(groupMealPlans(plans));
+        } catch (err) {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : "Une erreur est survenue");
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    }
 
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   return (
     <Screen>
-      <ScreenHeader title="Repas" subtitle="Votre plan de la semaine" />
+      <View className="mb-6 flex-row items-center justify-between">
+        <ScreenHeader title="Repas" subtitle="Votre plan de la semaine" />
+        <Pressable
+          onPress={() => router.push("/plan-meal")}
+          className="h-11 w-11 items-center justify-center rounded-full bg-emerald-600 active:bg-emerald-700"
+        >
+          <Ionicons name="add" size={24} color="#ffffff" />
+        </Pressable>
+      </View>
 
       {error ? (
         <View className="mb-4 rounded-xl bg-red-50 px-4 py-3">

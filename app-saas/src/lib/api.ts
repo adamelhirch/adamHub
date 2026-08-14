@@ -158,3 +158,57 @@ export interface PantryItemRead {
 export function listPantryItems(): Promise<PantryItemRead[]> {
   return request<PantryItemRead[]>("/pantry/items");
 }
+
+export interface RecipeIngredientRead {
+  id: number;
+  name: string;
+  quantity: number;
+  unit: string;
+  note: string | null;
+}
+
+export interface RecipeRead {
+  id: number;
+  name: string;
+  description: string | null;
+  instructions: string;
+  prep_minutes: number;
+  cook_minutes: number;
+  servings: number;
+  ingredients: RecipeIngredientRead[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecipeIngredientInput {
+  name: string;
+  quantity: number;
+  unit: string;
+}
+
+export interface RecipeCreateInput {
+  name: string;
+  instructions: string;
+  servings: number;
+  prep_minutes?: number;
+  cook_minutes?: number;
+  ingredients: RecipeIngredientInput[];
+}
+
+export function listRecipes(): Promise<RecipeRead[]> {
+  return request<RecipeRead[]>("/recipes");
+}
+
+export function createRecipe(payload: RecipeCreateInput): Promise<RecipeRead> {
+  return request<RecipeRead>("/recipes", { method: "POST", body: payload });
+}
+
+export interface MealPlanCreateInput {
+  recipe_id: number;
+  planned_for: string;
+  slot: "breakfast" | "lunch" | "dinner";
+}
+
+export function createMealPlan(payload: MealPlanCreateInput): Promise<MealPlanRead> {
+  return request<MealPlanRead>("/meal-plans", { method: "POST", body: payload });
+}
