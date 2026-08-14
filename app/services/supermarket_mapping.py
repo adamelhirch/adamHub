@@ -9,11 +9,11 @@ from app.models import (
     PantryItem,
     RecipeIngredient,
     SupermarketMapping,
-    SupermarketSearchCache,
     SupermarketStore,
     SupermarketTargetType,
 )
 from app.schemas import SupermarketMappingCreate
+from app.services.store_fields import resolve_store_fields
 from app.services.supermarket_registry import get_store_definition
 
 
@@ -58,10 +58,8 @@ def create_or_replace_mapping(
 
     # cache_id is mandatory: the snapshot fields are resolved from the cache row
     # server-side instead of trusting client-supplied strings.
-    cache_row = session.get(SupermarketSearchCache, payload.cache_id)
-    if cache_row is None:
-        raise HTTPException(status_code=404, detail="Search cache entry not found")
-    if cache_row.store != payload.store:
+    resolved = resolve_store_fields(session, payload.cache_id)
+    if resolved["store"] != payload.store:
         raise HTTPException(status_code=400, detail="cache_id store does not match payload store")
 
     previous = get_active_mapping(session, target_type, target_id, payload.store)
@@ -75,14 +73,14 @@ def create_or_replace_mapping(
         target_type=target_type,
         target_id=target_id,
         store=payload.store,
-        external_id=cache_row.external_id,
-        store_label=definition.label if definition else payload.store.value,
-        name_snapshot=cache_row.name,
-        category_snapshot=cache_row.category,
-        packaging_snapshot=cache_row.packaging,
-        price_snapshot=cache_row.price_text,
-        product_url=cache_row.product_url,
-        image_url=cache_row.image_url,
+        external_id=resolved["external_id"],
+        store_label=resolved["store_label"],
+        name_snapshot=resolved["name"],
+        category_snapshot=resolved["category"],
+        packaging_snapshot=resolved["packaging"],
+        price_snapshot=resolved["price_text"],
+        product_url=resolved["product_url"],
+        image_url=resolved["image_url"],
         last_verified_at=verified_at,
         active=True,
         created_at=datetime.now(UTC),
