@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 from sqlalchemy import or_
 from sqlmodel import Session, select
@@ -65,22 +65,17 @@ def validate_meal_plan_slot_free(
 
     This replaces the generic cross-domain calendar overlap check for meal plans:
     planning lunch must not be blocked by an unrelated task/event at the same hour.
-    Recipe.confirm_cooked marker plans are excluded — they are internal records of
-    a past cook, not scheduled meals.
+    Reads through visible_meal_plans, which keeps recipe.confirm_cooked marker rows
+    (internal records of a past cook, not scheduled meals) out of the check.
     """
-    statement = (
-        exclude_recipe_confirm_marker_plans(select(MealPlan))
-        .where(
-            MealPlan.user_id == user_id,
-            MealPlan.planned_for == planned_for,
-            MealPlan.slot == slot,
-        )
-    )
-    if exclude_plan_id is not None:
-        statement = statement.where(MealPlan.id != exclude_plan_id)
-    existing = session.exec(statement).first()
-    if existing is not None:
-        raise ValueError("Vous avez déjà un repas planifié pour ce créneau")
+    for plan in visible_meal_plans(
+        session,
+        user_id=user_id,
+        planned_for=planned_for,
+        slot=slot,
+    ):
+        if plan.id != exclude_plan_id:
+            raise ValueError("Vous avez déjà un repas planifié pour ce créneau")
 
 
 def compute_recipe_missing_ingredients(
@@ -518,7 +513,7 @@ def reset_meal_plan_cook_confirmation(session: Session, meal_plan: MealPlan) -> 
 RECIPE_CONFIRM_MARKER = "recipe.confirm_cooked"
 
 
-def exclude_recipe_confirm_marker_plans(statement):
+def _exclude_recipe_confirm_marker_plans(statement):
     """Filter recipe.confirm_cooked carrier plans out of a MealPlan select.
 
     Marker rows only exist to carry a MealPlanCookConfirmation for recipe-level
@@ -529,6 +524,45 @@ def exclude_recipe_confirm_marker_plans(statement):
     return statement.where(
         or_(MealPlan.note.is_(None), MealPlan.note != RECIPE_CONFIRM_MARKER)
     )
+
+
+def visible_meal_plans(
+    session: Session,
+    *,
+    user_id: int | None = None,
+    planned_for: date | None = None,
+    slot: MealSlot | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    limit: int | None = None,
+) -> list[MealPlan]:
+    """The one safe way to read MealPlan rows for display or calendar projection.
+
+    Owns the recipe.confirm_cooked marker exclusion: ad-hoc MealPlan rows that only
+    carry a recipe-level cook confirmation are internal bookkeeping and must never
+    surface in meal-plan listings or calendar feeds. Callers pass their filters and
+    get back only rows that are safe to show — the marker never needs mentioning.
+    ``date_from``/``date_to`` bound ``planned_at`` (UTC day edges).
+    """
+    statement = _exclude_recipe_confirm_marker_plans(select(MealPlan))
+    if user_id is not None:
+        statement = statement.where(MealPlan.user_id == user_id)
+    if planned_for is not None:
+        statement = statement.where(MealPlan.planned_for == planned_for)
+    if slot is not None:
+        statement = statement.where(MealPlan.slot == slot)
+    if date_from is not None:
+        statement = statement.where(
+            MealPlan.planned_at >= datetime.combine(date_from, time.min).replace(tzinfo=timezone.utc)
+        )
+    if date_to is not None:
+        statement = statement.where(
+            MealPlan.planned_at <= datetime.combine(date_to, time.max).replace(tzinfo=timezone.utc)
+        )
+    statement = statement.order_by(MealPlan.planned_at.asc())
+    if limit is not None:
+        statement = statement.limit(limit)
+    return session.exec(statement).all()
 
 
 def _recipe_confirmation_plan(session: Session, recipe: Recipe) -> MealPlan | None:
