@@ -756,3 +756,58 @@ def test_skill_ubereats_selected_store_is_db_only(client, auth_headers):
     assert fetched.status_code == 200
     assert fetched.json()["data"]["selection"]["store_label"] == "Franprix"
 
+
+# ── F1: meal_plan.add with a slot must return 200, never 500 ──────────────────
+
+
+def test_skill_meal_plan_add_with_slot_succeeds(client, auth_headers):
+    recipe = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "recipe.add", "input": {"name": "Ragoût", "instructions": "Mijoter"}},
+    )
+    assert recipe.status_code == 200
+    recipe_id = recipe.json()["data"]["recipe"]["id"]
+
+    added = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "meal_plan.add",
+            "input": {"recipe_id": recipe_id, "slot": "lunch"},
+        },
+    )
+    assert added.status_code == 200
+    plan = added.json()["data"]["meal_plan"]
+    assert plan["recipe_id"] == recipe_id
+    assert plan["slot"] == "lunch"
+
+
+# ── F1: grocery.check_item response must keep a non-empty item after pantry sync
+
+
+def test_skill_grocery_check_item_returns_full_item_after_pantry_sync(client, auth_headers):
+    created = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "grocery.add_item", "input": {"name": "Fromage", "quantity": 1, "unit": "piece"}},
+    )
+    assert created.status_code == 200
+    item_id = created.json()["data"]["item"]["id"]
+
+    checked = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "grocery.check_item", "input": {"item_id": item_id, "checked": True}},
+    )
+    assert checked.status_code == 200
+    data = checked.json()["data"]
+    assert data["pantry_sync"]["synced"] is True
+
+    item = data["item"]
+    assert item
+    assert item["id"] == item_id
+    assert item["name"] == "Fromage"
+    assert item["quantity"] == 1
+    assert item["checked"] is True
+
