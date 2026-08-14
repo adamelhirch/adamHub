@@ -21,6 +21,7 @@ Request shape:
 - `task.list`
 - `task.update`
 - `task.complete`
+- `task.delete`
 
 ## Finance
 
@@ -92,6 +93,7 @@ Request shape:
 
 - `habit.create`
 - `habit.list`
+- `habit.update`
 - `habit.set_active`
 - `habit.log`
 - `habit.list_logs`
