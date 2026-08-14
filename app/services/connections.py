@@ -50,6 +50,7 @@ def upsert_connection(
     store: SupermarketStore,
     label: str,
     cookies: list[dict[str, Any]],
+    credentials: dict[str, Any] | None = None,
     activate: bool = True,
     connection_id: int | None = None,
     user_id: int | None = None,
@@ -59,9 +60,21 @@ def upsert_connection(
     When a `user_id` is provided, the connection is scoped to that user — both
     deduplication (by store+label) and the "deactivate others" toggle stay
     within that user's connections.
+
+    `cookies_encrypted` stays the single at-rest container: it holds either the
+    raw JSON cookie list (legacy format, backward compatible) or, when `cookies`
+    is empty and `credentials` is given, a `{"type": "credentials", ...}` dict.
+    Credentials are a best-effort fallback — the extension cookie path remains
+    the reliable one.
     """
     now = datetime.now(UTC)
-    payload = encrypt_text(json.dumps(cookies, ensure_ascii=False))
+    if cookies:
+        plain_payload: Any = cookies
+    elif credentials:
+        plain_payload = {"type": "credentials", "credentials": credentials}
+    else:
+        raise ValueError("cookies or credentials are required")
+    payload = encrypt_text(json.dumps(plain_payload, ensure_ascii=False))
 
     existing: SupermarketConnection | None = None
     if connection_id is not None:
@@ -170,6 +183,15 @@ def decrypt_cookies(connection: SupermarketConnection) -> list[dict[str, Any]]:
     raw = decrypt_text(connection.cookies_encrypted)
     parsed = json.loads(raw)
     return list(parsed) if isinstance(parsed, list) else []
+
+
+def decrypt_credentials(connection: SupermarketConnection) -> dict[str, Any] | None:
+    """Return the stored credentials dict, or None when the container holds cookies."""
+    raw = decrypt_text(connection.cookies_encrypted)
+    parsed = json.loads(raw)
+    if isinstance(parsed, dict) and parsed.get("type") == "credentials":
+        return parsed.get("credentials")
+    return None
 
 
 def touch_connection(session: Session, connection: SupermarketConnection) -> None:

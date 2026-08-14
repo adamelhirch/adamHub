@@ -163,10 +163,23 @@ class SupermarketConnectionRead(BaseModel):
     cookies_count: int
 
 
+class SupermarketCredentials(BaseModel):
+    """Best-effort login/password for a store that supports programmatic login.
+
+    Encrypted at rest inside the same `cookies_encrypted` container as cookie
+    sets. This is a fallback only: the browser extension (cookies) remains the
+    reliable path, and programmatic login is not wired to any scraper yet.
+    """
+
+    username: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=1, max_length=1024)
+
+
 class SupermarketConnectionImport(BaseModel):
     store: SupermarketStore
     label: str
-    cookies: list[dict]
+    cookies: list[dict] = Field(default_factory=list)
+    credentials: SupermarketCredentials | None = None
     activate: bool = True
     connection_id: int | None = None
 

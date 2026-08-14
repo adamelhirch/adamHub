@@ -42,8 +42,10 @@ from app.services.connections import (
     get_active_connection,
     touch_connection,
 )
+from app.services.scrapers.auchan import search_auchan
 from app.services.scrapers.carrefour import search_carrefour
 from app.services.scrapers.intermarche import search_intermarche
+from app.services.scrapers.leclerc import search_leclerc
 from app.services.scrapers.ubereats import (
     UbereatsLocationError,
     search_in_store as search_ubereats_in_store,
@@ -91,6 +93,30 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
             "Carrefour Drive search via /api/marketing/search. Requires "
             "data/cookies_carrefour.json from a logged-in browser session "
             "with a Drive store selected (prices are store-specific)."
+        ),
+    ),
+    SupermarketStoreDefinition(
+        key=SupermarketStore.LECLERC,
+        label="Leclerc",
+        scraper_name="leclerc",
+        notes=(
+            "Leclerc Drive search via api.drive.leclerc (JSON API + cookies). "
+            "Requires data/cookies_leclerc.json from a logged-in browser session "
+            "with a Drive store selected (prices are store-specific). Reverse-"
+            "engineered endpoint needs live validation; login/password is "
+            "best-effort and the browser extension stays the reliable path."
+        ),
+    ),
+    SupermarketStoreDefinition(
+        key=SupermarketStore.AUCHAN,
+        label="Auchan",
+        scraper_name="auchan",
+        notes=(
+            "Auchan Drive search via www.auchan.fr/api (JSON API + cookies). "
+            "Requires data/cookies_auchan.json from a logged-in browser session "
+            "with a Drive store selected (prices are store-specific). Reverse-"
+            "engineered endpoint needs live validation; login/password is "
+            "best-effort and the browser extension stays the reliable path."
         ),
     ),
 )
@@ -418,6 +444,22 @@ async def fetch_search_results(
         raw_results = await search_carrefour(
             queries=queries,
             max_results=max_results,
+            cookies=cookies,
+        )
+    elif store == SupermarketStore.LECLERC:
+        raw_results = await search_leclerc(
+            queries=queries,
+            max_results=max_results,
+            sort_by=sort_by,
+            promotions_only=promotions_only,
+            cookies=cookies,
+        )
+    elif store == SupermarketStore.AUCHAN:
+        raw_results = await search_auchan(
+            queries=queries,
+            max_results=max_results,
+            sort_by=sort_by,
+            promotions_only=promotions_only,
             cookies=cookies,
         )
     elif store == SupermarketStore.UBEREATS:

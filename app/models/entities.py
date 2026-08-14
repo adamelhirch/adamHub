@@ -35,6 +35,8 @@ class SupermarketStore(str, Enum):
     INTERMARCHE = "intermarche"
     UBEREATS = "ubereats"
     CARREFOUR = "carrefour"
+    LECLERC = "leclerc"
+    AUCHAN = "auchan"
 
 
 class SupermarketTargetType(str, Enum):

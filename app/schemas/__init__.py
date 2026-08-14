@@ -92,6 +92,7 @@ from app.schemas.skills import SkillExecuteRequest, SkillExecuteResponse
 from app.schemas.supermarket import (
     SupermarketConnectionImport,
     SupermarketConnectionRead,
+    SupermarketCredentials,
     SupermarketMappingCreate,
     SupermarketMappingRead,
     SupermarketSearchRequest,
@@ -204,6 +205,7 @@ __all__ = [
     "SavingsGoalUpdate",
     "SupermarketConnectionImport",
     "SupermarketConnectionRead",
+    "SupermarketCredentials",
     "SupermarketMappingCreate",
     "SupermarketMappingRead",
     "SupermarketSearchRequest",

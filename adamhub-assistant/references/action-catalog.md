@@ -89,10 +89,10 @@ Request shape:
   - `input_schema`: (none)
 
 - `supermarket.list_connections` — List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count. Multiple connections per store are allowed (e.g. user + spouse).
-  - `input_schema`: `store`: intermarche|carrefour|ubereats?
+  - `input_schema`: `store`: intermarche|carrefour|ubereats|leclerc|auchan?
 
-- `supermarket.import_connection` — Save a fresh cookie set for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store.
-  - `input_schema`: `store`: intermarche|carrefour|ubereats, `label`: string, `cookies`: object[], `activate`: bool?, `connection_id`: int?
+- `supermarket.import_connection` — Save a fresh cookie set (or best-effort credentials) for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store. `credentials` ({username, password}) is a best-effort fallback when the store has no captcha/2FA on programmatic login; cookies remain the reliable path.
+  - `input_schema`: `store`: intermarche|carrefour|ubereats|leclerc|auchan, `label`: string, `cookies`: object[]?, `credentials`: object?, `activate`: bool?, `connection_id`: int?
 
 - `supermarket.activate_connection` — Switch the active connection for a store (search/cart/orders will use this account next).
   - `input_schema`: `connection_id`: int
@@ -100,8 +100,8 @@ Request shape:
 - `supermarket.delete_connection` — Delete a saved supermarket connection.
   - `input_schema`: `connection_id`: int
 
-- `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter) or 'carrefour' (Drive JSON API, requires data/cookies_carrefour.json). For Uber Eats use the dedicated ubereats.search_products action which supports sort and store selection.
-  - `input_schema`: `store`: intermarche|carrefour?, `queries`: string[], `max_results`: int?, `promotions_only`: bool?
+- `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter), 'carrefour', 'leclerc' or 'auchan' (Drive JSON API + cookies; leclerc/auchan endpoints need live validation). For Uber Eats use the dedicated ubereats.search_products action which supports sort and store selection.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?, `queries`: string[], `max_results`: int?, `promotions_only`: bool?
 
 - `ubereats.list_addresses` — List saved Uber Eats delivery addresses (the active one is_active=true).
   - `input_schema`: (none)

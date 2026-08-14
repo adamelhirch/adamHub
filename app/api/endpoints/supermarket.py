@@ -181,8 +181,11 @@ def import_connection_endpoint(
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketConnectionRead:
-    if not payload.cookies:
-        raise HTTPException(status_code=400, detail="cookies must be a non-empty list")
+    if not payload.cookies and not payload.credentials:
+        raise HTTPException(
+            status_code=400,
+            detail="cookies or credentials must be provided",
+        )
     label = payload.label.strip()
     if not label:
         label = (user.display_name or f"{payload.store.value}-connection").strip()
@@ -191,6 +194,7 @@ def import_connection_endpoint(
         store=payload.store,
         label=label,
         cookies=payload.cookies,
+        credentials=payload.credentials.model_dump() if payload.credentials else None,
         activate=payload.activate,
         connection_id=payload.connection_id,
         user_id=user.id,
