@@ -105,6 +105,7 @@ export interface MealPlanRead {
   servings_override: number | null;
   note: string | null;
   cooked: boolean;
+  synced_grocery_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -115,6 +116,16 @@ export function listMealPlans(params: { date_from?: string; date_to?: string } =
   if (params.date_to) query.set("date_to", params.date_to);
   const qs = query.toString();
   return request<MealPlanRead[]>(`/meal-plans${qs ? `?${qs}` : ""}`);
+}
+
+export interface MealPlanSyncGroceriesResult {
+  meal_plan_id: number;
+  created_grocery_items: number;
+  missing_ingredients: unknown[];
+}
+
+export function syncMealPlanGroceries(id: number): Promise<MealPlanSyncGroceriesResult> {
+  return request<MealPlanSyncGroceriesResult>(`/meal-plans/${id}/sync-groceries`, { method: "POST" });
 }
 
 export interface GroceryItemRead {

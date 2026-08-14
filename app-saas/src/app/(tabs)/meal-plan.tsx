@@ -5,7 +5,7 @@ import { ActivityIndicator, Pressable, Text, View } from "react-native";
 
 import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
-import { listMealPlans, type MealPlanRead } from "@/lib/api";
+import { listMealPlans, syncMealPlanGroceries, type MealPlanRead } from "@/lib/api";
 import { toISODate } from "@/lib/date";
 
 const SLOT_LABELS: Record<string, string> = {
@@ -17,7 +17,12 @@ const SLOT_LABELS: Record<string, string> = {
 type MealPlanDay = {
   day: string;
   date: string;
-  meals: { label: string; recipe: string }[];
+  meals: {
+    id: number;
+    label: string;
+    recipe: string;
+    syncedGroceryAt: string | null;
+  }[];
 };
 
 function formatDayLabel(dateKey: string): { day: string; date: string } {
@@ -49,17 +54,52 @@ function groupMealPlans(plans: MealPlanRead[]): MealPlanDay[] {
         day,
         date,
         meals: dayPlans.map((plan) => ({
+          id: plan.id,
           label: plan.slot ? SLOT_LABELS[plan.slot] : "Repas",
           recipe: plan.recipe_name,
+          syncedGroceryAt: plan.synced_grocery_at,
         })),
       };
     });
 }
 
 export default function MealPlanScreen() {
-  const [days, setDays] = useState<MealPlanDay[]>([]);
+  const [plans, setPlans] = useState<MealPlanRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncingIds, setSyncingIds] = useState<Set<number>>(new Set());
+  const [syncErrors, setSyncErrors] = useState<Set<number>>(new Set());
+  const [syncCounts, setSyncCounts] = useState<Record<number, number>>({});
+  const days = groupMealPlans(plans);
+
+  async function handleSync(id: number) {
+    if (syncingIds.has(id)) return;
+    setSyncingIds((prev) => new Set(prev).add(id));
+    setSyncErrors((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    try {
+      const result = await syncMealPlanGroceries(id);
+      setSyncCounts((prev) => ({ ...prev, [id]: result.created_grocery_items }));
+      setPlans((prev) =>
+        prev.map((plan) =>
+          plan.id === id
+            ? { ...plan, synced_grocery_at: new Date().toISOString() }
+            : plan,
+        ),
+      );
+    } catch {
+      setSyncErrors((prev) => new Set(prev).add(id));
+    } finally {
+      setSyncingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -76,7 +116,7 @@ export default function MealPlanScreen() {
             date_from: toISODate(today),
             date_to: toISODate(end),
           });
-          if (!cancelled) setDays(groupMealPlans(plans));
+          if (!cancelled) setPlans(plans);
         } catch (err) {
           if (!cancelled) {
             setError(err instanceof Error ? err.message : "Une erreur est survenue");
@@ -130,14 +170,31 @@ export default function MealPlanScreen() {
               <Text className="text-sm text-slate-400">{day.date}</Text>
             </View>
             {day.meals.map((meal) => (
-              <View
-                key={`${meal.label}-${meal.recipe}`}
-                className="flex-row items-start py-1.5"
-              >
+              <View key={meal.id} className="flex-row items-start py-1.5">
                 <View className="mr-3 mt-1 h-2 w-2 rounded-full bg-emerald-500" />
                 <View className="flex-1">
                   <Text className="text-sm font-medium text-slate-500">{meal.label}</Text>
                   <Text className="text-base text-slate-900">{meal.recipe}</Text>
+                </View>
+                <View className="ml-3 mt-1 flex-row items-center">
+                  {syncCounts[meal.id] != null ? (
+                    <Text className="mr-2 text-xs text-emerald-600">
+                      +{syncCounts[meal.id]}
+                    </Text>
+                  ) : null}
+                  {syncingIds.has(meal.id) ? (
+                    <ActivityIndicator size="small" color="#10b981" />
+                  ) : (
+                    <Pressable onPress={() => handleSync(meal.id)} hitSlop={8}>
+                      {syncErrors.has(meal.id) ? (
+                        <Ionicons name="alert-circle-outline" size={20} color="#ef4444" />
+                      ) : meal.syncedGroceryAt ? (
+                        <Ionicons name="checkmark-circle" size={20} color="#94a3b8" />
+                      ) : (
+                        <Ionicons name="cart-outline" size={20} color="#059669" />
+                      )}
+                    </Pressable>
+                  )}
                 </View>
               </View>
             ))}
