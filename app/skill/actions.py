@@ -680,14 +680,18 @@ def _handle_supermarket_list_connections(payload, session, *, user, now, user_id
 def _handle_supermarket_import_connection(payload, session, *, user, now, user_id):
     store_enum = SupermarketStore(str(payload.get("store") or "").lower())
     cookies = payload.get("cookies") or []
-    if not isinstance(cookies, list) or not cookies:
-        raise ValueError("cookies must be a non-empty list")
+    credentials = payload.get("credentials")
+    if not isinstance(cookies, list):
+        raise ValueError("cookies must be a list")
+    if not cookies and not isinstance(credentials, dict):
+        raise ValueError("cookies or credentials are required")
     label = (payload.get("label") or "").strip() or f"{store_enum.value}-connection"
     connection = upsert_supermarket_connection(
         session,
         store=store_enum,
         label=label,
         cookies=cookies,
+        credentials=credentials,
         activate=_as_bool(payload.get("activate"), default=True),
         connection_id=payload.get("connection_id"),
         user_id=user_id,
@@ -731,10 +735,10 @@ def _handle_supermarket_delete_connection(payload, session, *, user, now, user_i
 
 def _handle_supermarket_search(payload, session, *, user, now, user_id):
     store_key = (payload.get("store") or "intermarche").lower()
-    if store_key not in ("intermarche", "carrefour"):
+    if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
         raise ValueError(
-            "supermarket.search supports 'intermarche' or 'carrefour'. "
-            "For Uber Eats use ubereats.search_products."
+            "supermarket.search supports 'intermarche', 'carrefour', 'leclerc' "
+            "or 'auchan'. For Uber Eats use ubereats.search_products."
         )
     store_enum = SupermarketStore(store_key)
     queries = payload.get("queries")
@@ -2349,11 +2353,11 @@ ACTION_CATALOG = [
     {"action": "fitness.delete_measurement", "description": "Delete a fitness measurement", "input_schema": {"measurement_id": "int"}, "handler": _handle_fitness_delete_measurement},
     {"action": "supermarket.list_stores", "description": "List supported supermarket stores and capabilities", "input_schema": {}, "handler": _handle_supermarket_list_stores},
     # ── Multi-account connections (cookies stored encrypted in DB) ──────────
-    {"action": "supermarket.list_connections", "description": "List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count. Multiple connections per store are allowed (e.g. user + spouse).", "input_schema": {"store": "intermarche|carrefour|ubereats?"}, "handler": _handle_supermarket_list_connections},
-    {"action": "supermarket.import_connection", "description": "Save a fresh cookie set for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store.", "input_schema": {"store": "intermarche|carrefour|ubereats", "label": "string", "cookies": "object[]", "activate": "bool?", "connection_id": "int?"}, "handler": _handle_supermarket_import_connection},
+    {"action": "supermarket.list_connections", "description": "List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count. Multiple connections per store are allowed (e.g. user + spouse).", "input_schema": {"store": "intermarche|carrefour|ubereats|leclerc|auchan?"}, "handler": _handle_supermarket_list_connections},
+    {"action": "supermarket.import_connection", "description": "Save a fresh cookie set (or best-effort credentials) for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store. `credentials` ({username, password}) is a best-effort fallback when the store has no captcha/2FA on programmatic login; cookies remain the reliable path.", "input_schema": {"store": "intermarche|carrefour|ubereats|leclerc|auchan", "label": "string", "cookies": "object[]?", "credentials": "object?", "activate": "bool?", "connection_id": "int?"}, "handler": _handle_supermarket_import_connection},
     {"action": "supermarket.activate_connection", "description": "Switch the active connection for a store (search/cart/orders will use this account next).", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_activate_connection},
     {"action": "supermarket.delete_connection", "description": "Delete a saved supermarket connection.", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_delete_connection},
-    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter) or 'carrefour' (Drive JSON API, requires data/cookies_carrefour.json). For Uber Eats use the dedicated ubereats.search_products action which supports sort and store selection.", "input_schema": {"store": "intermarche|carrefour?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
+    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter), 'carrefour', 'leclerc' or 'auchan' (Drive JSON API + cookies; leclerc/auchan endpoints need live validation). For Uber Eats use the dedicated ubereats.search_products action which supports sort and store selection.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
     # ── Uber Eats: address & store setup ─────────────────────────────────────
     {"action": "ubereats.list_addresses", "description": "List saved Uber Eats delivery addresses (the active one is_active=true).", "input_schema": {}, "handler": _handle_ubereats_list_addresses},
     {"action": "ubereats.geocode_address", "description": "Search a free-text address via OpenStreetMap and return picker candidates with lat/lng. Use this before ubereats.save_address when the user gives a textual address.", "input_schema": {"query": "string", "limit": "int?"}, "handler": _handle_ubereats_geocode_address},

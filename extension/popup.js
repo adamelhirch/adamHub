@@ -22,6 +22,18 @@ const STORES = {
     homepage: "https://www.ubereats.com/fr/",
     sessionMarker: "sid",
   },
+  leclerc: {
+    label: "Leclerc",
+    cookieDomains: [".leclercdrive.fr", "www.leclercdrive.fr"],
+    homepage: "https://www.leclercdrive.fr/",
+    sessionMarker: null,
+  },
+  auchan: {
+    label: "Auchan",
+    cookieDomains: [".auchan.fr", "www.auchan.fr"],
+    homepage: "https://www.auchan.fr/",
+    sessionMarker: null,
+  },
 };
 
 const $ = (sel) => document.querySelector(sel);

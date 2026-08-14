@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlmodel import Session, select
 
 from app.models import (
@@ -9,7 +10,13 @@ from app.models import (
     SupermarketSearchCache,
     SupermarketStore,
 )
-from app.services.store_catalog import normalize_search_result, upsert_search_cache
+from app.services.connections import (
+    decrypt_cookies,
+    decrypt_credentials,
+    upsert_connection,
+)
+from app.services.store_catalog import list_store_definitions, normalize_search_result, upsert_search_cache
+from app.services.scrapers.auchan import parse_auchan_search, search_auchan
 from app.services.scrapers.intermarche import (
     extract_category_from_tracking_code,
     extract_category_from_product_breadcrumb,
@@ -17,6 +24,7 @@ from app.services.scrapers.intermarche import (
     parse_intermarche_html,
     requires_intermarche_store_selection,
 )
+from app.services.scrapers.leclerc import parse_leclerc_search, search_leclerc
 
 
 def test_parse_intermarche_html_handles_missing_fields():
@@ -381,9 +389,9 @@ def test_mapping_rejects_invalid_target_and_store(client, auth_headers, test_eng
         headers=auth_headers,
         json={
             "cache_id": cache_id,
-            "store": "leclerc",
+            "store": "monoprix",
             "external_id": "sku-x",
-            "store_label": "Leclerc",
+            "store_label": "Monoprix",
             "name_snapshot": "Farine",
         },
     )
@@ -410,3 +418,95 @@ def test_mapping_rejects_fabricated_snapshot_without_cache_id(client, auth_heade
         },
     )
     assert no_cache.status_code == 422
+
+
+# ── P3: Leclerc + Auchan (Drive) registry, parsers and credentials ────────────
+
+
+def test_store_registry_lists_five_stores_including_leclerc_and_auchan():
+    definitions = list_store_definitions()
+    keys = [definition.key for definition in definitions]
+    assert len(keys) == 5
+    assert SupermarketStore.INTERMARCHE in keys
+    assert SupermarketStore.UBEREATS in keys
+    assert SupermarketStore.CARREFOUR in keys
+    assert SupermarketStore.LECLERC in keys
+    assert SupermarketStore.AUCHAN in keys
+
+    leclerc = next(d for d in definitions if d.key == SupermarketStore.LECLERC)
+    auchan = next(d for d in definitions if d.key == SupermarketStore.AUCHAN)
+    assert leclerc.label == "Leclerc"
+    assert auchan.label == "Auchan"
+    assert leclerc.supports_search is True
+    assert auchan.supports_search is True
+    assert leclerc.scraper_name == "leclerc"
+    assert auchan.scraper_name == "auchan"
+
+
+def test_leclerc_and_auchan_parsers_normalize_mock_results():
+    leclerc_items = parse_leclerc_search(
+        {
+            "data": [
+                {
+                    "id": "L1",
+                    "name": "Lait entier",
+                    "brand": "Marque Repère",
+                    "price": 1.29,
+                    "packaging": "1 L",
+                },
+                {"id": "L2", "name": "Pâtes", "price": {"amount": 0.99, "currency": "EUR"}},
+                {"id": "L3", "name": "", "price": 2.0},
+            ]
+        },
+        max_results=10,
+    )
+    assert len(leclerc_items) == 2
+    normalized = [
+        normalize_search_result(SupermarketStore.LECLERC, "lait", item) for item in leclerc_items
+    ]
+    assert normalized[0]["name"] == "Lait entier"
+    assert normalized[0]["price_amount"] == 1.29
+    assert normalized[1]["price_amount"] == 0.99
+
+    auchan_items = parse_auchan_search(
+        {
+            "products": [
+                {"id": "A1", "name": "Eau minérale", "price": {"value": 0.45, "currency": "EUR"}},
+                {"id": "A2", "name": "Café", "price": "4,95 €", "brand": "Auchan"},
+            ]
+        },
+        max_results=10,
+    )
+    assert len(auchan_items) == 2
+    normalized_auchan = [
+        normalize_search_result(SupermarketStore.AUCHAN, "eau", item) for item in auchan_items
+    ]
+    assert normalized_auchan[0]["price_amount"] == 0.45
+    assert normalized_auchan[1]["price_amount"] == 4.95
+
+
+def test_leclerc_and_auchan_search_raise_without_cookies_offline():
+    import asyncio
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(search_leclerc(queries=["lait"], cookies=[]))
+    with pytest.raises(RuntimeError):
+        asyncio.run(search_auchan(queries=["lait"], cookies=[]))
+
+
+def test_connection_import_with_credentials_stores_encrypted(test_engine):
+    with Session(test_engine) as session:
+        connection = upsert_connection(
+            session,
+            store=SupermarketStore.LECLERC,
+            label="leclerc-creds",
+            cookies=[],
+            credentials={"username": "user@example.com", "password": "s3cret"},
+            activate=True,
+        )
+        assert connection.cookies_encrypted != '{"username": "user@example.com", "password": "s3cret"}'
+        assert decrypt_credentials(connection) == {
+            "username": "user@example.com",
+            "password": "s3cret",
+        }
+        assert decrypt_cookies(connection) == []
