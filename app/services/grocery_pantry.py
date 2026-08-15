@@ -2,11 +2,32 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.models import GroceryItem, GroceryPantrySync, PantryItem
 from app.services.store_catalog import reject_fabricated_store_fields, resolve_store_fields
 from app.services.units import from_base, normalize_name, to_base
+
+
+def _normalized_like_pattern(normalized_name: str) -> str:
+    """Build a LIKE pattern matching any stored name that could normalize to ``normalized_name``.
+
+    ``normalize_name`` collapses whitespace runs and lowercases, so the pattern
+    joins the name's tokens with ``%`` to tolerate arbitrary spacing in the
+    stored value. LIKE wildcards (``%``, ``_``) present in the name are escaped.
+    The pattern is a superset of exact ``normalize_name`` equality: the caller's
+    Python mini-scan still re-verifies before merging, keeping semantics unchanged.
+
+    Limit: the pre-filter is not index-backed (``lower(name) LIKE ...``), and
+    ``lower()`` on SQLite only folds ASCII case, so non-ASCII uppercase in a
+    stored name may be skipped on SQLite (PostgreSQL is Unicode-aware). If
+    that ever matters, ``normalize_name`` is deterministic on the stored name,
+    so a derived, indexed ``normalized_name`` column populated at write time
+    would make the filter an exact index-backed equality.
+    """
+    escaped = normalized_name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return "%" + escaped.replace(" ", "%") + "%"
 
 
 def resolve_store_metadata(session: Session, data: dict) -> dict:
@@ -48,18 +69,26 @@ def sync_checked_grocery_item_to_pantry(
             "pantry_item_id": already.pantry_item_id,
         }
 
-    statement = select(PantryItem)
-    if user_id is not None:
-        statement = statement.where(PantryItem.user_id == user_id)
-    pantry_items = session.exec(statement).all()
-    target = None
     normalized_name = normalize_name(grocery_item.name)
     quantity = max(0.0, float(grocery_item.quantity or 0.0))
     grocery_base_quantity, grocery_base_unit = to_base(quantity, grocery_item.unit or "item")
 
+    # Pre-filter in SQL instead of loading the whole pantry in memory: only
+    # rows whose stored name could normalize to the grocery name are candidates.
+    # The LIKE pattern tolerates case/whitespace variance; unit compatibility is
+    # still decided below via to_base, so semantics are unchanged (2 kg merges
+    # into a 2000 g row).
+    statement = select(PantryItem).where(
+        func.lower(PantryItem.name).like(_normalized_like_pattern(normalized_name), escape="\\")
+    )
+    if user_id is not None:
+        statement = statement.where(PantryItem.user_id == user_id)
+    candidates = session.exec(statement).all()
+
     # Match on normalized name + base unit so "2 kg" merges into a "2000 g"
     # pantry row instead of creating a duplicate.
-    for item in pantry_items:
+    target = None
+    for item in candidates:
         if normalize_name(item.name) == normalized_name:
             _, pantry_base_unit = to_base(1.0, item.unit or "item")
             if pantry_base_unit == grocery_base_unit:
