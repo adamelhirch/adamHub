@@ -48,8 +48,7 @@ COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
 COPY alembic ./alembic
 
-RUN pip install --no-cache-dir . \
-    && python -m camoufox fetch
+RUN pip install --no-cache-dir .
 
 COPY --from=web-builder /web/dist ./web/dist
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh

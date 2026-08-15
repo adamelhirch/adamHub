@@ -1,0 +1,686 @@
+{
+  "products": [
+    {
+      "url": "/produit/grandlait-lait-demi-ecreme/3176571626004",
+      "informations": {
+        "title": "Grandlait - Lait demi écrémé",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "les 4 bouteilles de 50cl - 200cl",
+        "hasAlcohol": false,
+        "brand": "Grandlait",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Ressources/images/publication/27691.png",
+            "title": ""
+          }
+        ],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/pim/03176571626004/483fed51d42045acbab82b8f942cef29.jpg",
+            "alt": "Grandlait - Lait demi écrémé"
+          },
+          {
+            "src": "https://assets-big.cdn-mousquetaires.com/medias/domain11815/media136234/10870348-bagrcjwk5b-ecommint.jpg",
+            "alt": "Grandlait - Lait demi écrémé"
+          }
+        ],
+        "volume": 2000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://cdn.intermarche.com/fr/Content/images/pim/03176571626004/483fed51d42045acbab82b8f942cef29.jpg",
+          "alt": "Grandlait - Lait demi écrémé"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8NDMyNDl8bGFpdHxQUk9EVUNUfDB8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtBdmFudGFnZXJdIExlIHJheW9uIGxhaXQsIGJvaXNzb24gbGFjdMOpZSBldCB2w6lnw6l0YWxlIGRhbnMgbGEgcmVxdcOqdGUgImxhaXQifDE3ODY3NTU2OTE3Njd8ZnItRlJ8Q09NUFVURVI",
+      "famillyId": 5961,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 4.08,
+          "integer": "4",
+          "decimal": "08",
+          "concatenated": "4,08€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 2.04,
+          "integer": "2",
+          "decimal": "04",
+          "concatenated": "2,04€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [],
+      "ean": "3176571626004",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "43249",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "43249",
+      "hasReduction": false,
+      "stock": 3
+    },
+    {
+      "url": "/produit/lait-frais-pasteurise-entier-francais/3250390011866",
+      "informations": {
+        "title": "Lait frais pasteurisé entier français",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "la bouteille de 1 L",
+        "hasAlcohol": false,
+        "brand": "Pâturages, une marque Intermarché",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Ressources/images/publication/27976.png",
+            "title": "A conserver au frais "
+          }
+        ],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/pim/03250390011866/637ed7f9b5fd44e490bfda77187581c8.png",
+            "alt": "Lait frais pasteurisé entier français"
+          }
+        ],
+        "volume": 1000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://cdn.intermarche.com/fr/Content/images/pim/03250390011866/637ed7f9b5fd44e490bfda77187581c8.png",
+          "alt": "Lait frais pasteurisé entier français"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MzI1OHxsYWl0fFBST0RVQ1R8MXxTRUFSQ0h8bnVsbHxSRVNVTFRTX0xJU1R8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfG51bGx8W0F2YW50YWdlcl0gTGUgcmF5b24gbGFpdCwgYm9pc3NvbiBsYWN0w6llIGV0IHbDqWfDqXRhbGUgZGFucyBsYSByZXF1w6p0ZSAibGFpdCJ8MTc4Njc1NTY5MTc2N3xmci1GUnxDT01QVVRFUg",
+      "famillyId": 5964,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 1.32,
+          "integer": "1",
+          "decimal": "32",
+          "concatenated": "1,32€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 1.32,
+          "integer": "1",
+          "decimal": "32",
+          "concatenated": "1,32€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [
+        {
+          "value": 5,
+          "type": "deferredDiscount",
+          "maxIteration": 99,
+          "endDate": "2026-12-31T23:59:59+01:00",
+          "unit": "percentage",
+          "flashSale": false,
+          "discount": "0,07",
+          "isLV": false,
+          "loyaltyCardRewardType": "CHOC",
+          "typePromo": "ac"
+        }
+      ],
+      "ean": "3250390011866",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "3258",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "3258",
+      "hasReduction": false,
+      "stock": 18
+    },
+    {
+      "url": "/produit/lait-demi-ecreme-15%25-mg-bio/3428271980048",
+      "informations": {
+        "title": "Lait demi-écrémé 1,5% mg BIO",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "Les 6 bouteilles de 50cl - 3l",
+        "hasAlcohol": false,
+        "brand": "Lactel",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Ressources/images/publication/27691.png",
+            "title": ""
+          }
+        ],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://assets-big.cdn-mousquetaires.com/medias/domain11815/media135802/10740784-08k544oxi9-ecommint.jpg",
+            "alt": "Lait demi-écrémé 1,5% mg BIO"
+          },
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/pim/03428271980048/babfd149326a4314802ec75064fad145.png",
+            "alt": "Lait demi-écrémé 1,5% mg BIO"
+          }
+        ],
+        "volume": 3000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://assets-big.cdn-mousquetaires.com/medias/domain11815/media135802/10740784-08k544oxi9-ecommint.jpg",
+          "alt": "Lait demi-écrémé 1,5% mg BIO"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8NDE4MzN8bGFpdHxQUk9EVUNUfDJ8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtBdmFudGFnZXJdIExlIHJheW9uIGxhaXQsIGJvaXNzb24gbGFjdMOpZSBldCB2w6lnw6l0YWxlIGRhbnMgbGEgcmVxdcOqdGUgImxhaXQifDE3ODY3NTU2OTE3Njd8ZnItRlJ8Q09NUFVURVI",
+      "famillyId": 5961,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 6.5,
+          "integer": "6",
+          "decimal": "50",
+          "concatenated": "6,50€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 2.17,
+          "integer": "2",
+          "decimal": "17",
+          "concatenated": "2,17€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [],
+      "ean": "3428271980048",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "41833",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "41833",
+      "hasReduction": false,
+      "stock": 30
+    },
+    {
+      "url": "/produit/lait-chevre-demi-ecreme-15%25-mg/3428274960078",
+      "informations": {
+        "title": "Lait chèvre demi-écrémé 1,5% mg",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "La bouteille de 1l",
+        "hasAlcohol": false,
+        "brand": "Lactel",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/F72915E2A43C797CEBF260288CBD3A0D.jpg",
+            "alt": "Lait chèvre demi-écrémé 1,5% mg"
+          },
+          {
+            "src": "https://assets-big.cdn-mousquetaires.com/medias/domain11815/media10196/2015158-vg40tbshc0-ecommint.jpg",
+            "alt": "Lait chèvre demi-écrémé 1,5% mg"
+          }
+        ],
+        "volume": 1000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/F72915E2A43C797CEBF260288CBD3A0D.jpg",
+          "alt": "Lait chèvre demi-écrémé 1,5% mg"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MTIyMzN8bGFpdHxQUk9EVUNUfDN8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtBdmFudGFnZXJdIExlIHJheW9uIGxhaXQsIGJvaXNzb24gbGFjdMOpZSBldCB2w6lnw6l0YWxlIGRhbnMgbGEgcmVxdcOqdGUgImxhaXQifDE3ODY3NTU2OTE3Njd8ZnItRlJ8Q09NUFVURVI",
+      "famillyId": 5960,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 2.49,
+          "integer": "2",
+          "decimal": "49",
+          "concatenated": "2,49€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 2.49,
+          "integer": "2",
+          "decimal": "49",
+          "concatenated": "2,49€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [],
+      "ean": "3428274960078",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "12233",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "12233",
+      "hasReduction": false,
+      "stock": 47
+    },
+    {
+      "url": "/produit/lait-frais-demi-ecreme-francais/3250390011859",
+      "informations": {
+        "title": "Lait frais demi-écrémé français",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "la bouteille de 1 L",
+        "hasAlcohol": false,
+        "brand": "Pâturages, une marque Intermarché",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Ressources/images/publication/27976.png",
+            "title": "A conserver au frais "
+          }
+        ],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/pim/03250390011859/da527cf2d24c44cdac5aab1cd7b1e9d8.png",
+            "alt": "Lait frais demi-écrémé français"
+          },
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/9748078F58096A8313A1E3B45D3B0263.jpg",
+            "alt": "Lait frais demi-écrémé français"
+          }
+        ],
+        "volume": 1000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://cdn.intermarche.com/fr/Content/images/pim/03250390011859/da527cf2d24c44cdac5aab1cd7b1e9d8.png",
+          "alt": "Lait frais demi-écrémé français"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MjA4OXxsYWl0fFBST0RVQ1R8NHxTRUFSQ0h8bnVsbHxSRVNVTFRTX0xJU1R8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfG51bGx8W0F2YW50YWdlcl0gTGUgcmF5b24gbGFpdCwgYm9pc3NvbiBsYWN0w6llIGV0IHbDqWfDqXRhbGUgZGFucyBsYSByZXF1w6p0ZSAibGFpdCJ8MTc4Njc1NTY5MTc2N3xmci1GUnxDT01QVVRFUg",
+      "famillyId": 5964,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 1.1,
+          "integer": "1",
+          "decimal": "10",
+          "concatenated": "1,10€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 1.1,
+          "integer": "1",
+          "decimal": "10",
+          "concatenated": "1,10€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [
+        {
+          "value": 5,
+          "type": "deferredDiscount",
+          "maxIteration": 99,
+          "endDate": "2026-12-31T23:59:59+01:00",
+          "unit": "percentage",
+          "flashSale": false,
+          "discount": "0,06",
+          "isLV": false,
+          "loyaltyCardRewardType": "CHOC",
+          "typePromo": "ac"
+        }
+      ],
+      "ean": "3250390011859",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "2089",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "2089",
+      "hasReduction": false,
+      "stock": 52
+    },
+    {
+      "url": "/produit/lait-ecreme-sterilise-uht-francais-issu-de-vaches-qui-paturent/3250390010036",
+      "informations": {
+        "title": "Lait écrémé stérilisé UHT français issu de vaches qui pâturent",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "la brique de 1L",
+        "hasAlcohol": false,
+        "brand": "Pâturages, une marque Intermarché",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/AB5DC26DB4A2C545C84236B4E4588B4F.jpg",
+            "alt": "Lait écrémé stérilisé UHT français issu de vaches qui pâturent"
+          }
+        ],
+        "volume": 1000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/AB5DC26DB4A2C545C84236B4E4588B4F.jpg",
+          "alt": "Lait écrémé stérilisé UHT français issu de vaches qui pâturent"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MTkzMTd8bGFpdHxQUk9EVUNUfDZ8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtBdmFudGFnZXJdIExlIHJheW9uIGxhaXQsIGJvaXNzb24gbGFjdMOpZSBldCB2w6lnw6l0YWxlIGRhbnMgbGEgcmVxdcOqdGUgImxhaXQifDE3ODY3NTU2OTE3Njd8ZnItRlJ8Q09NUFVURVI",
+      "famillyId": 5962,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 1.01,
+          "integer": "1",
+          "decimal": "01",
+          "concatenated": "1,01€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 1.01,
+          "integer": "1",
+          "decimal": "01",
+          "concatenated": "1,01€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [
+        {
+          "value": 5,
+          "type": "deferredDiscount",
+          "maxIteration": 99,
+          "endDate": "2026-12-31T23:59:59+01:00",
+          "unit": "percentage",
+          "flashSale": false,
+          "discount": "0,05",
+          "isLV": false,
+          "loyaltyCardRewardType": "CHOC",
+          "typePromo": "ac"
+        }
+      ],
+      "ean": "3250390010036",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "19317",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "19317",
+      "hasReduction": false,
+      "stock": 185
+    },
+    {
+      "url": "/produit/lait-frais-entier-bio/3250391996261",
+      "informations": {
+        "title": "Lait frais entier BIO",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "la bouteille de 1L",
+        "hasAlcohol": false,
+        "brand": "Pâturages, une marque Intermarché",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Ressources/images/publication/27976.png",
+            "title": "A conserver au frais "
+          },
+          {
+            "src": "https://cdn.intermarche.com/fr/Ressources/images/publication/27691.png",
+            "title": ""
+          }
+        ],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/3927301B19519FA4A0817A40D961F77F.jpg",
+            "alt": "Lait frais entier BIO"
+          }
+        ],
+        "volume": 1000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://cdn.intermarche.com/fr/Content/images/boitmal/produit/zoom/3927301B19519FA4A0817A40D961F77F.jpg",
+          "alt": "Lait frais entier BIO"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8NTgyODF8bGFpdHxQUk9EVUNUfDd8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtBdmFudGFnZXJdIExlIHJheW9uIGxhaXQsIGJvaXNzb24gbGFjdMOpZSBldCB2w6lnw6l0YWxlIGRhbnMgbGEgcmVxdcOqdGUgImxhaXQifDE3ODY3NTU2OTE3Njd8ZnItRlJ8Q09NUFVURVI",
+      "famillyId": 5964,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 1.48,
+          "integer": "1",
+          "decimal": "48",
+          "concatenated": "1,48€"
+        },
+        "crossedOutPrice": null,
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 1.48,
+          "integer": "1",
+          "decimal": "48",
+          "concatenated": "1,48€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [
+        {
+          "value": 5,
+          "type": "deferredDiscount",
+          "maxIteration": 99,
+          "endDate": "2026-12-31T23:59:59+01:00",
+          "unit": "percentage",
+          "flashSale": false,
+          "discount": "0,07",
+          "isLV": false,
+          "loyaltyCardRewardType": "CHOC",
+          "typePromo": "ac"
+        }
+      ],
+      "ean": "3250391996261",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "58281",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "58281",
+      "hasReduction": false,
+      "stock": 26
+    },
+    {
+      "url": "/produit/lait-brebis-demi-ecreme-15%25-mg/3428274160010",
+      "informations": {
+        "title": "Lait brebis demi-écrémé 1,5% mg",
+        "puv": true,
+        "pvi": null,
+        "poidsMinimum": null,
+        "poidsUnite": 0,
+        "originPdp": "",
+        "packaging": "La bouteille de 1l",
+        "hasAlcohol": false,
+        "brand": "Lactel",
+        "interval": null,
+        "allergens": null,
+        "legalInformation": null,
+        "advantages": null,
+        "flags": [],
+        "features": null,
+        "allImages": [
+          {
+            "src": "https://assets-big.cdn-mousquetaires.com/medias/domain11815/media135492/10647732-ipwwwx3qrj-ecommint.jpg",
+            "alt": "Lait brebis demi-écrémé 1,5% mg"
+          },
+          {
+            "src": "https://cdn.intermarche.com/fr/Content/images/pim/03428274160010/5845c0d0eb5040efa99eff5a86f8b7ff.png",
+            "alt": "Lait brebis demi-écrémé 1,5% mg"
+          }
+        ],
+        "volume": 1000,
+        "kiloAndLitreUnitLabel": null,
+        "pdpWarningDph": {},
+        "highlight": null,
+        "image": {
+          "src": "https://assets-big.cdn-mousquetaires.com/medias/domain11815/media135492/10647732-ipwwwx3qrj-ecommint.jpg",
+          "alt": "Lait brebis demi-écrémé 1,5% mg"
+        }
+      },
+      "trackingCode": "bmF2T25seV8gNTljMDI4ZDUtYWMxYS00NWIzLTliODItNTRhNjViZGYyOWRlfDUxNWZmZDllLTUzOGUtNDQ3YS05ODNlLTY5Y2ExNzM2M2ZhY3xQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MTIxODkwfGxhaXR8UFJPRFVDVHwyM3xTRUFSQ0h8bnVsbHxSRVNVTFRTX0xJU1R8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfG51bGx8W0F2YW50YWdlcl0gTGUgcmF5b24gbGFpdCwgYm9pc3NvbiBsYWN0w6llIGV0IHbDqWfDqXRhbGUgZGFucyBsYSByZXF1w6p0ZSAibGFpdCJ8MTc4Njc1NTY5MTc2N3xmci1GUnxDT01QVVRFUg",
+      "famillyId": 5960,
+      "departmentId": 2233,
+      "available": true,
+      "type": "PDV",
+      "prices": {
+        "productPrice": {
+          "currency": "€",
+          "value": 4.19,
+          "integer": "4",
+          "decimal": "19",
+          "concatenated": "4,19€"
+        },
+        "crossedOutPrice": {
+          "currency": "€",
+          "value": 4.39,
+          "integer": "4",
+          "decimal": "39",
+          "concatenated": "4,39€"
+        },
+        "unitPrice": {
+          "currency": "€/L",
+          "value": 4.19,
+          "integer": "4",
+          "decimal": "19",
+          "concatenated": "4,19€/L"
+        },
+        "kiloLitrePrice": null
+      },
+      "promotions": [],
+      "ean": "3428274160010",
+      "subFamillyId": 0,
+      "bestOffer": {
+        "itemId": "121890",
+        "seller": {
+          "id": "ITM",
+          "name": "Intermarché"
+        },
+        "bestOffer": true
+      },
+      "id": "121890",
+      "hasReduction": false,
+      "stock": 47
+    }
+  ],
+  "meta": {
+    "total": 611,
+    "page": 1,
+    "perPage": 40,
+    "hasPreviousPage": false,
+    "hasNextPage": true
+  }
+}
