@@ -14,6 +14,8 @@ from app.models import (
     SupermarketTargetType,
 )
 from app.schemas import (
+    AuchanOfferingContext,
+    AuchanStoreSelectionRequest,
     SupermarketConnectionImport,
     SupermarketConnectionRead,
     SupermarketMappingCreate,
@@ -21,6 +23,7 @@ from app.schemas import (
     SupermarketSearchRequest,
     SupermarketSearchResult,
     SupermarketStoreRead,
+    SupermarketStoreSelectionRead,
 )
 from app.services.connections import (
     activate_connection as activate_supermarket_connection,
@@ -227,6 +230,113 @@ def get_cached_search_results(
         statement.order_by(SupermarketSearchCache.fetched_at.desc(), SupermarketSearchCache.id.desc()).limit(limit)
     ).all()
     return [_to_result(row) for row in rows]
+
+
+def _auchan_cookies(session: SessionDep, user_id: int | None = None) -> list[dict]:
+    """DB connection cookies for Auchan, falling back to the filesystem export."""
+    from app.services.scrapers.auchan import load_auchan_cookies
+
+    return load_active_cookies(session, SupermarketStore.AUCHAN, user_id=user_id) or load_auchan_cookies()
+
+
+@router.get("/auchan/offering-contexts", response_model=list[AuchanOfferingContext])
+async def list_auchan_offering_contexts_endpoint(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+    zipcode: str = Query(..., min_length=3, max_length=16),
+    city: str = Query(..., min_length=2, max_length=128),
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    country: str = Query(default="France", max_length=128),
+) -> list[AuchanOfferingContext]:
+    from app.services.scrapers.auchan import (
+        AuchanAuthError,
+        list_auchan_offering_contexts,
+    )
+
+    try:
+        contexts = await list_auchan_offering_contexts(
+            zipcode=zipcode,
+            city=city,
+            latitude=latitude,
+            longitude=longitude,
+            country=country,
+            cookies=_auchan_cookies(session, user_id=user.id),
+        )
+    except AuchanAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return [AuchanOfferingContext(**context) for context in contexts]
+
+
+@router.get("/auchan/selected-store", response_model=SupermarketStoreSelectionRead | None)
+def get_auchan_selected_store(session: SessionDep) -> SupermarketStoreSelectionRead | None:
+    selection = get_selected_store(session, SupermarketStore.AUCHAN)
+    if selection is None:
+        return None
+    return SupermarketStoreSelectionRead(
+        external_store_id=selection.external_store_id,
+        store_label=selection.store_label,
+        location_label=selection.location_label,
+        updated_at=selection.updated_at,
+    )
+
+
+@router.post("/auchan/selected-store", response_model=SupermarketStoreSelectionRead)
+async def select_auchan_store_endpoint(
+    payload: AuchanStoreSelectionRequest,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SupermarketStoreSelectionRead:
+    from app.services.scrapers.auchan import (
+        AuchanAuthError,
+        AuchanStoreContext,
+        select_auchan_store,
+    )
+
+    context = AuchanStoreContext(
+        seller_id=payload.seller_id,
+        store_reference=payload.store_reference,
+        channel=payload.channel,
+        zipcode=payload.zipcode,
+        city=payload.city,
+        country=payload.country,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+    )
+    try:
+        journey = await select_auchan_store(
+            context, cookies=_auchan_cookies(session, user_id=user.id)
+        )
+    except AuchanAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    selection = upsert_selected_store(
+        session,
+        SupermarketStore.AUCHAN,
+        external_store_id=payload.seller_id,
+        store_label=payload.store_label,
+        location_label=payload.location_label,
+        raw_payload={
+            "store_reference": payload.store_reference,
+            "channel": payload.channel,
+            "zipcode": payload.zipcode,
+            "city": payload.city,
+            "country": payload.country,
+            "latitude": payload.latitude,
+            "longitude": payload.longitude,
+            "journey_id": journey.get("id"),
+        },
+    )
+    return SupermarketStoreSelectionRead(
+        external_store_id=selection.external_store_id,
+        store_label=selection.store_label,
+        location_label=selection.location_label,
+        updated_at=selection.updated_at,
+    )
 
 
 @router.put("/mappings/recipe-ingredients/{ingredient_id}", response_model=SupermarketMappingRead)

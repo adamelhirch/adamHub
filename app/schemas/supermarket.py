@@ -41,6 +41,57 @@ class SupermarketStoreRead(BaseModel):
     supports_promotions_filter: bool = False
 
 
+class SupermarketStoreSelectionRequest(BaseModel):
+    """Generic persisted store selection (store-agnostic fields)."""
+
+    external_store_id: str = Field(min_length=1, max_length=256)
+    store_label: str = Field(min_length=1, max_length=256)
+    location_label: str | None = Field(default=None, max_length=512)
+    raw_payload: dict | None = Field(
+        default=None,
+        description="Store-specific context (e.g. Auchan journey/update fields).",
+    )
+
+
+class SupermarketStoreSelectionRead(BaseModel):
+    external_store_id: str
+    store_label: str
+    location_label: str | None
+    updated_at: datetime
+
+
+class AuchanStoreSelectionRequest(BaseModel):
+    """Payload for POST /supermarket/auchan/selected-store.
+
+    Mirrors the fields of POST /journey/update so the selection can be applied
+    live to the session before persisting it.
+    """
+
+    seller_id: str = Field(min_length=1, max_length=256)
+    store_reference: str = Field(min_length=1, max_length=128)
+    channel: str = Field(default="PICK_UP", max_length=64)
+    store_label: str = Field(min_length=1, max_length=256)
+    location_label: str | None = Field(default=None, max_length=512)
+    zipcode: str | None = Field(default=None, max_length=16)
+    city: str | None = Field(default=None, max_length=128)
+    country: str | None = Field(default="France", max_length=128)
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class AuchanOfferingContext(BaseModel):
+    """A selectable store surfaced by GET /offering-contexts."""
+
+    pos_id: str | None = None
+    pos_type: str | None = None
+    seller_id: str
+    store_reference: str | None = None
+    channel: str | None = None
+    name: str | None = None
+    address: str | None = None
+    distance: str | None = None
+
+
 class SupermarketConnectionRead(BaseModel):
     id: int
     store: SupermarketStore

@@ -10,6 +10,8 @@ Use for shopping list, pantry-aware restocking, and store-backed grocery creatio
 - `supermarket.import_connection`
 - `supermarket.activate_connection`
 - `supermarket.delete_connection`
+- `supermarket.list_offering_contexts`
+- `supermarket.select_auchan_store`
 - `supermarket.search`
 - `grocery.add_item`
 - `grocery.list_items`

@@ -7,7 +7,7 @@ The source of truth is always the live manifest returned by:
 - `GET /api/v1/skill/manifest`
 
 <!-- BEGIN GENERATED: action-count (source: app/skill/actions.py ACTION_CATALOG) -->
-As of `2026-08-14`, the skill surface exposes `106` actions.
+As of `2026-08-14`, the skill surface exposes `108` actions.
 <!-- END GENERATED: action-count -->
 
 ## 1) Runtime contract
@@ -264,7 +264,7 @@ After a read:
 - `task.create|task.list|task.update|task.complete|task.delete`
 - `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
 - `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
-- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.search`
+- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.list_offering_contexts|supermarket.select_auchan_store|supermarket.search`
 - `grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
 - `video.fetch`
 - `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.unconfirm_cooked|recipe.delete`

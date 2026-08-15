@@ -58,19 +58,23 @@ URL : https://www.auchan.fr/
 
 Étapes :
 
-1. Ouvrir le site, puis **se connecter** (compte Auchan ou Auchan Drive).
+1. Ouvrir le site (la connexion n'est **pas requise** : une session cookie
+   valide suffit, voir `auchan-paslogin.har`).
 2. **Choisir un magasin** (bouton de sélection de magasin / localisation) pour
    avoir les prix du drive.
 3. Dans la barre de recherche, taper `lait` et lancer la recherche.
-4. La page de résultats charge les produits via des appels XHR/Fetch.
-5. Éventuellement changer le tri / scroller pour déclencher d'autres appels.
-6. Repérer dans Network les requêtes `fetch/json` vers `*.auchan.fr` (ou un
-   sous-domaine d'API). Exporter le HAR avec contenu.
+4. La page de résultats est **serveur-rendue** (pas de XHR pour les produits) :
+   le prix est dans le HTML quand le magasin est sélectionné.
+5. Repérer dans Network : `GET /journey`, `GET /offering-contexts?address.*`,
+   `POST /journey/update` (sélection magasin), `GET /recherche?text=..` (prix).
+6. Exporter le HAR avec contenu. Le corps de `/recherche` est souvent absent du
+   HAR (capture sans contenu) : capturer aussi la fiche produit
+   (`/pouce-lait-demi-ecreme/pr-C1177649` par ex.) comme référence de structure.
 
 Note : le domaine `api.drive.leclerc` qu'on avait mis dans le code au départ
 était un placeholder faux — le scraper lit désormais le HTML serveur-rendu de
-`recherche.aspx` (blob `pnlElementProduit`). Pour Auchan, le path
-`/api/v1/products/search` actuel est aussi un placeholder à confirmer.
+`recherche.aspx` (blob `pnlElementProduit`). Pour Auchan, le chemin de
+recherche est `/recherche?text=..` (HTML SSR), pas une API JSON.
 
 ---
 

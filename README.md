@@ -143,9 +143,11 @@ Production note:
 
 Supported stores (registry at `app/services/store_catalog.py`): **Intermarché**, **Carrefour**, **Leclerc**, **Auchan**.
 
-The reliable path is cookies: the AdamHUB Connect browser extension (`extension/`) dumps the cookies of a logged-in session (with a Drive store selected, since prices are store-specific) and posts them to `POST /api/v1/supermarket/connections/import`. Each store's scraper then calls the store's JSON/HTML API with those cookies.
+The reliable path is cookies: the AdamHUB Connect browser extension (`extension/`) dumps the cookies of a browser session (with a Drive store selected, since prices are store-specific) and posts them to `POST /api/v1/supermarket/connections/import`. Each store's scraper then calls the store's JSON/HTML API with those cookies.
 
-Login/password is a **best-effort alternative per store**: `POST /api/v1/supermarket/connections/import` accepts an optional `credentials` object `{username, password}` which is encrypted at rest (same Fernet container as cookies) and only works where a programmatic login exists without captcha/2FA. It is not wired to any scraper yet — Leclerc and Auchan reverse-engineered endpoints in particular need **live validation** against a real session before relying on them. The browser extension remains the reliable path.
+**Auchan does not require a logged-in account**: any valid session cookie is enough — the price is server-rendered in the search HTML once a store is selected via `POST /api/v1/supermarket/auchan/selected-store` (wired to `POST /journey/update`), and `GET /api/v1/supermarket/auchan/offering-contexts` lists the selectable stores for an address. Searching without a selected store returns a clear "sélectionnez un magasin" error.
+
+Login/password is a **best-effort alternative per store**: `POST /api/v1/supermarket/connections/import` accepts an optional `credentials` object `{username, password}` which is encrypted at rest (same Fernet container as cookies) and only works where a programmatic login exists without captcha/2FA. It is not wired to any scraper yet — the Leclerc reverse-engineered endpoint in particular needs **live validation** against a real session before relying on it. The browser extension remains the reliable path.
 
 ## Testing
 

@@ -42,7 +42,11 @@ from app.services.connections import (
     get_active_connection,
     touch_connection,
 )
-from app.services.scrapers.auchan import search_auchan
+from app.services.scrapers.auchan import (
+    AuchanStoreContext,
+    AuchanStoreSelectionError,
+    search_auchan,
+)
 from app.services.scrapers.carrefour import search_carrefour
 from app.services.scrapers.intermarche import search_intermarche
 from app.services.scrapers.leclerc import search_leclerc
@@ -106,11 +110,12 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         label="Auchan",
         scraper_name="auchan",
         notes=(
-            "Auchan Drive search via www.auchan.fr/api (JSON API + cookies). "
-            "Requires data/cookies_auchan.json from a logged-in browser session "
-            "with a Drive store selected (prices are store-specific). Reverse-"
-            "engineered endpoint needs live validation; login/password is "
-            "best-effort and the browser extension stays the reliable path."
+            "Auchan search via server-rendered /recherche HTML; the price is in "
+            "the offers block once a store is selected for the session. Works "
+            "without login (any valid session cookie) but requires a store "
+            "selection: POST /supermarket/auchan/selected-store (journey/update) "
+            "before searching, and GET /supermarket/auchan/offering-contexts to "
+            "list the selectable stores. Prices are store-specific."
         ),
     ),
 )
@@ -299,6 +304,23 @@ def load_active_cookies(
     return cookies
 
 
+def _auchan_store_context_from_selection(
+    selection: SupermarketStoreSelection,
+) -> AuchanStoreContext:
+    """Rebuild the Auchan store context from a persisted selection row."""
+    payload = selection.raw_payload or {}
+    return AuchanStoreContext(
+        seller_id=selection.external_store_id,
+        store_reference=str(payload.get("store_reference") or ""),
+        channel=str(payload.get("channel") or "PICK_UP"),
+        zipcode=payload.get("zipcode"),
+        city=payload.get("city"),
+        country=payload.get("country") or "France",
+        latitude=payload.get("latitude"),
+        longitude=payload.get("longitude"),
+    )
+
+
 def upsert_selected_store(
     session: Session,
     store: SupermarketStore,
@@ -432,12 +454,21 @@ async def fetch_search_results(
             cookies=cookies,
         )
     elif store == SupermarketStore.AUCHAN:
+        if session is None:
+            raise ValueError("Auchan search requires a database session.")
+        selection = get_selected_store(session, store)
+        if selection is None:
+            raise AuchanStoreSelectionError(
+                "Sélectionnez un magasin Auchan avant de lancer une recherche "
+                "(POST /supermarket/auchan/selected-store)."
+            )
         raw_results = await search_auchan(
             queries=queries,
             max_results=max_results,
             sort_by=sort_by,
             promotions_only=promotions_only,
             cookies=cookies,
+            store_selection=_auchan_store_context_from_selection(selection),
         )
     else:
         raise ValueError(f"Unsupported supermarket store: {store}")

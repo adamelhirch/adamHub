@@ -149,8 +149,16 @@ from app.services.store_catalog import (
     fetch_search_results,
     get_selected_store as get_selected_supermarket_store,
     list_store_definitions,
+    load_active_cookies,
     upsert_search_cache,
     upsert_selected_store,
+)
+from app.services.scrapers.auchan import (
+    AuchanAuthError,
+    AuchanStoreContext,
+    list_auchan_offering_contexts,
+    load_auchan_cookies,
+    select_auchan_store,
 )
 from app.services.video_intake import extract_video_source
 
@@ -744,6 +752,99 @@ def _handle_supermarket_search(payload, session, *, user, now, user_id):
         raise ValueError(f"supermarket.search failed: {exc}") from exc
     saved = upsert_search_cache(session, store_enum, results)
     return {"results": [row.model_dump(mode="json") for row in saved]}
+
+
+def _handle_supermarket_list_offering_contexts(payload, session, *, user, now, user_id):
+    zipcode = str(payload.get("zipcode") or "").strip()
+    city = str(payload.get("city") or "").strip()
+    latitude = payload.get("latitude")
+    longitude = payload.get("longitude")
+    if not zipcode or not city:
+        raise ValueError("zipcode and city are required")
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except (TypeError, ValueError):
+        raise ValueError("latitude and longitude are required numbers") from None
+
+    cookies = load_active_cookies(session, SupermarketStore.AUCHAN) or load_auchan_cookies()
+    try:
+        contexts = asyncio.run(
+            list_auchan_offering_contexts(
+                zipcode=zipcode,
+                city=city,
+                latitude=latitude,
+                longitude=longitude,
+                country=str(payload.get("country") or "France"),
+                cookies=cookies,
+            )
+        )
+    except AuchanAuthError as exc:
+        raise ValueError(f"supermarket.list_offering_contexts failed: {exc}") from exc
+    except RuntimeError as exc:
+        raise ValueError(f"supermarket.list_offering_contexts failed: {exc}") from exc
+    return {"contexts": contexts}
+
+
+def _handle_supermarket_select_auchan_store(payload, session, *, user, now, user_id):
+    seller_id = str(payload.get("seller_id") or "").strip()
+    store_reference = str(payload.get("store_reference") or "").strip()
+    store_label = str(payload.get("store_label") or "").strip()
+    if not seller_id or not store_reference or not store_label:
+        raise ValueError("seller_id, store_reference and store_label are required")
+
+    cookies = load_active_cookies(session, SupermarketStore.AUCHAN) or load_auchan_cookies()
+    context = AuchanStoreContext(
+        seller_id=seller_id,
+        store_reference=store_reference,
+        channel=str(payload.get("channel") or "PICK_UP"),
+        zipcode=payload.get("zipcode"),
+        city=payload.get("city"),
+        country=payload.get("country") or "France",
+        latitude=_opt_float(payload.get("latitude")),
+        longitude=_opt_float(payload.get("longitude")),
+    )
+    try:
+        journey = asyncio.run(select_auchan_store(context, cookies=cookies))
+    except AuchanAuthError as exc:
+        raise ValueError(f"supermarket.select_auchan_store failed: {exc}") from exc
+    except RuntimeError as exc:
+        raise ValueError(f"supermarket.select_auchan_store failed: {exc}") from exc
+
+    selection = upsert_selected_store(
+        session,
+        SupermarketStore.AUCHAN,
+        external_store_id=seller_id,
+        store_label=store_label,
+        location_label=payload.get("location_label"),
+        raw_payload={
+            "store_reference": store_reference,
+            "channel": context.channel,
+            "zipcode": context.zipcode,
+            "city": context.city,
+            "country": context.country,
+            "latitude": context.latitude,
+            "longitude": context.longitude,
+            "journey_id": journey.get("id"),
+        },
+    )
+    return {
+        "selection": {
+            "external_store_id": selection.external_store_id,
+            "store_label": selection.store_label,
+            "location_label": selection.location_label,
+            "updated_at": selection.updated_at.isoformat(),
+        }
+    }
+
+
+def _opt_float(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _handle_grocery_list_items(payload, session, *, user, now, user_id):
@@ -2022,7 +2123,9 @@ ACTION_CATALOG = [
     {"action": "supermarket.import_connection", "description": "Save a fresh cookie set (or best-effort credentials) for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store. `credentials` ({username, password}) is a best-effort fallback when the store has no captcha/2FA on programmatic login; cookies remain the reliable path.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "label": "string", "cookies": "object[]?", "credentials": "object?", "activate": "bool?", "connection_id": "int?"}, "handler": _handle_supermarket_import_connection},
     {"action": "supermarket.activate_connection", "description": "Switch the active connection for a store (search/cart/orders will use this account next).", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_activate_connection},
     {"action": "supermarket.delete_connection", "description": "Delete a saved supermarket connection.", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_delete_connection},
-    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter), 'carrefour', 'leclerc' or 'auchan' (Drive JSON API + cookies; leclerc/auchan endpoints need live validation).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
+    {"action": "supermarket.list_offering_contexts", "description": "List the Auchan stores selectable for an address. Each entry carries `seller_id`, `store_reference`, `channel`, `name`, `address` and `distance` — feed them to `supermarket.select_auchan_store`.", "input_schema": {"zipcode": "string", "city": "string", "latitude": "float", "longitude": "float", "country": "string?"}, "handler": _handle_supermarket_list_offering_contexts},
+    {"action": "supermarket.select_auchan_store", "description": "Select the Auchan store used for search (POST /journey/update + persist). Auchan prices are only server-rendered once a store is selected; searching without one returns a 400 'sélectionnez un magasin'.", "input_schema": {"seller_id": "string", "store_reference": "string", "store_label": "string", "channel": "string?", "location_label": "string?", "zipcode": "string?", "city": "string?", "country": "string?", "latitude": "float?", "longitude": "float?"}, "handler": _handle_supermarket_select_auchan_store},
+    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (JSON API), 'carrefour' (JSON endpoint), 'leclerc' (JSON API + cookies) or 'auchan' (server-rendered HTML; works without login but requires a selected store via `supermarket.select_auchan_store`).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
     {"action": "grocery.add_item", "description": "Add an item to grocery list", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "image_url": "string?", "store_label": "string?", "external_id": "string?", "packaging": "string?", "price_text": "string?", "product_url": "string?", "priority": "int?", "note": "string?"}, "handler": _handle_grocery_add_item},
     {"action": "grocery.list_items", "description": "List grocery items", "input_schema": {"checked": "bool?", "limit": "int?"}, "handler": _handle_grocery_list_items},
     {"action": "grocery.update_item", "description": "Update a grocery item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "checked": "bool?", "priority": "int?", "note": "string?"}, "handler": _handle_grocery_update_item},
