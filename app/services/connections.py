@@ -15,6 +15,12 @@ def list_connections(
     store: SupermarketStore | None = None,
     user_id: int | None = None,
 ) -> list[SupermarketConnection]:
+    """List connections, scoped to a user or to the shared legacy ones.
+
+    `user_id` selects the caller's own connections. When it is None, only the
+    pre-scoping shared connections (user_id IS NULL) are returned — callers use
+    this to surface the legacy single-user rows to the owner.
+    """
     statement = select(SupermarketConnection).order_by(
         SupermarketConnection.is_active.desc(),
         SupermarketConnection.updated_at.desc(),
@@ -23,6 +29,8 @@ def list_connections(
         statement = statement.where(SupermarketConnection.store == store)
     if user_id is not None:
         statement = statement.where(SupermarketConnection.user_id == user_id)
+    else:
+        statement = statement.where(SupermarketConnection.user_id.is_(None))
     return list(session.exec(statement).all())
 
 
@@ -35,12 +43,19 @@ def get_active_connection(
     store: SupermarketStore,
     user_id: int | None = None,
 ) -> SupermarketConnection | None:
+    """Return the active connection for a store, scoped like `list_connections`.
+
+    `user_id` selects the caller's own active connection; None looks up the
+    shared legacy connection (user_id IS NULL).
+    """
     statement = select(SupermarketConnection).where(
         SupermarketConnection.store == store,
         SupermarketConnection.is_active.is_(True),
     )
     if user_id is not None:
         statement = statement.where(SupermarketConnection.user_id == user_id)
+    else:
+        statement = statement.where(SupermarketConnection.user_id.is_(None))
     return session.exec(statement).first()
 
 
