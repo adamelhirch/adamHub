@@ -133,16 +133,23 @@ Réponse : HTML serveur-rendu. Structure d'une carte produit :
 </article>
 ```
 
-**Le prix n'est pas dans le HTML de recherche.** Il est lazy-loadé via le
-bouton « Afficher le prix », qui déclenche un appel de disponibilité :
+**Le prix est présent dans le HTML de recherche quand un magasin est
+sélectionné.** Il est dans un bloc `itemprop="offers"` de la carte :
 
-```
-GET https://api.auchan.fr/xsell/v0/cross-sell/availability/{productId}?activeContexts=GROCERY--{sellerId}__PICK_UP
+```html
+<div class="product-thumbnail__price product-price__container"
+     itemprop="offers" itemscope itemtype="http://schema.org/Offer">
+  <div class="product-price bolder text-dark-color">7,62€</div>
+  <meta itemprop="price" content="7.62">
+  <meta itemprop="priceCurrency" content="EUR">
+</div>
 ```
 
-`productId` est un UUID (`e7ab4048-9672-4ac9-9bd5-db28cd6500a6`), pas un entier.
-`sellerId` vient du contexte sélectionné (`4c663296-54a8-45f6-b385-0be86b4dfe98`
-= le magasin GROCERY). `offerId` est un autre UUID distinct.
+Sans magasin sélectionné, ce bloc est remplacé par le bouton « Afficher le
+prix » (lazy-load via `availability`). Le scraper lit `meta[itemprop=price]` +
+`meta[itemprop=priceCurrency]`, et expose les identifiants panier depuis les
+data-attributs de la carte (`data-current-offer-id`, `data-seller-id` du
+`.quantity-selector`).
 
 Champs d'identification produit (nécessaires au panier) :
 - `productId` (UUID)
@@ -197,14 +204,15 @@ Le `consentId` et le `cartId` sont obtenus à la première interaction panier
 2. **Leclerc** : le sous-domaine (`fdN-courses`) et le `magasin-{plid}-{plid}-{slug}`
    dépendent du point de livraison sélectionné → il faut persister le
    `SupermarketStoreSelection` (déjà prévu) pour reconstruire l'URL.
-3. **Auchan** : le prix est lazy et nécessite le contexte magasin sélectionné
-   (`journey` / `offering-contexts`) puis un appel d'availability par produit.
-   Sans prix dans le HTML, la recherche devra soit renoncer au prix, soit faire
-   N+1 appels d'availability (coûteux).
+3. **Auchan** : le prix est dans le HTML quand un magasin est sélectionné
+   (`meta[itemprop=price]`). Le contexte magasin est porté par les cookies de
+   session ; sans lui, le HTML affiche « Afficher le prix » et le prix est
+   absent (renvoyé `None` par le scraper).
 
 ## Reste à valider en live (bloqué sans session)
 
-- Sélecteurs CSS exacts des cartes produit Leclerc (`recherche.aspx`) et du
-  prix dans le HTML Auchan (si jamais présent après sélection de magasin).
-- Endpoint exact d'availability Auchan qui renvoie le prix (corps de réponse
-  non capturé dans le HAR).
+- Le sous-domaine Leclerc (`fdN-courses`) et le `magasin-{plid}-{plid}-{slug}`
+  doivent être fournis via `ADAMHUB_LECLERC_BASE_URL` (ou un
+  `SupermarketStoreSelection`) après sélection d'un Drive.
+- L'endpoint d'ajout au panier Auchan n'est pas encore câblé (les identifiants
+  `productId`/`offerId`/`sellerId` sont désormais exposés par le scraper).

@@ -98,13 +98,30 @@ def build_auchan_cookie_jar(cookies: list[dict[str, Any]]) -> httpx.Cookies:
     return jar
 
 
+def _format_price(amount: str, currency: str) -> str | None:
+    """Format a schema.org Offer price + currency into a French price string."""
+    if not amount:
+        return None
+    amount = amount.strip().replace(".", ",")
+    symbol = "€" if currency in {"EUR", "eur", "€"} else currency
+    return f"{amount} {symbol}".strip()
+
+
 def parse_auchan_search_html(html: str, max_results: int) -> list[dict[str, str | None]]:
-    """Parse product cards out of a `/recherche` response page."""
+    """Parse product cards out of a `/recherche` response page.
+
+    With a store context selected the price is rendered server-side inside the
+    card's ``itemprop="offers"`` block (``meta itemprop="price"`` +
+    ``meta itemprop="priceCurrency"``); without a store it is absent and left
+    as ``None``. The cart identifiers (``offer_id``, ``seller_id``) are exposed
+    from the card's data attributes for the add-to-cart flow.
+    """
     soup = BeautifulSoup(html, "html.parser")
 
     results: dict[str, dict[str, str | None]] = {}
     for article in soup.find_all("article", class_="product-thumbnail"):
         product_id = article.get("data-id")
+        offer_id = article.get("data-current-offer-id")
         link = article.find("a", class_="product-thumbnail__details-wrapper")
         product_url = link.get("href") if link else None
         if product_url and product_url.startswith("/"):
@@ -135,6 +152,22 @@ def parse_auchan_search_html(html: str, max_results: int) -> list[dict[str, str 
         if image_meta:
             image = image_meta.get("content")
 
+        price = None
+        offer_block = article.find("div", itemprop="offers")
+        if offer_block:
+            price_meta = offer_block.find("meta", itemprop="price")
+            currency_meta = offer_block.find("meta", itemprop="priceCurrency")
+            if price_meta and price_meta.get("content"):
+                price = _format_price(
+                    price_meta["content"],
+                    currency_meta.get("content", "EUR") if currency_meta else "EUR",
+                )
+
+        seller_id = None
+        qty = article.find("div", class_="quantity-selector")
+        if qty:
+            seller_id = qty.get("data-seller-id")
+
         if not name:
             continue
         key = product_id or name
@@ -142,11 +175,13 @@ def parse_auchan_search_html(html: str, max_results: int) -> list[dict[str, str 
             continue
         results[key] = {
             "id": product_id,
+            "offer_id": offer_id,
+            "seller_id": seller_id,
             "name": name,
             "brand": brand,
             "category": None,
             "packaging": packaging,
-            "price": None,  # lazy-loaded; not present in the search HTML
+            "price": price,
             "image": image,
             "product_url": product_url,
         }
