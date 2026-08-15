@@ -80,9 +80,9 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         scraper_name="carrefour",
         supports_mapping=False,
         notes=(
-            "Carrefour Drive search via /api/marketing/search. Requires "
-            "data/cookies_carrefour.json from a logged-in browser session "
-            "with a Drive store selected (prices are store-specific)."
+            "Carrefour search via the /s?q=… JSON endpoint (application/json, "
+            "XHR headers). Requires data/cookies_carrefour.json from a logged-in "
+            "browser session with a Drive store selected (prices are store-specific)."
         ),
     ),
     SupermarketStoreDefinition(
@@ -415,6 +415,8 @@ async def fetch_search_results(
         raw_results = await search_carrefour(
             queries=queries,
             max_results=max_results,
+            sort_by=sort_by,
+            promotions_only=promotions_only,
             cookies=cookies,
         )
     elif store == SupermarketStore.LECLERC:
