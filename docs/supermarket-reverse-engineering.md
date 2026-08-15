@@ -1,4 +1,4 @@
-# Reverse-engineering Leclerc Drive & Auchan (recherche + panier)
+# Reverse-engineering des scrapers supermarchés (recherche + panier)
 
 Découvert par analyse des HAR capturés en session connectée (août 2026). Ce
 document fige les endpoints réels pour que les scrapers ne repartent pas de
@@ -6,8 +6,10 @@ placeholders inventés.
 
 ## Constat transversal
 
-Les deux enseignes servent la **recherche en HTML serveur-rendu**, pas en API
-JSON. Le panier, lui, passe par des endpoints dédiés (JSON / form-urlencoded).
+Les enseignes servent la **recherche en HTML serveur-rendu** (Leclerc, Auchan,
+Intermarché) **sauf Carrefour**, qui expose un **endpoint JSON** (`/s?q=…&page=N`)
+pour le catalogue. Le panier, lui, passe par des endpoints dédiés (JSON /
+form-urlencoded).
 
 ---
 
@@ -194,6 +196,74 @@ Autres endpoints :
 
 Le `consentId` et le `cartId` sont obtenus à la première interaction panier
 (`GET /cart/config`, `GET /cart?consentId=...`, `POST /cart/update`).
+
+---
+
+## Carrefour
+
+Base : `www.carrefour.fr`. Depuis août 2026, le site sert la **recherche en
+JSON** — le parsing du SSR `__INITIAL_STATE__` (format Devalue) a été retiré.
+
+### Recherche produit (endpoint retenu)
+
+```
+GET https://www.carrefour.fr/s?q={query}&page=N
+Accept: application/json, text/plain, */*
+X-Requested-With: XMLHttpRequest
+```
+
+Réponse : `application/json` sous la forme
+
+```json
+{
+  "data": [ { "type": "product", "id": "product-{ean}",
+              "attributes": { "ean": "…", "title": "…", "brand": "…",
+                              "slug": "…", "offers": { … }, "images": { … } },
+              "links": { "self": "/p/{slug}-{ean}" } } ],
+  "links": { "self": "/s?q=…", "next": "/s?q=…&page=N" },
+  "meta": { "total": …, "totalPage": …, "currentPage": … }
+}
+```
+
+- La **page 1** est rendue en HTML par le navigateur, mais le même endpoint
+  renvoie du JSON quand il est appelé avec les headers XHR (confirmé par les
+  requêtes `sort` dans le HAR). Le scraper passe donc `Accept: application/json`
+  + `X-Requested-With: XMLHttpRequest`.
+- **Tri** (param `sort`) : `offers.prices.effective_price`,
+  `-offers.prices.effective_price`,
+  `offers.prices.standard_price_per_unit.price_per_unit_value`,
+  `-offers.prices.standard_price_per_unit.price_per_unit_value`,
+  `-product.customer_review.average`. Mapping dans
+  `CARREFOUR_SORT_KEYS` (`price_asc`, `price_desc`, `price_per_unit_asc`,
+  `price_per_unit_desc`, `best_rated`).
+- **Promotions** : le filtre `promotions_only` est appliqué côté client (une
+  offre est « en promo » quand son bloc `promotion` est non-null ou sa liste
+  `promotions` non vide).
+- **Pagination** : suivre `links.next` jusqu'à `max_results` (30/page).
+- Le prix par unité (`price.perUnitLabel`, ex. `1.58 € / L`) est concaténé au
+  `price_text`.
+
+### Endpoints écartés
+
+- `POST /api/marketing/search` (et `search_panel` / `search_cross_sell`) :
+  feed de merchandising (produits sponsorisés + groupes FS/BF), sans tri ni
+  pagination — conservé uniquement comme parseur secondaire
+  (`parse_carrefour_search`).
+- **Panier** : `GET/PATCH/DELETE /api/cart`, `PATCH /api/cart/items` — hors
+  périmètre.
+
+### Matrice connexion (validation live, lecture seule)
+
+| Cas | Résultat attendu | Constat |
+|---|---|---|
+| Recherche sans cookies | `CarrefourAuthError` (pas de cookies) | Le scraper lève avant tout appel réseau quand `data/cookies_carrefour.json` manque (testé offline) |
+| Recherche avec cookies depuis une IP data-center | 403 Cloudflare | Confirmé live depuis l'environnement dev : 403 HTML même avec les cookies frais — Cloudflare bloque les IP data-center ; un proxy résidentiel (`ADAMHUB_CARREFOUR_PROXY_URL`) est requis hors navigateur |
+| Recherche avec cookies depuis un navigateur réel (HAR) | 200 JSON | Confirmé dans `carrefour.har` / `carrefourr-recherche.har` : pages 2-19 + variantes `sort` servent du JSON |
+| Prix sans login | Prix visibles sans login | Les offres (`offers.*.*.attributes.price`) sont présentes dans le JSON sans compte ; un Drive store doit être sélectionné pour que le prix corresponde au magasin |
+
+Le prix est **store-specific** : le scraper lit le prix de l'offre canonique
+`subType == "carrefour"` dans `attributes.offers`, qui dépend du magasin porté
+par la session cookies.
 
 ---
 
