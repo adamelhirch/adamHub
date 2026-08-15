@@ -775,3 +775,70 @@ def test_skill_grocery_check_item_returns_full_item_after_pantry_sync(client, au
     assert item["quantity"] == 1
     assert item["checked"] is True
 
+
+# ── T5: Auchan store selection skill actions (offering contexts + selected store)
+
+
+def test_skill_supermarket_list_offering_contexts(client, auth_headers, monkeypatch):
+    async def fake_list_auchan_offering_contexts(**kwargs):
+        assert kwargs["zipcode"] == "31400"
+        assert kwargs["city"] == "Toulouse"
+        return [
+            {
+                "pos_id": "aa33fa5e-98bd-4944-8576-86f10d7cb589",
+                "pos_type": "DRIVE",
+                "seller_id": "4c663296-54a8-45f6-b385-0be86b4dfe98",
+                "store_reference": "6007",
+                "channel": "PICK_UP",
+                "name": "Auchan Drive Supermarché Toulouse Pontjumeaux",
+                "address": "31000 Toulouse",
+                "distance": "2.15 km",
+            }
+        ]
+
+    monkeypatch.setattr("app.skill.actions.list_auchan_offering_contexts", fake_list_auchan_offering_contexts)
+
+    executed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "supermarket.list_offering_contexts",
+            "input": {"zipcode": "31400", "city": "Toulouse", "latitude": 43.604464, "longitude": 1.444243},
+        },
+    )
+    assert executed.status_code == 200, executed.text
+    contexts = executed.json()["data"]["contexts"]
+    assert len(contexts) == 1
+    assert contexts[0]["seller_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+    assert contexts[0]["name"] == "Auchan Drive Supermarché Toulouse Pontjumeaux"
+
+
+def test_skill_supermarket_select_auchan_store(client, auth_headers, monkeypatch):
+    async def fake_select_auchan_store(context, cookies=None):
+        assert context.seller_id == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+        assert context.store_reference == "6007"
+        return {"id": "cf9f3c53-f09b-44c2-ab45-c24debf45fe3", "activeContexts": []}
+
+    monkeypatch.setattr("app.skill.actions.select_auchan_store", fake_select_auchan_store)
+
+    executed = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={
+            "action": "supermarket.select_auchan_store",
+            "input": {
+                "seller_id": "4c663296-54a8-45f6-b385-0be86b4dfe98",
+                "store_reference": "6007",
+                "store_label": "Auchan Drive Supermarché Toulouse Pontjumeaux",
+                "zipcode": "31400",
+                "city": "Toulouse",
+                "latitude": 43.604464,
+                "longitude": 1.444243,
+            },
+        },
+    )
+    assert executed.status_code == 200, executed.text
+    selection = executed.json()["data"]["selection"]
+    assert selection["external_store_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+    assert selection["store_label"] == "Auchan Drive Supermarché Toulouse Pontjumeaux"
+

@@ -15,8 +15,21 @@ from app.services.connections import (
     decrypt_credentials,
     upsert_connection,
 )
-from app.services.store_catalog import list_store_definitions, normalize_search_result, upsert_search_cache
-from app.services.scrapers.auchan import parse_auchan_search_html, search_auchan
+from app.services.store_catalog import (
+    fetch_search_results,
+    get_selected_store,
+    list_store_definitions,
+    normalize_search_result,
+    upsert_search_cache,
+    upsert_selected_store,
+)
+from app.services.scrapers.auchan import (
+    AuchanStoreContext,
+    AuchanStoreSelectionError,
+    parse_auchan_offering_contexts,
+    parse_auchan_search_html,
+    search_auchan,
+)
 from app.services.scrapers.intermarche import (
     build_search_query,
     extract_category_from_tracking_code,
@@ -588,6 +601,201 @@ def test_leclerc_and_auchan_search_raise_without_cookies_offline():
         asyncio.run(search_leclerc(queries=["lait"], cookies=[]))
     with pytest.raises(RuntimeError):
         asyncio.run(search_auchan(queries=["lait"], cookies=[]))
+
+
+def test_auchan_parser_extracts_offering_contexts_from_fixture():
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "auchan" / "offering_contexts.html"
+    contexts = parse_auchan_offering_contexts(fixture.read_text(encoding="utf-8"))
+
+    assert len(contexts) == 2
+    drive = contexts[0]
+    assert drive["pos_id"] == "aa33fa5e-98bd-4944-8576-86f10d7cb589"
+    assert drive["pos_type"] == "DRIVE"
+    assert drive["seller_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+    assert drive["store_reference"] == "6007"
+    assert drive["channel"] == "PICK_UP"
+    assert drive["name"] == "Auchan Drive Supermarché Toulouse Pontjumeaux"
+    assert drive["address"] == "31000 Toulouse"
+    assert drive["distance"] == "2.15 km"
+    assert contexts[1]["seller_id"] == "a50ef74b-7bac-4bde-b138-cbfdbd4f6e01"
+
+
+def test_auchan_parser_skips_cards_without_seller_form():
+    html = """
+    <div class="journey-offering-context__wrapper journeyPosItem"
+         data-id="orphan" data-type="DRIVE">
+      <span class="place-pos__name">Orphan</span>
+    </div>
+    """
+    assert parse_auchan_offering_contexts(html) == []
+
+
+def test_auchan_fetch_search_requires_selected_store(test_engine):
+    async def run():
+        with Session(test_engine) as session:
+            return await fetch_search_results(
+                store=SupermarketStore.AUCHAN,
+                queries=["lait"],
+                max_results=5,
+                session=session,
+            )
+
+    import asyncio
+
+    with pytest.raises(AuchanStoreSelectionError) as exc_info:
+        asyncio.run(run())
+    assert "Sélectionnez un magasin" in str(exc_info.value)
+
+
+def test_auchan_fetch_search_uses_selected_store_context(test_engine, monkeypatch):
+    import asyncio
+
+    captured = {}
+
+    async def fake_search_auchan(queries, max_results=10, sort_by=None, promotions_only=False, cookies=None, store_selection=None):
+        captured["store_selection"] = store_selection
+        return {
+            "lait": [
+                {
+                    "id": "6baf949f-7d78-4d36-8458-3e96f5637688",
+                    "name": "Lait demi-écrémé équitable UHT",
+                    "price": "7,62 €",
+                }
+            ]
+        }
+
+    monkeypatch.setattr("app.services.store_catalog.search_auchan", fake_search_auchan)
+
+    with Session(test_engine) as session:
+        upsert_selected_store(
+            session,
+            SupermarketStore.AUCHAN,
+            external_store_id="4c663296-54a8-45f6-b385-0be86b4dfe98",
+            store_label="Auchan Drive Toulouse Pontjumeaux",
+            raw_payload={
+                "store_reference": "6007",
+                "channel": "PICK_UP",
+                "zipcode": "31400",
+                "city": "Toulouse",
+                "latitude": 43.604464,
+                "longitude": 1.444243,
+            },
+        )
+
+    async def run():
+        with Session(test_engine) as session:
+            return await fetch_search_results(
+                store=SupermarketStore.AUCHAN,
+                queries=["lait"],
+                max_results=5,
+                session=session,
+            )
+
+    results = asyncio.run(run())
+    assert len(results) == 1
+    assert results[0]["price_text"] == "7,62 €"
+
+    selection = captured["store_selection"]
+    assert isinstance(selection, AuchanStoreContext)
+    assert selection.seller_id == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+    assert selection.store_reference == "6007"
+    assert selection.zipcode == "31400"
+    assert selection.latitude == 43.604464
+
+
+def test_auchan_selected_store_endpoints_persist_and_read(client, auth_headers, monkeypatch, test_engine):
+    async def fake_select_auchan_store(context, cookies=None):
+        assert context.seller_id == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+        assert context.store_reference == "6007"
+        return {"id": "cf9f3c53-f09b-44c2-ab45-c24debf45fe3", "activeContexts": []}
+
+    monkeypatch.setattr(
+        "app.services.scrapers.auchan.select_auchan_store",
+        fake_select_auchan_store,
+    )
+
+    read_before = client.get("/api/v1/supermarket/auchan/selected-store", headers=auth_headers)
+    assert read_before.status_code == 200
+    assert read_before.json() is None
+
+    payload = {
+        "seller_id": "4c663296-54a8-45f6-b385-0be86b4dfe98",
+        "store_reference": "6007",
+        "channel": "PICK_UP",
+        "store_label": "Auchan Drive Supermarché Toulouse Pontjumeaux",
+        "location_label": "31400 Toulouse",
+        "zipcode": "31400",
+        "city": "Toulouse",
+        "latitude": 43.604464,
+        "longitude": 1.444243,
+    }
+    selected = client.post(
+        "/api/v1/supermarket/auchan/selected-store",
+        headers=auth_headers,
+        json=payload,
+    )
+    assert selected.status_code == 200, selected.text
+    body = selected.json()
+    assert body["external_store_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+    assert body["store_label"] == "Auchan Drive Supermarché Toulouse Pontjumeaux"
+    assert body["location_label"] == "31400 Toulouse"
+
+    with Session(test_engine) as session:
+        selection = get_selected_store(session, SupermarketStore.AUCHAN)
+        assert selection is not None
+        assert selection.raw_payload["store_reference"] == "6007"
+        assert selection.raw_payload["journey_id"] == "cf9f3c53-f09b-44c2-ab45-c24debf45fe3"
+
+    read_after = client.get("/api/v1/supermarket/auchan/selected-store", headers=auth_headers)
+    assert read_after.status_code == 200
+    assert read_after.json()["external_store_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+
+
+def test_auchan_offering_contexts_endpoint(client, auth_headers, monkeypatch):
+    async def fake_list_auchan_offering_contexts(**kwargs):
+        assert kwargs["zipcode"] == "31400"
+        assert kwargs["city"] == "Toulouse"
+        return [
+            {
+                "pos_id": "aa33fa5e-98bd-4944-8576-86f10d7cb589",
+                "pos_type": "DRIVE",
+                "seller_id": "4c663296-54a8-45f6-b385-0be86b4dfe98",
+                "store_reference": "6007",
+                "channel": "PICK_UP",
+                "name": "Auchan Drive Supermarché Toulouse Pontjumeaux",
+                "address": "31000 Toulouse",
+                "distance": "2.15 km",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "app.services.scrapers.auchan.list_auchan_offering_contexts",
+        fake_list_auchan_offering_contexts,
+    )
+
+    response = client.get(
+        "/api/v1/supermarket/auchan/offering-contexts",
+        headers=auth_headers,
+        params={"zipcode": "31400", "city": "Toulouse", "latitude": 43.604464, "longitude": 1.444243},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["seller_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
+    assert body[0]["name"] == "Auchan Drive Supermarché Toulouse Pontjumeaux"
+
+
+def test_auchan_search_endpoint_returns_400_without_selected_store(client, auth_headers):
+    response = client.post(
+        "/api/v1/supermarket/search",
+        headers=auth_headers,
+        json={"store": "auchan", "queries": ["lait"], "max_results": 5},
+    )
+    assert response.status_code == 400
+    assert "Sélectionnez un magasin" in response.json()["detail"]
 
 
 def test_connection_import_with_credentials_stores_encrypted(test_engine):
