@@ -52,10 +52,12 @@ END_ACTION_CATALOG = "<!-- END GENERATED: action-catalog -->"
 ACTION_COUNT_DATE = "2026-08-14"
 
 # Maps an adamhub-assistant/<domain>/SKILL.md folder to the ACTION_CATALOG
-# action-name prefixes it owns. Prefixes with no owning domain folder today
-# (calendar, dashboard) are reported but not written anywhere -- see the
-# "unassigned" warning in the script output.
+# action-name prefixes it owns. Every catalog prefix must belong to exactly
+# one domain: a small action like dashboard.overview is folded into its
+# closest domain folder instead of getting an empty directory of its own.
+# Prefixes with no owning domain folder are reported as "unassigned" below.
 DOMAIN_ACTION_PREFIXES = {
+    "calendar": ["calendar"],
     "events": ["event"],
     "finance": ["finance"],
     "fitness": ["fitness"],
@@ -68,7 +70,7 @@ DOMAIN_ACTION_PREFIXES = {
     "patrimony": ["patrimony"],
     "recipes": ["recipe", "video", "meal_plan"],
     "subscriptions": ["subscription"],
-    "tasks": ["task"],
+    "tasks": ["task", "dashboard"],
 }
 
 # Section groupings (title, owning prefixes) for the full action catalog
