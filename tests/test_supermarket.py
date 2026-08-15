@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+import httpx
 import pytest
 from sqlmodel import Session, select
 
@@ -37,7 +39,14 @@ from app.services.scrapers.intermarche import (
     parse_intermarche_category_tree,
     parse_intermarche_products,
 )
-from app.services.scrapers.leclerc import parse_leclerc_search_html, search_leclerc
+from app.services.scrapers.leclerc import (
+    LECLERC_SORT_IDS,
+    LeclercAuthError,
+    parse_leclerc_search_html,
+    search_leclerc,
+)
+
+LECLERC_FIXTURE = Path(__file__).parent / "fixtures" / "leclerc" / "recherche_lait.html"
 
 
 def _load_intermarche_fixture():
@@ -507,6 +516,11 @@ def test_store_registry_lists_four_stores_including_leclerc_and_auchan():
     assert auchan.supports_search is True
     assert leclerc.scraper_name == "leclerc"
     assert auchan.scraper_name == "auchan"
+    # Leclerc has no promotions-only query flag; the capability is only exposed
+    # on stores that implement it (Intermarché).
+    assert leclerc.supports_promotions_filter is False
+    intermarche = next(d for d in definitions if d.key == SupermarketStore.INTERMARCHE)
+    assert intermarche.supports_promotions_filter is True
 
 
 def test_leclerc_parser_extracts_embedded_json_from_search_html():
@@ -532,6 +546,8 @@ def test_leclerc_parser_extracts_embedded_json_from_search_html():
     """
     items = parse_leclerc_search_html(html, max_results=10)
     assert len(items) == 2
+    assert items[0]["store"] == "Leclerc"
+    assert items[1]["store"] == "Leclerc"
     normalized = [
         normalize_search_result(SupermarketStore.LECLERC, "lait", item) for item in items
     ]
@@ -542,6 +558,176 @@ def test_leclerc_parser_extracts_embedded_json_from_search_html():
     assert normalized[0]["product_url"].endswith("fiche-produits-32452-Lait-de-montagne-Delisse.aspx")
     assert normalized[0]["image_url"] == "https://fd7-photos.leclercdrive.fr/image.ashx?id=2929937"
     assert normalized[1]["name"] == "Lait demi-écrémé UHT Délisse"
+
+
+def test_leclerc_parser_against_real_fixture_offline():
+    """Parse the reduced fixture derived from the live 936 KB fd7 HAR body.
+
+    The fixture keeps five real `objElement` entries (names, prices, category,
+    images, product URLs) plus the real sort widget datasource, so the parser is
+    exercised on authentic markup without any network access.
+    """
+    html = LECLERC_FIXTURE.read_text(encoding="utf-8")
+    items = parse_leclerc_search_html(html, max_results=10)
+
+    assert len(items) == 5
+    assert items[0]["id"] == "32452"
+    assert items[0]["name"] == "Lait de montagne Délisse"
+    assert items[0]["packaging"] == "UHT Bouteille - 6x1L"
+    assert items[0]["price"] == "6,72 €"
+    assert items[0]["price_per_unit"] == "1,12 € / l"
+    assert items[0]["category"] == "30"
+    assert items[0]["image"].startswith("https://fd7-photos.leclercdrive.fr/image.ashx?id=2929937")
+    assert items[0]["product_url"].endswith("fiche-produits-32452-Lait-de-montagne-Delisse.aspx")
+    assert items[0]["store"] == "Leclerc"
+    assert items[3]["packaging"] == "UHT Bouteille - 6x50cl"
+    assert items[4]["category"] == "30"
+
+
+def test_leclerc_parser_respects_max_results_on_real_fixture():
+    html = LECLERC_FIXTURE.read_text(encoding="utf-8")
+    assert len(parse_leclerc_search_html(html, max_results=2)) == 2
+
+
+def test_leclerc_sort_ids_match_site_tri_datasource():
+    assert LECLERC_SORT_IDS == {
+        "default": 1,
+        "price_asc": 2,
+        "price_desc": 3,
+        "price_per_unit_asc": 4,
+        "price_per_unit_desc": 5,
+        "best_rated": 6,
+    }
+
+
+class _FakeLeclercClient:
+    """Records requests issued by `search_leclerc`; no network involved."""
+
+    def __init__(self, requests: list, **kwargs):
+        self._requests = requests
+        self._kwargs = kwargs
+
+    async def __aenter__(self) -> "_FakeLeclercClient":
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    async def get(self, url, params=None, headers=None):
+        self._requests.append((str(url), dict(params or {})))
+        return httpx.Response(200, text="<html></html>", request=httpx.Request("GET", str(url)))
+
+
+def _run_search_leclerc_with_fake_client(cookies, **kwargs):
+    import asyncio
+    from unittest import mock
+
+    requests: list = []
+
+    def fake_client_cls(**client_kwargs):
+        return _FakeLeclercClient(requests, **client_kwargs)
+
+    with mock.patch(
+        "app.services.scrapers.leclerc.httpx.AsyncClient", side_effect=fake_client_cls
+    ):
+        asyncio.run(
+            search_leclerc(
+                queries=["lait"],
+                cookies=cookies,
+                store_base_url="https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
+                **kwargs,
+            )
+        )
+    return requests
+
+
+def test_leclerc_search_sends_tri_param_for_sort_by():
+    cookies = [{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}]
+    requests = _run_search_leclerc_with_fake_client(cookies, sort_by="price_asc")
+
+    assert len(requests) == 1
+    url, params = requests[0]
+    assert url == "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran/recherche.aspx"
+    assert params == {"TexteRecherche": "lait", "tri": 2}
+
+
+def test_leclerc_search_omits_tri_param_by_default():
+    cookies = [{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}]
+    requests = _run_search_leclerc_with_fake_client(cookies)
+
+    _, params = requests[0]
+    assert params == {"TexteRecherche": "lait"}
+
+
+def test_leclerc_search_accepts_promotions_only_without_query_flag():
+    cookies = [{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}]
+    requests = _run_search_leclerc_with_fake_client(cookies, promotions_only=True)
+
+    _, params = requests[0]
+    assert params == {"TexteRecherche": "lait"}
+
+
+class _FakeStatusLeclercClient:
+    def __init__(self, status: int, text: str, **kwargs):
+        self._response = httpx.Response(
+            status, text=text, request=httpx.Request("GET", "https://x.test/")
+        )
+
+    async def __aenter__(self) -> "_FakeStatusLeclercClient":
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    async def get(self, url, params=None, headers=None):
+        return self._response
+
+
+def test_leclerc_search_raises_datadome_challenge_on_403_probe():
+    import asyncio
+    from unittest import mock
+
+    probe_body = (
+        '<html lang="fr"><head><title>leclercdrive.fr</title></head><body>'
+        'Please enable JS and disable any ad blocker'
+        "<script data-cfasync=\"false\">var dd={'rt':'i','cid':'abc','hsh':'def'};</script>"
+        "</body></html>"
+    )
+
+    def fake_client_cls(**kwargs):
+        return _FakeStatusLeclercClient(403, probe_body)
+
+    with mock.patch(
+        "app.services.scrapers.leclerc.httpx.AsyncClient", side_effect=fake_client_cls
+    ):
+        with pytest.raises(LeclercAuthError, match="anti-bot challenge"):
+            asyncio.run(
+                search_leclerc(
+                    queries=["lait"],
+                    cookies=[{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}],
+                    store_base_url="https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
+                )
+            )
+
+
+def test_leclerc_search_raises_generic_session_error_on_plain_403():
+    import asyncio
+    from unittest import mock
+
+    def fake_client_cls(**kwargs):
+        return _FakeStatusLeclercClient(403, "<html>Forbidden</html>")
+
+    with mock.patch(
+        "app.services.scrapers.leclerc.httpx.AsyncClient", side_effect=fake_client_cls
+    ):
+        with pytest.raises(LeclercAuthError, match="rejected the current session"):
+            asyncio.run(
+                search_leclerc(
+                    queries=["lait"],
+                    cookies=[{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}],
+                    store_base_url="https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
+                )
+            )
 
 
 def test_auchan_parser_extracts_product_cards_from_search_html():

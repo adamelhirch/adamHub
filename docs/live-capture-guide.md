@@ -36,18 +36,19 @@ URL : https://www.leclercdrive.fr/
 2. **Sélectionner un magasin Drive** : entrer ton code postal et choisir le drive
    (les prix sont propres au magasin).
 3. Aller dans le champ **recherche** et taper un produit simple, ex. `lait`.
-4. Valider la recherche. La page de résultats charge les produits **via des
-   appels XHR/Fetch** — c'est eux qu'on veut.
-5. Optionnel mais utile : changer le tri (ex. « Prix croissant ») et scroller, pour
-   déclencher un ou deux appels de plus.
-6. Dans Network, tu dois voir apparaître des requêtes de type `json`/`fetch` vers
-   un domaine `*.leclercdrive.fr` (ou un sous-domaine api). Ce sont les appels de
-   recherche produit.
-7. Exporter le HAR (`Save all as HAR with content`).
+4. Valider la recherche. La page de résultats est **servie en HTML serveur-rendu** :
+   les produits sont dans un blob JSON embarqué (appel `initOptions('...pnlElementProduit', {..})`).
+   C'est le corps HTML de `recherche.aspx` qu'on veut — pas des appels JSON séparés.
+5. Optionnel mais utile : changer le tri (ex. « Prix croissant » → `tri=2`) et
+   valider, pour capturer la page avec le paramètre `tri`.
+6. Dans Network, repérer la requête `GET .../magasin-{plid}-{plid}-{slug}/recherche.aspx?TexteRecherche=...`
+   (statut 200, type `text/html`) et vérifier que son corps contient bien `pnlElementProduit`.
+7. Exporter le HAR **avec le contenu des réponses** (`Save all as HAR with content`) :
+   sans les corps, le parsing HTML ne peut pas être vérifié.
 
-Ce qu'on cherche dedans : l'URL de l'endpoint de recherche, ses query params
-(`q=`, tri, etc.), les headers d'authentification, et un échantillon de la
-réponse JSON (champs nom/prix/image).
+Ce qu'on cherche dedans : le corps HTML de `recherche.aspx` (avec le blob
+`pnlElementProduit`), les query params (`TexteRecherche`, `tri`), et un
+échantillon des champs nom/prix/image.
 
 ---
 
@@ -70,9 +71,10 @@ URL : https://www.auchan.fr/
    HAR (capture sans contenu) : capturer aussi la fiche produit
    (`/pouce-lait-demi-ecreme/pr-C1177649` par ex.) comme référence de structure.
 
-Note : le domaine `api.drive.leclerc` qu'on avait mis dans le code était un
-placeholder faux — c'est pour ça qu'on capture le vrai endpoint. Pour Auchan, le
-chemin de recherche est `/recherche?text=..` (HTML SSR), pas une API JSON.
+Note : le domaine `api.drive.leclerc` qu'on avait mis dans le code au départ
+était un placeholder faux — le scraper lit désormais le HTML serveur-rendu de
+`recherche.aspx` (blob `pnlElementProduit`). Pour Auchan, le chemin de
+recherche est `/recherche?text=..` (HTML SSR), pas une API JSON.
 
 ---
 

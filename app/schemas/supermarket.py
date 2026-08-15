@@ -38,6 +38,7 @@ class SupermarketStoreRead(BaseModel):
     supports_search: bool = True
     supports_mapping: bool = True
     supports_cart_automation: bool = False
+    supports_promotions_filter: bool = False
 
 
 class SupermarketStoreSelectionRequest(BaseModel):

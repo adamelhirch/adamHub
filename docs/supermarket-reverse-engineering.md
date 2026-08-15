@@ -32,9 +32,49 @@ slug du magasin (`Montaudran`).
 GET https://{sous-domaine}/magasin-{plid}-{plid}-{slug}/recherche.aspx?TexteRecherche={query}
 ```
 
-Réponse : HTML. Les produits sont des cartes serveur-rendues. Le HTML n'a pas
-été capturé avec le corps dans le HAR → les sélecteurs CSS exacts restent à
-confirmer sur une session live (voir plus bas).
+Réponse : HTML. Les produits sont des cartes serveur-rendues. Les sélecteurs
+ont été **confirmés sur le corps réel du HAR fd7** (936 KB) : la liste vit dans
+le JSON d'un appel `Utilitaires.widget.initOptions('...pnlElementProduit', {..})`,
+dans `objContenu.lstElements[].objElement` avec les champs :
+
+- `iIdProduit` / `sId` → identifiant produit (numérique, utilisé au panier)
+- `sLibelleLigne1` → nom, `sLibelleLigne2` → format/conditionnement
+- `sPrixUnitaire` → prix affiché, `nrPVUnitaireTTC` → montant numérique
+- `sPrixParUniteDeMesure` → prix au kg/L, `nrPVParUniteDeMesureTTC`
+- `sPrixPromo` → prix promo (« 0,00 € » = pas de promo)
+- `sUrlVignetteProduit` → image, `sUrlPageProduit` → fiche produit
+- `sCategorie` → identifiant de catégorie (numérique, chaîne)
+
+Exemple réel (capture fd7, « lait ») : `iIdProduit=32452`, prix `6,72 €`,
+image `https://fd7-photos.leclercdrive.fr/image.ashx?id=2929937&use=l&cat=p&typeid=i`.
+
+#### Tri
+
+Le widget de tri embarqué expose la datasource réelle des ids `tri` :
+
+| tri | Libellé |
+| --- | --- |
+| 1 | Tri par défaut |
+| 2 | Tri par prix croissant |
+| 3 | Tri par prix décroissant |
+| 4 | Tri par prix / Kg, L croissant |
+| 5 | Tri par prix / Kg, L décroissant |
+| 6 | Tri par Meilleures notes |
+
+`LECLERC_SORT_IDS` mappe ces ids (ex. `price_asc` → `tri=2`). Le paramètre est
+envoyé sur `recherche.aspx` (`?TexteRecherche={q}&tri={id}`). Les captures HAR
+des pages `tri=6` vs défaut renvoient le même ordre produit (artefact de cache
+page `clsWCSD045:PageCache`), mais le paramètre est bien le mécanisme de tri
+côté site.
+
+#### Promotions
+
+Il n'existe **pas** de flag « promotions only » sur `recherche.aspx`. Les
+promotions vivent sur une page dédiée (`promotions.aspx`, accessible via
+`sUrlRayonPromotions`). Décision : `promotions_only` reste accepté par le
+scraper pour la parité d'interface mais est ignoré ; la capability est exposée
+par `SupermarketStoreDefinition.supports_promotions_filter` (false pour Leclerc,
+true pour Intermarché qui l'implémente côté navigateur).
 
 ### Panier
 
@@ -295,8 +335,11 @@ par la session cookies.
 1. **Recherche = parsing HTML**, pas un appel JSON. Il faut `httpx` + `BeautifulSoup`
    (déjà utilisé par Intermarché/Carrefour), avec les cookies de session.
 2. **Leclerc** : le sous-domaine (`fdN-courses`) et le `magasin-{plid}-{plid}-{slug}`
-   dépendent du point de livraison sélectionné → il faut persister le
-   `SupermarketStoreSelection` (déjà prévu) pour reconstruire l'URL.
+   dépendent du point de livraison sélectionné → le scraper exige
+   `ADAMHUB_LECLERC_BASE_URL` (ou `SupermarketStoreSelection`) pour reconstruire
+   l'URL ; sans base configurée il lève une erreur explicite. Le tri passe par
+   le paramètre `tri`. Le store `Leclerc` expose `supports_promotions_filter:
+   false`.
 3. **Auchan** : le prix est dans le HTML quand un magasin est sélectionné
    (`meta[itemprop=price]`). Le contexte magasin est sélectionné via
    `POST /journey/update` + le cookie `lark-journey`, et **ne requiert pas de
@@ -316,10 +359,33 @@ par la session cookies.
 prix ; toutes exigent un contexte magasin. Le panier, lui, reste hors
 périmètre pour Auchan (endpoints `checkout/v1/carts` + `consentId`).
 
+## Matrice connexion Leclerc (test LIVE lecture seule, août 2026)
+
+Résultats observés en direct contre `fd7-courses.leclercdrive.fr` :
+
+| Cas | Résultat | Détail |
+| --- | --- | --- |
+| Recherche sans cookie, sans base URL | Échec explicite | `_resolve_store_base_url` lève « set ADAMHUB_LECLERC_BASE_URL » (aucune requête émise) |
+| Recherche sans cookie, base URL fournie | 403 DataDome | `_raise_for_auth` détecte le challenge (`var dd=…`, « Please enable JS ») → `LeclercAuthError` « anti-bot challenge » |
+| Recherche avec cookies capturés (session expirée) | 403 DataDome | La session du HAR est périmée / liée à l'IP de capture → challenge renvoyé |
+| Prix sans login | Non confirmé en live | Le rendu du prix dépend du point de livraison (cookie `clsWCCD125:@123111` + sous-domaine fdN) ; la capture HAR était connectée, et DataDome bloque les sessions étrangères → à revérifier avec un cookie frais |
+| Point livraison / magasin requis ? | OUI | Sous-domaine fdN + chemin `magasin-{plid}-{plid}-{slug}` dans `ADAMHUB_LECLERC_BASE_URL` + cookie de sélection du point de livraison. Sans sélection de magasin, pas de sous-domaine exploitable |
+| Panier | HORS PÉRIMÈTRE | `panier.aspx` (`op=1`/`op=3`) non câblé ; pas de gestion de compte |
+
+**Conclusion opérationnelle** : la recherche est utilisable avec une session
+cookie fraîche capturée sur le bon point de livraison. Un cookie « connecté »
+n'est pas nécessaire pour la recherche elle-même d'après la structure (le prix
+dépend du point de livraison, pas du compte), mais une session sans sélection
+de magasin ne peut pas cibler le bon sous-domaine. DataDome invalide
+rapidement les sessions non issues du navigateur d'origine.
+
 ## Reste à valider en live (bloqué sans session)
 
 - Le sous-domaine Leclerc (`fdN-courses`) et le `magasin-{plid}-{plid}-{slug}`
   doivent être fournis via `ADAMHUB_LECLERC_BASE_URL` (ou un
-  `SupermarketStoreSelection`) après sélection d'un Drive.
+  `SupermarketStoreSelection`) après sélection d'un Drive. ✅ confirmé : le
+  scraper construit `recherche.aspx?TexteRecherche={q}&tri={id}` sur cette base.
+- La recherche sans compte (cookie de point de livraison seul) : à confirmer
+  avec un cookie frais ; les captures actuelles sont bloquées par DataDome.
 - L'endpoint d'ajout au panier Auchan n'est pas encore câblé (les identifiants
   `productId`/`offerId`/`sellerId` sont désormais exposés par le scraper).

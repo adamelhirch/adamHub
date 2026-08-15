@@ -61,6 +61,7 @@ class SupermarketStoreDefinition:
     supports_search: bool = True
     supports_mapping: bool = True
     supports_cart_automation: bool = False
+    supports_promotions_filter: bool = False
     scraper_name: str | None = None
     notes: str | None = None
 
@@ -70,6 +71,7 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         key=SupermarketStore.INTERMARCHE,
         label="Intermarché",
         scraper_name="intermarche",
+        supports_promotions_filter=True,
         notes=(
             "Intermarché search via the public /api/products JSON API. Prices are "
             "store-specific: the selected store id is recovered from "
@@ -94,11 +96,13 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         label="Leclerc",
         scraper_name="leclerc",
         notes=(
-            "Leclerc Drive search via api.drive.leclerc (JSON API + cookies). "
-            "Requires data/cookies_leclerc.json from a logged-in browser session "
-            "with a Drive store selected (prices are store-specific). Reverse-"
-            "engineered endpoint needs live validation; login/password is "
-            "best-effort and the browser extension stays the reliable path."
+            "Leclerc Drive search via HTML SSR of recherche.aspx (JSON blob "
+            "inside initOptions('...pnlElementProduit', {..})). Requires "
+            "data/cookies_leclerc.json from a browser session with a Drive "
+            "store selected (store subdomain + magasin path set via "
+            "ADAMHUB_LECLERC_BASE_URL; prices are store-specific). Sorting via "
+            "the `tri` query param; no promotions-only query flag (see "
+            "docs/supermarket-reverse-engineering.md)."
         ),
     ),
     SupermarketStoreDefinition(

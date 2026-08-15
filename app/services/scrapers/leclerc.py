@@ -114,6 +114,14 @@ def _resolve_store_base_url(store_base_url: str | None) -> str:
     return base
 
 
+def _clean_text(value: Any) -> str | None:
+    """Normalize an HTML-escaped product field (collapse runs of whitespace)."""
+    if value is None:
+        return None
+    cleaned = re.sub(r"\s+", " ", unescape(str(value)))
+    return cleaned.strip() or None
+
+
 def parse_leclerc_search_html(html: str, max_results: int) -> list[dict[str, str | None]]:
     """Parse the embedded product JSON out of a `recherche.aspx` response.
 
@@ -121,6 +129,8 @@ def parse_leclerc_search_html(html: str, max_results: int) -> list[dict[str, str
     JSON has `objContenu.lstElements[].objElement` entries with the fields:
     iIdProduit, sLibelleLigne1 (name), sLibelleLigne2 (format), sPrixUnitaire,
     sPrixParUniteDeMesure, sUrlVignetteProduit, sUrlPageProduit, sCategorie.
+    The selector was confirmed against the live `fd7-courses.leclercdrive.fr`
+    capture (data/live-capture/fd7-courses.leclercdrive.fr.har, 936 KB HTML).
     """
     soup = BeautifulSoup(html, "html.parser")
 
@@ -151,21 +161,23 @@ def parse_leclerc_search_html(html: str, max_results: int) -> list[dict[str, str
             product = entry.get("objElement") if isinstance(entry, dict) else None
             if not isinstance(product, dict):
                 continue
-            name = (unescape(product.get("sLibelleLigne1") or "")).strip()
+            name = _clean_text(product.get("sLibelleLigne1"))
             if not name:
                 continue
             ext_id = product.get("iIdProduit") or product.get("sId")
+            category = product.get("sCategorie")
             results.append(
                 {
                     "id": str(ext_id) if ext_id is not None else None,
                     "name": name,
                     "brand": None,
-                    "category": str(product["sCategorie"]) if product.get("sCategorie") is not None else None,
-                    "packaging": unescape(product.get("sLibelleLigne2") or "").strip() or None,
-                    "price": unescape(product.get("sPrixUnitaire") or "").strip() or None,
-                    "price_per_unit": unescape(product.get("sPrixParUniteDeMesure") or "").strip() or None,
+                    "category": str(category) if category is not None else None,
+                    "packaging": _clean_text(product.get("sLibelleLigne2")),
+                    "price": _clean_text(product.get("sPrixUnitaire")),
+                    "price_per_unit": _clean_text(product.get("sPrixParUniteDeMesure")),
                     "image": product.get("sUrlVignetteProduit"),
                     "product_url": product.get("sUrlPageProduit"),
+                    "store": "Leclerc",
                 }
             )
             if len(results) >= max_results:
@@ -193,17 +205,23 @@ def _build_headers(referer: str) -> dict[str, str]:
 
 
 def _raise_for_auth(response: httpx.Response) -> None:
+    # DataDome answers 403 with a JS probe page (`var dd={...}`, "Please enable
+    # JS and disable any ad blocker") — detect it before the generic 403 branch
+    # so the operator knows a fresh cookie session is required. Confirmed live:
+    # both a bare request and the captured (stale) session get this challenge.
+    body = response.text or ""
+    if response.status_code == 403 and (
+        "var dd=" in body or "datadome" in body.lower()[:4000] or "Please enable JS" in body[:500]
+    ):
+        raise LeclercAuthError(
+            "Leclerc returned an anti-bot challenge (DataDome). A fresh cookie "
+            "session is required."
+        )
     if response.status_code in {401, 403}:
         raise LeclercAuthError(
             "Leclerc rejected the current session. "
             "Refresh `data/cookies_leclerc.json` from a logged-in browser session "
             "with a Drive store selected."
-        )
-    # DataDome blocks with a 403 challenge page; surface it clearly.
-    if response.status_code == 403 or "datadome" in response.text.lower()[:2000]:
-        raise LeclercAuthError(
-            "Leclerc returned an anti-bot challenge (DataDome). A fresh cookie "
-            "session is required."
         )
 
 
@@ -219,9 +237,12 @@ async def search_leclerc(
     """Search Leclerc Drive by scraping `recherche.aspx` and parsing its JSON.
 
     ``store_base_url`` is the store subdomain + magasin path (or the
-    ``ADAMHUB_LECLERC_BASE_URL`` env var). ``promotions_only`` is not wired to
-    the request (Leclerc has no promotions-only query flag); it is accepted for
-    interface parity and ignored.
+    ``ADAMHUB_LECLERC_BASE_URL`` env var). ``sort_by`` maps through
+    ``LECLERC_SORT_IDS`` to the site's ``tri`` query param (datasource ids
+    1..6 confirmed in the live capture). ``promotions_only`` is accepted for
+    interface parity and ignored: Leclerc has no promotions-only query flag on
+    `recherche.aspx` (promos live on a separate page), so the store definition
+    exposes ``supports_promotions_filter`` so callers can skip the flag.
     """
     del promotions_only
     base = _resolve_store_base_url(store_base_url)
