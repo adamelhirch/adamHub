@@ -51,121 +51,12 @@ export interface PantryOverview {
   expiring_within_7_days: number;
 }
 
-export type SupermarketStoreKey = 'intermarche' | 'ubereats' | 'carrefour';
-
-export type UbereatsSortKey = 'recommended' | 'price_asc' | 'price_desc';
+export type SupermarketStoreKey = 'intermarche' | 'carrefour';
 
 export const STORE_LABELS: Record<SupermarketStoreKey, string> = {
   intermarche: 'Intermarché',
-  ubereats: 'Uber Eats',
   carrefour: 'Carrefour',
 };
-
-export interface UbereatsLocation {
-  label: string | null;
-  title: string | null;
-  formatted_address: string | null;
-  latitude: number | null;
-  longitude: number | null;
-}
-
-export interface UbereatsStoreOption {
-  uuid: string;
-  name: string;
-  subtitle: string | null;
-  address: string | null;
-  rating: number | null;
-  image_url: string | null;
-}
-
-export interface UbereatsStoreSelection {
-  external_store_id: string;
-  store_label: string;
-  location_label: string | null;
-  updated_at: string;
-}
-
-export interface UbereatsGeocodeResult {
-  title: string;
-  subtitle: string | null;
-  formatted_address: string;
-  latitude: number;
-  longitude: number;
-  reference: string | null;
-  reference_type: string;
-}
-
-export interface UbereatsSavedAddress {
-  id: number;
-  label: string;
-  formatted_address: string;
-  subtitle: string | null;
-  latitude: number;
-  longitude: number;
-  reference: string | null;
-  reference_type: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface UbereatsCartItem {
-  item_uuid: string;
-  cart_item_uuid: string;
-  title: string;
-  quantity: number;
-  price_cents: number | null;
-  image_url: string | null;
-}
-
-export interface UbereatsCartDetails {
-  draft_order_uuid: string | null;
-  cart_uuid: string | null;
-  store_uuid: string | null;
-  items: UbereatsCartItem[];
-}
-
-export interface UbereatsCartSummaryEntry {
-  draft_order_uuid: string | null;
-  title: string | null;
-  subtotal_text: string | null;
-  item_count: number | null;
-  store_image_urls: string[];
-  details: UbereatsCartDetails | null;
-}
-
-export interface UbereatsCartSummary {
-  carts: UbereatsCartSummaryEntry[];
-  focused: UbereatsCartDetails | null;
-}
-
-export interface UbereatsPastOrder {
-  uuid: string;
-  store_title: string | null;
-  store_image_url: string | null;
-  completed_at: string | null;
-  is_completed: boolean;
-  is_cancelled: boolean;
-  num_items: number;
-  total_quantity: number;
-  total_text: string | null;
-}
-
-export interface UbereatsImportedItem {
-  name: string;
-  quantity: number;
-  external_id: string | null;
-  price_text: string | null;
-  created: boolean;
-}
-
-export interface UbereatsImportResult {
-  order_uuid: string;
-  store_label: string | null;
-  items_imported: number;
-  items_updated: number;
-  items: UbereatsImportedItem[];
-}
 
 export interface SupermarketConnection {
   id: number;
@@ -300,7 +191,7 @@ interface GroceryStore {
   selectedStore: SupermarketStoreKey;
 
   setSelectedStore: (store: SupermarketStoreKey) => void;
-  searchSupermarket: (store: SupermarketStoreKey, query: string, options?: { forceRefresh?: boolean; promotionsOnly?: boolean; sortBy?: UbereatsSortKey }) => Promise<void>;
+  searchSupermarket: (store: SupermarketStoreKey, query: string, options?: { forceRefresh?: boolean; promotionsOnly?: boolean }) => Promise<void>;
   searchIntermarche: (query: string, forceRefresh?: boolean, promotionsOnly?: boolean) => Promise<void>;
   getCachedProducts: (query?: string, store?: SupermarketStoreKey) => Promise<void>;
   hasCachedProducts: (query: string, store?: SupermarketStoreKey) => Promise<boolean>;
@@ -308,69 +199,6 @@ interface GroceryStore {
   fetchPantryMapping: (itemId: number) => Promise<SupermarketMapping | null>;
   savePantryMapping: (itemId: number, product: SupermarketProduct) => Promise<SupermarketMapping>;
   deleteMapping: (mappingId: number) => Promise<void>;
-
-  // Uber Eats setup
-  ubereatsLocation: UbereatsLocation | null;
-  ubereatsSelectedStore: UbereatsStoreSelection | null;
-  ubereatsStores: UbereatsStoreOption[];
-  ubereatsStoresLoading: boolean;
-  ubereatsError: string | null;
-
-  fetchUbereatsLocation: () => Promise<void>;
-  updateUbereatsLocation: (payload: {
-    title: string;
-    subtitle?: string;
-    formatted_address?: string;
-    latitude: number;
-    longitude: number;
-    reference?: string;
-    reference_type?: string;
-  }) => Promise<void>;
-  fetchUbereatsStores: (limit?: number) => Promise<void>;
-  fetchSelectedUbereatsStore: () => Promise<void>;
-  selectUbereatsStore: (option: UbereatsStoreOption) => Promise<void>;
-
-  // Saved addresses + geocoding
-  ubereatsAddresses: UbereatsSavedAddress[];
-  ubereatsGeocodeResults: UbereatsGeocodeResult[];
-  ubereatsGeocodeLoading: boolean;
-
-  fetchUbereatsAddresses: () => Promise<void>;
-  geocodeUbereatsAddress: (query: string) => Promise<void>;
-  clearUbereatsGeocodeResults: () => void;
-  saveUbereatsAddress: (
-    payload: {
-      label: string;
-      formatted_address: string;
-      subtitle?: string;
-      latitude: number;
-      longitude: number;
-      reference?: string;
-      reference_type?: string;
-      activate?: boolean;
-    },
-  ) => Promise<UbereatsSavedAddress>;
-  activateUbereatsAddress: (addressId: number) => Promise<void>;
-  deleteUbereatsAddress: (addressId: number) => Promise<void>;
-
-  // Cart automation
-  ubereatsCart: UbereatsCartSummary | null;
-  ubereatsCartAdding: Record<number, boolean>;
-  ubereatsCartError: string | null;
-
-  fetchUbereatsCart: (options?: { includeDetails?: boolean }) => Promise<void>;
-  addToUbereatsCart: (cacheId: number, quantity?: number) => Promise<void>;
-
-  // Past orders & import
-  ubereatsPastOrders: UbereatsPastOrder[];
-  ubereatsPastOrdersLoading: boolean;
-  ubereatsImportLoading: boolean;
-  ubereatsLastImport: UbereatsImportResult | null;
-  ubereatsImportError: string | null;
-
-  fetchUbereatsPastOrders: (limit?: number) => Promise<void>;
-  importUbereatsOrderToPantry: (trackingUrlOrUuid: string) => Promise<UbereatsImportResult>;
-  clearUbereatsImportFeedback: () => void;
 
   // Cookie connections (per-store, multi-account)
   connections: SupermarketConnection[];
@@ -486,10 +314,10 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
   },
 
   searchSupermarket: async (store, query, options = {}) => {
-    const { forceRefresh = false, promotionsOnly = false, sortBy } = options;
+    const { forceRefresh = false, promotionsOnly = false } = options;
     set({ searchLoading: true, searchError: null, searchResults: [] });
     try {
-      const limit = store === 'ubereats' ? 100 : 30;
+      const limit = 30;
       const supportsCacheReuse = store === 'intermarche';
       if (supportsCacheReuse && !forceRefresh && !promotionsOnly) {
         const cached = await api.get('/supermarket/search', {
@@ -508,9 +336,6 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
       };
       if (store === 'intermarche') {
         body.promotions_only = promotionsOnly;
-      }
-      if (store === 'ubereats' && sortBy && sortBy !== 'recommended') {
-        body.sort_by = sortBy;
       }
 
       const res = await api.post('/supermarket/search', body, { timeout: 120_000 });
@@ -608,177 +433,6 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
     }
   },
 
-  // ── Uber Eats setup ────────────────────────────────────────────────────────
-  ubereatsLocation: null,
-  ubereatsSelectedStore: null,
-  ubereatsStores: [],
-  ubereatsStoresLoading: false,
-  ubereatsError: null,
-
-  fetchUbereatsLocation: async () => {
-    try {
-      const res = await api.get('/supermarket/ubereats/location');
-      set({ ubereatsLocation: res.data });
-    } catch (e: unknown) {
-      set({ ubereatsError: extractErrorMessage(e, 'Erreur localisation') });
-    }
-  },
-
-  updateUbereatsLocation: async (payload) => {
-    try {
-      const res = await api.put('/supermarket/ubereats/location', payload);
-      set({ ubereatsLocation: res.data, ubereatsError: null });
-    } catch (e: unknown) {
-      const msg = extractErrorMessage(e, 'Erreur mise à jour adresse');
-      set({ ubereatsError: msg });
-      throw new Error(msg);
-    }
-  },
-
-  fetchUbereatsStores: async (limit = 25) => {
-    set({ ubereatsStoresLoading: true, ubereatsError: null });
-    try {
-      const res = await api.get('/supermarket/ubereats/stores', { params: { limit }, timeout: 60_000 });
-      set({ ubereatsStores: res.data });
-    } catch (e: unknown) {
-      set({ ubereatsError: extractErrorMessage(e, 'Erreur listing magasins'), ubereatsStores: [] });
-    } finally {
-      set({ ubereatsStoresLoading: false });
-    }
-  },
-
-  fetchSelectedUbereatsStore: async () => {
-    try {
-      const res = await api.get('/supermarket/ubereats/selected-store');
-      set({ ubereatsSelectedStore: res.data });
-    } catch {
-      set({ ubereatsSelectedStore: null });
-    }
-  },
-
-  selectUbereatsStore: async (option) => {
-    const res = await api.put('/supermarket/ubereats/selected-store', {
-      external_store_id: option.uuid,
-      store_label: option.name,
-      location_label: option.address,
-    });
-    set({ ubereatsSelectedStore: res.data, ubereatsError: null });
-  },
-
-  // ── Saved addresses + geocoding ────────────────────────────────────────────
-  ubereatsAddresses: [],
-  ubereatsGeocodeResults: [],
-  ubereatsGeocodeLoading: false,
-
-  fetchUbereatsAddresses: async () => {
-    try {
-      const res = await api.get('/supermarket/ubereats/addresses');
-      set({ ubereatsAddresses: Array.isArray(res.data) ? res.data : [] });
-    } catch (e: unknown) {
-      set({ ubereatsError: extractErrorMessage(e, 'Erreur adresses') });
-    }
-  },
-
-  geocodeUbereatsAddress: async (query) => {
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      set({ ubereatsGeocodeResults: [], ubereatsGeocodeLoading: false });
-      return;
-    }
-    set({ ubereatsGeocodeLoading: true });
-    try {
-      const res = await api.get('/supermarket/ubereats/geocode', { params: { q: trimmed, limit: 6 } });
-      set({ ubereatsGeocodeResults: Array.isArray(res.data) ? res.data : [] });
-    } catch (e: unknown) {
-      set({ ubereatsError: extractErrorMessage(e, 'Erreur géocodage'), ubereatsGeocodeResults: [] });
-    } finally {
-      set({ ubereatsGeocodeLoading: false });
-    }
-  },
-
-  clearUbereatsGeocodeResults: () => set({ ubereatsGeocodeResults: [] }),
-
-  saveUbereatsAddress: async (payload) => {
-    const res = await api.post('/supermarket/ubereats/addresses', payload);
-    const created = res.data as UbereatsSavedAddress;
-    await get().fetchUbereatsAddresses();
-    if (created.is_active) {
-      await get().fetchUbereatsLocation();
-    }
-    return created;
-  },
-
-  activateUbereatsAddress: async (addressId) => {
-    await api.put(`/supermarket/ubereats/addresses/${addressId}/activate`);
-    await get().fetchUbereatsAddresses();
-    await get().fetchUbereatsLocation();
-  },
-
-  deleteUbereatsAddress: async (addressId) => {
-    await api.delete(`/supermarket/ubereats/addresses/${addressId}`);
-    await get().fetchUbereatsAddresses();
-  },
-
-  // ── Cart automation ────────────────────────────────────────────────────────
-  ubereatsCart: null,
-  ubereatsCartAdding: {},
-  ubereatsCartError: null,
-
-  fetchUbereatsCart: async (options) => {
-    const includeDetails = options?.includeDetails ?? false;
-    try {
-      const res = await api.get('/supermarket/ubereats/cart', {
-        params: { include_details: includeDetails },
-        timeout: 30_000,
-      });
-      set({ ubereatsCart: res.data, ubereatsCartError: null });
-    } catch (e: unknown) {
-      set({ ubereatsCartError: extractErrorMessage(e, 'Erreur lecture panier UE') });
-    }
-  },
-
-  ubereatsPastOrders: [],
-  ubereatsPastOrdersLoading: false,
-  ubereatsImportLoading: false,
-  ubereatsLastImport: null,
-  ubereatsImportError: null,
-
-  fetchUbereatsPastOrders: async (limit = 10) => {
-    set({ ubereatsPastOrdersLoading: true });
-    try {
-      const res = await api.get('/supermarket/ubereats/orders', { params: { limit }, timeout: 30_000 });
-      set({ ubereatsPastOrders: Array.isArray(res.data) ? res.data : [] });
-    } catch (e: unknown) {
-      set({ ubereatsImportError: extractErrorMessage(e, 'Erreur lecture commandes UE') });
-    } finally {
-      set({ ubereatsPastOrdersLoading: false });
-    }
-  },
-
-  importUbereatsOrderToPantry: async (trackingUrlOrUuid) => {
-    set({ ubereatsImportLoading: true, ubereatsImportError: null, ubereatsLastImport: null });
-    try {
-      const res = await api.post(
-        '/supermarket/ubereats/orders/import-to-pantry',
-        { tracking_url_or_uuid: trackingUrlOrUuid },
-        { timeout: 60_000 },
-      );
-      const result = res.data as UbereatsImportResult;
-      set({ ubereatsLastImport: result });
-      await get().fetchPantry();
-      await get().fetchPantryOverview();
-      return result;
-    } catch (e: unknown) {
-      const msg = extractErrorMessage(e, 'Erreur import commande UE');
-      set({ ubereatsImportError: msg });
-      throw new Error(msg);
-    } finally {
-      set({ ubereatsImportLoading: false });
-    }
-  },
-
-  clearUbereatsImportFeedback: () => set({ ubereatsLastImport: null, ubereatsImportError: null }),
-
   // ── Connections (per-store cookie sets) ─────────────────────────────────
   connections: [],
   connectionsLoading: false,
@@ -803,23 +457,5 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
   deleteConnection: async (connectionId) => {
     await api.delete(`/supermarket/connections/${connectionId}`);
     await get().fetchConnections();
-  },
-
-  addToUbereatsCart: async (cacheId, quantity = 1) => {
-    set((s) => ({ ubereatsCartAdding: { ...s.ubereatsCartAdding, [cacheId]: true }, ubereatsCartError: null }));
-    try {
-      await api.post('/supermarket/ubereats/cart/items', { cache_id: cacheId, quantity }, { timeout: 30_000 });
-      // Refresh both the live UE cart and the local grocery list (mirrored by backend).
-      await Promise.all([get().fetchUbereatsCart(), get().fetchItems()]);
-    } catch (e: unknown) {
-      set({ ubereatsCartError: extractErrorMessage(e, 'Erreur ajout au panier UE') });
-      throw e;
-    } finally {
-      set((s) => {
-        const next = { ...s.ubereatsCartAdding };
-        delete next[cacheId];
-        return { ubereatsCartAdding: next };
-      });
-    }
   },
 }));

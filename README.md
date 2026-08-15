@@ -141,7 +141,7 @@ Production note:
 
 ## Supermarket connections
 
-Supported stores (registry at `app/services/store_catalog.py`): **Intermarché**, **Uber Eats**, **Carrefour**, **Leclerc**, **Auchan**.
+Supported stores (registry at `app/services/store_catalog.py`): **Intermarché**, **Carrefour**, **Leclerc**, **Auchan**.
 
 The reliable path is cookies: the AdamHUB Connect browser extension (`extension/`) dumps the cookies of a logged-in session (with a Drive store selected, since prices are store-specific) and posts them to `POST /api/v1/supermarket/connections/import`. Each store's scraper then calls the store's JSON/HTML API with those cookies.
 

@@ -46,11 +46,6 @@ from app.services.scrapers.auchan import search_auchan
 from app.services.scrapers.carrefour import search_carrefour
 from app.services.scrapers.intermarche import search_intermarche
 from app.services.scrapers.leclerc import search_leclerc
-from app.services.scrapers.ubereats import (
-    UbereatsLocationError,
-    search_in_store as search_ubereats_in_store,
-)
-from app.services.ubereats_addresses import get_active_address
 
 CACHE_TTL_DAYS = 15
 
@@ -73,17 +68,12 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         label="Intermarché",
         scraper_name="intermarche",
         supports_promotions_filter=True,
-        notes="Live HTML scraping with optional Camoufox fallback.",
-    ),
-    SupermarketStoreDefinition(
-        key=SupermarketStore.UBEREATS,
-        label="Uber Eats",
-        scraper_name="ubereats",
-        supports_mapping=False,
-        supports_cart_automation=True,
         notes=(
-            "Internal JSON API scraping. Requires data/cookies_ubereats.json and "
-            "a selected store (POST /supermarket/ubereats/selected-store)."
+            "Intermarché search via the public /api/products JSON API. Prices are "
+            "store-specific: the selected store id is recovered from "
+            "data/cookies_intermarche.json (itm_pdv cookie) and passed as `ref`. "
+            "Search works without cookies (default catalog) but the store's own "
+            "prices require a session with a store selected."
         ),
     ),
     SupermarketStoreDefinition(
@@ -92,9 +82,9 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         scraper_name="carrefour",
         supports_mapping=False,
         notes=(
-            "Carrefour Drive search via /api/marketing/search. Requires "
-            "data/cookies_carrefour.json from a logged-in browser session "
-            "with a Drive store selected (prices are store-specific)."
+            "Carrefour search via the /s?q=… JSON endpoint (application/json, "
+            "XHR headers). Requires data/cookies_carrefour.json from a logged-in "
+            "browser session with a Drive store selected (prices are store-specific)."
         ),
     ),
     SupermarketStoreDefinition(
@@ -309,26 +299,6 @@ def load_active_cookies(
     return cookies
 
 
-def _build_ubereats_target_location(session: Session) -> dict[str, Any] | None:
-    """Compose Uber Eats getInStoreSearchV1.targetLocation from the active address."""
-    address = get_active_address(session)
-    if address is None:
-        return None
-    formatted = address.formatted_address
-    return {
-        "address": formatted,
-        "streetAddress": formatted.split(",")[0].strip() or formatted,
-        "city": (address.subtitle or "").strip() or "",
-        "country": "FR",
-        "postalCode": "",
-        "region": "",
-        "latitude": address.latitude,
-        "longitude": address.longitude,
-        "geo": {"city": "", "country": "fr", "region": ""},
-        "locationType": "GROCERY_STORE",
-    }
-
-
 def upsert_selected_store(
     session: Session,
     store: SupermarketStore,
@@ -441,6 +411,7 @@ async def fetch_search_results(
         raw_results = await search_intermarche(
             queries=queries,
             max_results=max_results,
+            sort_by=sort_by,
             promotions_only=promotions_only,
             cookies=cookies,
         )
@@ -448,6 +419,8 @@ async def fetch_search_results(
         raw_results = await search_carrefour(
             queries=queries,
             max_results=max_results,
+            sort_by=sort_by,
+            promotions_only=promotions_only,
             cookies=cookies,
         )
     elif store == SupermarketStore.LECLERC:
@@ -464,24 +437,6 @@ async def fetch_search_results(
             max_results=max_results,
             sort_by=sort_by,
             promotions_only=promotions_only,
-            cookies=cookies,
-        )
-    elif store == SupermarketStore.UBEREATS:
-        if session is None:
-            raise ValueError("Uber Eats search requires a database session.")
-        selection = get_selected_store(session, store)
-        if selection is None:
-            raise UbereatsLocationError(
-                "No Uber Eats store selected. "
-                "Call POST /supermarket/ubereats/selected-store first."
-            )
-        target_location = _build_ubereats_target_location(session)
-        raw_results = await search_ubereats_in_store(
-            store_uuid=selection.external_store_id,
-            queries=queries,
-            max_results=max_results,
-            target_location=target_location,
-            sort_by=sort_by,
             cookies=cookies,
         )
     else:
@@ -508,11 +463,11 @@ async def run_intermarche_scraper(
     sort_by: str | None = None,
     promotions_only: bool = False,
 ) -> list[SupermarketSearchCache]:
-    del sort_by
     normalized = await fetch_search_results(
         store=SupermarketStore.INTERMARCHE,
         queries=queries,
         max_results=max_results,
+        sort_by=sort_by,
         promotions_only=promotions_only,
     )
     return upsert_search_cache(session, SupermarketStore.INTERMARCHE, normalized)

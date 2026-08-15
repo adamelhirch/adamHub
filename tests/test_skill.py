@@ -393,19 +393,6 @@ def test_skill_habit_update_normalizes_schedule_and_rejects_overlap(client, auth
     assert "overlaps" in conflicting.json()["detail"].lower()
 
 
-def test_skill_ubereats_save_address_missing_coordinates_is_a_400(client, auth_headers):
-    response = client.post(
-        "/api/v1/skill/execute",
-        headers=auth_headers,
-        json={
-            "action": "ubereats.save_address",
-            "input": {"label": "Maison", "formatted_address": "1 rue de la Paix, Paris"},
-        },
-    )
-    assert response.status_code == 400
-    assert "latitude and longitude are required" in response.json()["detail"]
-
-
 # ── B2: smoke coverage per domain (create/list/get/delete via skill/execute) ──
 
 
@@ -722,8 +709,6 @@ def test_skill_network_actions_fail_cleanly_before_hitting_the_network(client, a
     cases = [
         ("video.fetch", {}, "url is required"),
         ("supermarket.search", {"store": "colruyt", "queries": ["lait"]}, "intermarche"),
-        ("ubereats.geocode_address", {}, "query is required"),
-        ("ubereats.search_products", {}, "query is required"),
     ]
     for action, payload, expected_detail in cases:
         response = client.post(
@@ -734,27 +719,6 @@ def test_skill_network_actions_fail_cleanly_before_hitting_the_network(client, a
         assert response.status_code == 400, f"{action}: {response.text}"
         if expected_detail:
             assert expected_detail in response.json()["detail"]
-
-
-def test_skill_ubereats_selected_store_is_db_only(client, auth_headers):
-    saved = client.post(
-        "/api/v1/skill/execute",
-        headers=auth_headers,
-        json={
-            "action": "ubereats.set_selected_store",
-            "input": {"external_store_id": "ext-123", "store_label": "Franprix"},
-        },
-    )
-    assert saved.status_code == 200
-    assert saved.json()["data"]["selection"]["external_store_id"] == "ext-123"
-
-    fetched = client.post(
-        "/api/v1/skill/execute",
-        headers=auth_headers,
-        json={"action": "ubereats.get_selected_store", "input": {}},
-    )
-    assert fetched.status_code == 200
-    assert fetched.json()["data"]["selection"]["store_label"] == "Franprix"
 
 
 # ── F1: meal_plan.add with a slot must return 200, never 500 ──────────────────

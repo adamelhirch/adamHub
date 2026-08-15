@@ -20,11 +20,11 @@ from app.services.connections import (
 from app.services.store_catalog import list_store_definitions, normalize_search_result, upsert_search_cache
 from app.services.scrapers.auchan import parse_auchan_search_html, search_auchan
 from app.services.scrapers.intermarche import (
+    build_search_query,
     extract_category_from_tracking_code,
-    extract_category_from_product_breadcrumb,
-    infer_category_from_name,
-    parse_intermarche_html,
-    requires_intermarche_store_selection,
+    extract_pdv_ref_from_cookies,
+    parse_intermarche_category_tree,
+    parse_intermarche_products,
 )
 from app.services.scrapers.leclerc import (
     LECLERC_SORT_IDS,
@@ -36,68 +36,179 @@ from app.services.scrapers.leclerc import (
 LECLERC_FIXTURE = Path(__file__).parent / "fixtures" / "leclerc" / "recherche_lait.html"
 
 
-def test_parse_intermarche_html_handles_missing_fields():
-    html = """
-    <div data-testid="product-layout">
-      <p class="font-bold font-open-sans">Panzani</p>
-      <h2 class="product-title">Pates</h2>
-      <div data-testid="default">2,39 €</div>
-      <p class="packaging">500 g</p>
-      <a class="productcard__link" href="/produits/pates-123"></a>
-    </div>
-    <div data-testid="product-layout">
-      <h2 class="product-title">Lait demi-ecreme</h2>
-    </div>
-    <div data-testid="product-layout">
-      <h2 class="product-title">Beurre</h2>
-      <div class="price-box">prix mystere</div>
-      <img src="https://img.test/beurre.png" />
-    </div>
-    """
+def _load_intermarche_fixture():
+    import json
+    from pathlib import Path
 
-    results = parse_intermarche_html(html, max_results=10)
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "intermarche_products.json"
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def test_parse_intermarche_products_handles_missing_fields():
+    payload = {"products": [
+        {
+            "id": "sku-1",
+            "ean": None,
+            "url": "/produit/pates-123",
+            "informations": {
+                "title": "Panzani - Pates",
+                "brand": "Panzani",
+                "packaging": "500 g",
+                "image": {"src": None},
+            },
+            "prices": {"productPrice": {"concatenated": "2,39€"}},
+            "trackingCode": None,
+        },
+        {
+            "id": "sku-2",
+            "informations": {"title": "Lait demi-ecreme"},
+            "prices": {},
+        },
+        {
+            "id": "sku-3",
+            "informations": {"title": "Beurre"},
+            "prices": {"productPrice": {"value": 1.2, "currency": "€"}},
+        },
+    ], "meta": {}}
+
+    results = parse_intermarche_products(payload, max_results=10)
 
     assert len(results) == 3
-    assert results[0]["id"] == "pates-123"
+    assert results[0]["id"] == "sku-1"
     assert results[0]["name"] == "Panzani - Pates"
+    assert results[0]["product_url"] == "https://www.intermarche.com/produit/pates-123"
     assert results[1]["image"] is None
     assert results[1]["product_url"] is None
-    assert results[2]["price"] == "prix mystere"
+    assert results[1]["price"] is None
+    assert results[2]["price"] == "1,2€"
 
 
-def test_parse_intermarche_html_uses_embedded_category_filters():
-    html = r"""
-    <div data-testid="product-layout">
-      <p class="font-bold font-open-sans">Paquito</p>
-      <h2 class="product-title">Jus de pomme</h2>
-      <div data-testid="default">1,33 €</div>
-      <p class="packaging">les 6 briques de 20cl</p>
-      <a class="productcard__link" href="/produit/jus-de-pomme/3250390031062"></a>
-    </div>
-    <script>
-      self.__next_f.push([1,"{\"products\":[{\"url\":\"/produit/jus-de-pomme/3250390031062\",\"famillyId\":15279,\"subFamillyId\":15308,\"departmentId\":15245,\"trackingCode\":\"ODk3YzE3ZWItMGVmZC00YzRjLWJhNjUtZGRmM2YxY2QyZjE4fDg5N2MxN2ViLTBlZmQtNGM0Yy1iYTY1LWRkZjNmMWNkMmYxOHxQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MTQ5NjB8anVzfFBST0RVQ1R8Mzl8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtTQ0VOQVJJT19QQUdFUkVTVUxUQVRdIEJJTy9NREQvSU5OSVR8MTc3MzU0Mjk0MTAwNXxmci1GUnxDT01QVVRFUg\"}],\"filters\":[{\"type\":\"categories\",\"label\":\"categories\",\"values\":[{\"id\":15279,\"label\":\"Pommes\",\"countProducts\":26}]},{\"type\":\"promotions\",\"label\":\"promotions\",\"values\":[]}]}"])
-    </script>
-    """
+def test_parse_intermarche_products_skips_editorial_tiles_without_product_id():
+    payload = {"products": [
+        {
+            "type": "PDV",
+            "url": "/produit/product/undefined",
+            "partnerTile": {"id": "21123", "kind": "RECIPE", "datas": {"title": "Flan express"}},
+            "informations": {"title": None, "brand": None},
+            "prices": None,
+        },
+        {
+            "id": "sku-1",
+            "ean": "3250390011866",
+            "url": "/produit/lait/3250390011866",
+            "informations": {"title": "Lait", "brand": "Candia", "packaging": "1 L"},
+            "prices": {"productPrice": {"concatenated": "1,49€"}},
+        },
+    ], "meta": {}}
 
-    results = parse_intermarche_html(html, max_results=10)
+    results = parse_intermarche_products(payload, max_results=10)
 
     assert len(results) == 1
-    assert results[0]["category"] == "Pommes"
+    assert results[0]["id"] == "3250390011866"
 
 
-def test_requires_intermarche_store_selection_detects_modal_copy():
-    html = """
-    <html>
-      <body>
-        <div role="dialog">
-          <h1>Sélectionner un magasin</h1>
-          <button aria-label="storeLocatore.switchBtn.add-list">Liste</button>
-        </div>
-      </body>
-    </html>
-    """
+def test_parse_intermarche_products_uses_category_lookup_preferring_deepest_family():
+    payload = {"products": [
+        {
+            "id": "sku-1",
+            "ean": "3176571626004",
+            "url": "/produit/lait/3176571626004",
+            "famillyId": 5961,
+            "subFamillyId": 0,
+            "departmentId": 2233,
+            "informations": {"title": "Lait", "brand": "Grandlait"},
+            "prices": {"productPrice": {"concatenated": "4,08€"}},
+            "trackingCode": None,
+        }
+    ], "meta": {}}
+    category_lookup = {
+        2233: "Fromages, Crèmerie et Oeufs / Laits et Boissons lactées",
+        5961: "Fromages, Crèmerie et Oeufs / Laits et Boissons lactées / Laits demi-écrémés",
+    }
 
-    assert requires_intermarche_store_selection(html) is True
+    results = parse_intermarche_products(payload, max_results=10, category_lookup=category_lookup)
+
+    assert results[0]["category"] == (
+        "Fromages, Crèmerie et Oeufs / Laits et Boissons lactées / Laits demi-écrémés"
+    )
+
+
+def test_parse_intermarche_products_falls_back_to_tracking_code_without_lookup():
+    payload = {"products": [
+        {
+            "id": "sku-1",
+            "ean": "3250390011866",
+            "url": "/produit/pain/3250390011866",
+            "famillyId": 5961,
+            "informations": {"title": "Pain", "brand": "Boulange"},
+            "prices": {"productPrice": {"concatenated": "1,00€"}},
+            "trackingCode": "ODk3YzE3ZWItMGVmZC00YzRjLWJhNjUtZGRmM2YxY2QyZjE4fDg5N2MxN2ViLTBlZmQtNGM0Yy1iYTY1LWRkZjNmMWNkMmYxOHxQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MTA3N3xwYWluIGRlIG1pZXxQUk9EVUNUfDB8U0VBUkNIfG51bGx8UkVTVUxUU19MSVNUfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxudWxsfFtQw6luYWxpc2VyXSBMYSBzb3VzLWZhbWlsbGUgInBhaW4gc2FuZHdpY2ggJiBidXJnZXIiIHBvdXIgbGEgcmVxdcOqdGUgInBhaW4gZGUgbWllInwxNzczNDc3ODIxMzIzfGZyLUZSfENPTVBVVEVS",
+        }
+    ], "meta": {}}
+
+    results = parse_intermarche_products(payload, max_results=10)
+
+    assert results[0]["category"] == "pain sandwich & burger"
+
+
+def test_parse_intermarche_products_maps_real_fixture_products():
+    payload = _load_intermarche_fixture()
+
+    results = parse_intermarche_products(payload, max_results=10)
+
+    assert len(results) == 8
+    normalized = normalize_search_result(SupermarketStore.INTERMARCHE, "lait", results[0])
+    assert normalized["external_id"] == "3176571626004"
+    assert normalized["name"] == "Grandlait - Lait demi écrémé"
+    assert normalized["brand"] == "Grandlait"
+    assert normalized["packaging"] == "les 4 bouteilles de 50cl - 200cl"
+    assert normalized["price_text"] == "4,08€"
+    assert normalized["price_amount"] == 4.08
+    assert normalized["product_url"].startswith("https://www.intermarche.com/produit/")
+    assert normalized["image_url"].startswith("https://")
+
+
+def test_build_search_query_encodes_sort_and_promotions_only():
+    default = build_search_query("lait")
+    assert default["sort"] == {"type": "pertinence", "direction": None}
+    assert default["isPromo"] is False
+
+    asc = build_search_query("lait", sort_by="price_asc")
+    assert asc["sort"] == {"type": "prix", "direction": "croissant"}
+
+    desc = build_search_query("lait", sort_by="price_desc")
+    assert desc["sort"] == {"type": "prix", "direction": "decroissant"}
+
+    promo = build_search_query("lait", promotions_only=True)
+    assert promo["isPromo"] is True
+
+
+def test_extract_pdv_ref_from_cookies_reads_itm_pdv_cookie():
+    cookies = [
+        {"name": "itm_pdv", "value": "{%22ref%22:%2211131%22%2C%22name%22:%22Super%22}"},
+        {"name": "novaParams", "value": "{%22pdvRef%22:%229999%22}"},
+    ]
+    assert extract_pdv_ref_from_cookies(cookies) == "11131"
+
+    assert extract_pdv_ref_from_cookies([{"name": "other", "value": "x"}]) is None
+    assert extract_pdv_ref_from_cookies([{"name": "itm_pdv", "value": "not-json"}]) is None
+
+
+def test_parse_intermarche_category_tree_flattens_paths():
+    tree = [
+        {
+            "id": "2233",
+            "title": "Fromages, Crèmerie et Oeufs",
+            "children": [
+                {"id": "5961", "title": "Laits demi-écrémés", "children": []}
+            ],
+        }
+    ]
+
+    lookup = parse_intermarche_category_tree(tree)
+
+    assert lookup[2233] == "Fromages, Crèmerie et Oeufs"
+    assert lookup[5961] == "Fromages, Crèmerie et Oeufs / Laits demi-écrémés"
 
 
 def test_extract_category_from_tracking_code_uses_subfamily_label():
@@ -108,63 +219,6 @@ def test_extract_category_from_tracking_code_uses_subfamily_label():
 def test_extract_category_from_tracking_code_supports_plural_families():
     tracking = "ODk3YzE3ZWItMGVmZC00YzRjLWJhNjUtZGRmM2YxY2QyZjE4fDg5N2MxN2ViLTBlZmQtNGM0Yy1iYTY1LWRkZjNmMWNkMmYxOHxQYWdlIFLDqXN1bHRhdHN8TGlzdGUgcHJvZHVpdHN8MjA5MTIxfHBhaW58UFJPRFVDVHwwfFNFQVJDSHxudWxsfFJFU1VMVFNfTElTVHxudWxsfG51bGx8bnVsbHxudWxsfG51bGx8bnVsbHxbQXZhbnRhZ2VyXSBMZXMgZmFtaWxsZXMgInBhaW4gZnJhaXMiICsgInBhaW4gZGUgbWllIiBkYW5zIGxhIHJlcXXDqnRlICJwYWluInwxNzczNTQyNTQ1NTk1fGZyLUZSfENPTVBVVEVS"
     assert extract_category_from_tracking_code(tracking) == "pain frais / pain de mie"
-
-
-def test_infer_category_from_name_uses_filter_hints():
-    categories = {
-        1: "Oranges et Agrumes",
-        2: "Multi-fruits",
-        3: "Pommes",
-    }
-
-    assert infer_category_from_name("/produit/100%25-pur-jus-orange-sans-pulpe/3250391571086", categories) == "Oranges et Agrumes"
-    assert infer_category_from_name("/produit/100%25-pur-jus-multifruits/3250390294726", categories) == "Multi-fruits"
-
-
-def test_extract_category_from_product_breadcrumb_uses_first_button():
-    html = """
-    <nav aria-label="Fil d’Ariane">
-      <a href="/accueil">Accueil</a>
-      <ol>
-        <li><button>Fromages, Crèmerie et Oeufs</button></li>
-        <li><a href="/rayons/laits">Laits et Boissons lactées</a></li>
-      </ol>
-    </nav>
-    """
-
-    assert extract_category_from_product_breadcrumb(html) == "Fromages, Crèmerie et Oeufs"
-
-
-def test_extract_category_from_product_breadcrumb_uses_json_ld_breadcrumb_list():
-    html = """
-    <script type="application/ld+json">
-      [
-        {
-          "@context": "https://schema.org",
-          "@type": "BreadcrumbList",
-          "itemListElement": [
-            {"@type": "ListItem", "position": 0, "name": "Fromages, Crèmerie et Oeufs"},
-            {"@type": "ListItem", "position": 1, "name": "Laits et Boissons lactées"}
-          ]
-        }
-      ]
-    </script>
-    """
-
-    assert extract_category_from_product_breadcrumb(html) == "Fromages, Crèmerie et Oeufs"
-
-
-def test_extract_category_from_product_breadcrumb_falls_back_to_first_link():
-    html = """
-    <nav aria-label="Fil d’Ariane">
-      <ol>
-        <li><a href="/rayons/boissons">Boissons</a></li>
-        <li><a href="/rayons/jus">Jus de fruits</a></li>
-      </ol>
-    </nav>
-    """
-
-    assert extract_category_from_product_breadcrumb(html) == "Boissons"
 
 
 def test_normalize_search_result_parses_price_and_keeps_missing_fields():
@@ -432,12 +486,11 @@ def test_mapping_rejects_fabricated_snapshot_without_cache_id(client, auth_heade
 # ── P3: Leclerc + Auchan (Drive) registry, parsers and credentials ────────────
 
 
-def test_store_registry_lists_five_stores_including_leclerc_and_auchan():
+def test_store_registry_lists_four_stores_including_leclerc_and_auchan():
     definitions = list_store_definitions()
     keys = [definition.key for definition in definitions]
-    assert len(keys) == 5
+    assert len(keys) == 4
     assert SupermarketStore.INTERMARCHE in keys
-    assert SupermarketStore.UBEREATS in keys
     assert SupermarketStore.CARREFOUR in keys
     assert SupermarketStore.LECLERC in keys
     assert SupermarketStore.AUCHAN in keys

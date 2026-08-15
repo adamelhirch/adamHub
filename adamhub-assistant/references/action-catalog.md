@@ -89,10 +89,10 @@ Request shape:
   - `input_schema`: (none)
 
 - `supermarket.list_connections` — List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count. Multiple connections per store are allowed (e.g. user + spouse).
-  - `input_schema`: `store`: intermarche|carrefour|ubereats|leclerc|auchan?
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?
 
 - `supermarket.import_connection` — Save a fresh cookie set (or best-effort credentials) for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store. `credentials` ({username, password}) is a best-effort fallback when the store has no captcha/2FA on programmatic login; cookies remain the reliable path.
-  - `input_schema`: `store`: intermarche|carrefour|ubereats|leclerc|auchan, `label`: string, `cookies`: object[]?, `credentials`: object?, `activate`: bool?, `connection_id`: int?
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan, `label`: string, `cookies`: object[]?, `credentials`: object?, `activate`: bool?, `connection_id`: int?
 
 - `supermarket.activate_connection` — Switch the active connection for a store (search/cart/orders will use this account next).
   - `input_schema`: `connection_id`: int
@@ -100,50 +100,8 @@ Request shape:
 - `supermarket.delete_connection` — Delete a saved supermarket connection.
   - `input_schema`: `connection_id`: int
 
-- `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter), 'carrefour', 'leclerc' or 'auchan' (Drive JSON API + cookies; leclerc/auchan endpoints need live validation). For Uber Eats use the dedicated ubereats.search_products action which supports sort and store selection.
+- `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter), 'carrefour', 'leclerc' or 'auchan' (Drive JSON API + cookies; leclerc/auchan endpoints need live validation).
   - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?, `queries`: string[], `max_results`: int?, `promotions_only`: bool?
-
-- `ubereats.list_addresses` — List saved Uber Eats delivery addresses (the active one is_active=true).
-  - `input_schema`: (none)
-
-- `ubereats.geocode_address` — Search a free-text address via OpenStreetMap and return picker candidates with lat/lng. Use this before ubereats.save_address when the user gives a textual address.
-  - `input_schema`: `query`: string, `limit`: int?
-
-- `ubereats.save_address` — Save a delivery address (label + lat/lng + formatted_address). Set activate=true to also write the uev2.loc cookie and refresh the active store list.
-  - `input_schema`: `label`: string, `formatted_address`: string, `subtitle`: string?, `latitude`: float, `longitude`: float, `reference`: string?, `reference_type`: string?, `activate`: bool?
-
-- `ubereats.activate_address` — Switch the active Uber Eats delivery address by id. Updates the uev2.loc cookie. Call ubereats.list_stores afterwards.
-  - `input_schema`: `address_id`: int
-
-- `ubereats.delete_address` — Delete a saved Uber Eats delivery address.
-  - `input_schema`: `address_id`: int
-
-- `ubereats.list_stores` — List grocery stores deliverable to the currently-active address (filtered by known FR brand keywords).
-  - `input_schema`: `limit`: int?
-
-- `ubereats.set_selected_store` — Persist the chosen Uber Eats grocery store. Subsequent ubereats.search_products / add_to_cart calls operate on this store.
-  - `input_schema`: `external_store_id`: string, `store_label`: string, `location_label`: string?
-
-- `ubereats.get_selected_store` — Return the currently-selected Uber Eats store (or null if none).
-  - `input_schema`: (none)
-
-- `ubereats.search_products` — Search inside the selected Uber Eats store. Returns up to ~70 products with cache_id, price_text, image, and the UUIDs needed for cart automation. Use sort_by='price_asc' or 'price_desc' to mirror the website filters.
-  - `input_schema`: `query`: string, `max_results`: int?, `sort_by`: price_asc|price_desc?
-
-- `ubereats.add_to_cart` — Push one search result into the actual Uber Eats cart and mirror it in the local grocery list (deduplicated by external_id). Pass the cache_id returned by ubereats.search_products. Re-adding the same product increments the quantity.
-  - `input_schema`: `cache_id`: int, `quantity`: int?
-
-- `ubereats.list_carts` — Read all active Uber Eats carts (one per store) with their items, quantities and prices. Use include_details=true to fetch item-level data.
-  - `input_schema`: `include_details`: bool?, `store_uuid`: string?
-
-- `ubereats.list_past_orders` — List the user's recent Uber Eats orders (history) with store, completion date, item count.
-  - `input_schema`: `limit`: int?
-
-- `ubereats.import_order_to_pantry` — Import the items of a delivered or active Uber Eats order into the pantry. Accepts a tracking URL (e.g. https://www.ubereats.com/fr/orders/<uuid>) or just the UUID. Items are deduplicated by external_id (incremented if already present). Substitutions are silently reflected (final delivered items, not original cart). Fails with a clear message if the UUID belongs to an order placed by a different account (third-party tracking link) — in that case use ubereats.import_third_party_order instead.
-  - `input_schema`: `tracking_url_or_uuid`: string
-
-- `ubereats.import_third_party_order` — Import items into the pantry FROM A LIST PARSED MANUALLY (typically from screenshots of a friend's Uber Eats tracking page that the user just shared). When the user mentions a friend ordered for them, ASK FOR SCREENSHOTS of the tracking page, READ THEM YOURSELF using your vision capability, then call this action with the extracted items. Each item needs at least name and quantity; price_text is optional but useful.
-  - `input_schema`: `store_label`: string, `items`: [{name: string, quantity: float?, price_text: string?, packaging: string?, category: string?, image_url: string?}], `completed_at`: datetime?
 
 - `grocery.add_item` — Add an item to grocery list
   - `input_schema`: `name`: string, `quantity`: float?, `unit`: string?, `category`: string?, `image_url`: string?, `store_label`: string?, `external_id`: string?, `packaging`: string?, `price_text`: string?, `product_url`: string?, `priority`: int?, `note`: string?

@@ -5,33 +5,55 @@ import base64
 import json
 import os
 import re
-import unicodedata
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from bs4 import BeautifulSoup
 import httpx
 
+# Intermarché serves search as a JSON API:
+#   GET https://www.intermarche.com/api/products?query={json}&ref={pdv}
+# with `query` carrying the keyword, pagination, sort and the promotions-only
+# flag. Prices are embedded in the response (`prices.productPrice`) and are
+# store-specific: the `ref` query param (and the `itm_pdv` cookie) scope the
+# results to the selected store. The endpoint sits behind DataDome, which
+# requires browser-like headers but not a login — prices are public.
+INTERMARCHE_BASE_URL = "https://www.intermarche.com"
+INTERMARCHE_COOKIES_PATH = Path(__file__).resolve().parents[3] / "data" / "cookies_intermarche.json"
 
-CATEGORY_HINTS = {
-    "agrumes": {
-        "agrume",
-        "agrumes",
-        "orange",
-        "oranges",
-        "pamplemousse",
-        "pamplemousses",
-        "citron",
-        "citrons",
-        "clementine",
-        "clementines",
-        "mandarine",
-        "mandarines",
-    },
-    "pommes": {"pomme", "pommes"},
-    "multi fruits": {"multifruit", "multifruits"},
+# sort_by values (API contract) -> JSON `sort` field. `pertinence` is the
+# default relevance order used by the site when no trier/ordre is given.
+INTERMARCHE_SORT_TYPES: dict[str, tuple[str, str | None]] = {
+    "price_asc": ("prix", "croissant"),
+    "price_desc": ("prix", "decroissant"),
+    "unit_price_asc": ("prixkg", "croissant"),
+    "unit_price_desc": ("prixkg", "decroissant"),
 }
+
+# The /api/products endpoint is behind DataDome: it answers 403 with a JS
+# challenge when the request does not look like a real browser. These headers
+# (a coherent Chrome profile, verified against the live endpoint) are required.
+_CHROME_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
+    "Accept-Language": "fr,en;q=0.9",
+    "sec-ch-ua": '"Chromium";v="151", "Not=A?Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "priority": "u=1, i",
+}
+
+INTERMARCHE_DEFAULT_REFERER = f"{INTERMARCHE_BASE_URL}/recherche/"
+
+
+class IntermarcheAuthError(RuntimeError):
+    """Intermarché rejected the current session (DataDome / auth)."""
 
 
 def get_intermarche_proxy_url() -> str | None:
@@ -49,306 +71,8 @@ def normalize_proxy_url(proxy_url: str) -> str:
     return normalized
 
 
-def build_browser_proxy_config(proxy_url: str) -> dict[str, str]:
-    parsed = urllib.parse.urlsplit(normalize_proxy_url(proxy_url))
-    if not parsed.scheme or not parsed.hostname:
-        raise ValueError("Invalid Intermarche proxy URL.")
-
-    server = f"{parsed.scheme}://{parsed.hostname}"
-    if parsed.port:
-        server += f":{parsed.port}"
-
-    proxy: dict[str, str] = {"server": server}
-    if parsed.username:
-        proxy["username"] = urllib.parse.unquote(parsed.username)
-    if parsed.password:
-        proxy["password"] = urllib.parse.unquote(parsed.password)
-    return proxy
-
-
-def extract_category_from_tracking_code(tracking_code: str | None) -> str | None:
-    if not tracking_code:
-        return None
-    try:
-        decoded = base64.b64decode(tracking_code + "===").decode("utf-8", "ignore")
-    except Exception:
-        return None
-
-    family_markers = [
-        "sous-famille",
-        "sous-familles",
-        "famille",
-        "familles",
-        "rayon",
-        "rayons",
-    ]
-    lower = decoded.lower()
-    for marker in family_markers:
-        idx = lower.find(marker)
-        if idx == -1:
-            continue
-        tail = decoded[idx: idx + 300]
-        for stop_marker in [" pour la requête ", " dans la requête "]:
-            stop_idx = tail.lower().find(stop_marker)
-            if stop_idx != -1:
-                tail = tail[:stop_idx]
-                break
-        labels = re.findall(r'"([^"]+)"', tail)
-        labels = [label.strip() for label in labels if label.strip()]
-        if labels:
-            return " / ".join(dict.fromkeys(labels))
-    return None
-
-
-def normalize_category_text(value: str | None) -> str:
-    if not value:
-        return ""
-    normalized = unicodedata.normalize("NFKD", value)
-    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]+", " ", ascii_text.lower()).strip()
-
-
-def tokenize_category_text(value: str | None) -> set[str]:
-    return {token for token in normalize_category_text(value).split() if len(token) > 2}
-
-
-def build_filter_category_lookup(content: str) -> dict[int, str]:
-    match = re.search(
-        r'\\"type\\":\\"categories\\",\\"label\\":\\"categories\\",\\"values\\":\[(?P<values>.*?)\]\},\{\\"type\\":',
-        content,
-        re.DOTALL,
-    )
-    if not match:
-        return {}
-
-    return {
-        int(category_id): label.strip()
-        for category_id, label in re.findall(r'\\"id\\":(\d+),\\"label\\":\\"([^\\"]+)\\"', match.group("values"))
-        if label.strip()
-    }
-
-
-def infer_category_from_name(name: str | None, filter_categories: dict[int, str]) -> str | None:
-    name_tokens = tokenize_category_text(name)
-    if not name_tokens:
-        return None
-
-    best_label: str | None = None
-    best_score = 0
-    second_score = 0
-    for label in dict.fromkeys(filter_categories.values()):
-        label_normalized = normalize_category_text(label)
-        hint_tokens = set()
-        for key, values in CATEGORY_HINTS.items():
-            if key in label_normalized:
-                hint_tokens.update(values)
-        if not hint_tokens:
-            continue
-
-        hint_overlap = len(name_tokens & hint_tokens)
-        exact_match = 1 if label_normalized and label_normalized in normalize_category_text(name) else 0
-        score = hint_overlap * 2 + exact_match * 4
-        if score > best_score:
-            second_score = best_score
-            best_score = score
-            best_label = label
-        elif score > second_score:
-            second_score = score
-
-    if best_score < 2 or best_score == second_score:
-        return None
-    return best_label
-
-
-def extract_category_from_product_breadcrumb(content: str) -> str | None:
-    soup = BeautifulSoup(content, "html.parser")
-    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
-        raw_json = script.string or script.get_text()
-        if not raw_json:
-            continue
-        try:
-            payload = json.loads(raw_json)
-        except json.JSONDecodeError:
-            continue
-
-        candidates = payload if isinstance(payload, list) else [payload]
-        for candidate in candidates:
-            if not isinstance(candidate, dict) or candidate.get("@type") != "BreadcrumbList":
-                continue
-            items = candidate.get("itemListElement")
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                name = (item.get("name") or "").strip()
-                if name:
-                    return name
-
-    breadcrumb_nav = soup.find("nav", attrs={"aria-label": lambda value: value and "fil" in value.lower()})
-    if not breadcrumb_nav:
-        return None
-
-    category_node = breadcrumb_nav.select_one("ol li button") or breadcrumb_nav.select_one("ol li a")
-    if not category_node:
-        return None
-
-    category = category_node.get_text(" ", strip=True)
-    return category or None
-
-
-def build_product_category_lookup(content: str) -> dict[str, str]:
-    filter_categories = build_filter_category_lookup(content)
-    lookup: dict[str, str] = {}
-    pattern = re.compile(
-        r'\\"url\\":\\"(?P<url>/produit/[^\\"]+)\\".*?'
-        r'\\"famillyId\\":(?P<family>\d+),\\"subFamillyId\\":(?P<subfamily>\d+),\\"departmentId\\":(?P<department>\d+),'
-        r'\\"trackingCode\\":\\"(?P<tracking>[^\\"]+)\\"',
-        re.DOTALL,
-    )
-    for match in pattern.finditer(content):
-        product_url = f"https://www.intermarche.com{match.group('url').replace('\\/', '/')}"
-        category = None
-        for category_id in (
-            int(match.group("subfamily")),
-            int(match.group("family")),
-            int(match.group("department")),
-        ):
-            category = filter_categories.get(category_id)
-            if category:
-                break
-        if not category:
-            category = extract_category_from_tracking_code(match.group("tracking"))
-        if not category:
-            category = infer_category_from_name(match.group("url"), filter_categories)
-        if category:
-            lookup[product_url] = category
-    return lookup
-
-
-async def fetch_product_breadcrumb_category(page, product_url: str) -> str | None:
-    await page.goto(product_url, wait_until="domcontentloaded")
-    try:
-        await page.wait_for_load_state("load", timeout=10_000)
-    except Exception:
-        pass
-    try:
-        await page.wait_for_function(
-            """
-            () => {
-              return Array.from(document.querySelectorAll("script[type='application/ld+json']"))
-                .some((node) => node.textContent?.includes("BreadcrumbList"));
-            }
-            """,
-            timeout=10_000,
-        )
-    except Exception:
-        await asyncio.sleep(5)
-
-    return extract_category_from_product_breadcrumb(await page.content())
-
-
-async def hydrate_product_categories_from_detail_pages(context, items: list[dict[str, str | None]]) -> None:
-    pending = [item for item in items if item.get("product_url") and not item.get("category")]
-    if not pending:
-        return
-
-    detail_page = await context.new_page()
-    try:
-        for item in pending:
-            try:
-                category = await fetch_product_breadcrumb_category(detail_page, item["product_url"])
-                if category:
-                    item["category"] = category
-            except Exception:
-                continue
-    finally:
-        await detail_page.close()
-
-
-def parse_intermarche_html(content: str, max_results: int = 10) -> list[dict[str, str | None]]:
-    soup = BeautifulSoup(content, "html.parser")
-    category_lookup = build_product_category_lookup(content)
-    items = soup.find_all("div", attrs={"data-testid": "product-layout"})
-    if not items:
-        items = soup.find_all("div", class_=lambda classes: classes and "productlayout" in classes.lower())
-
-    results: list[dict[str, str | None]] = []
-    for item in items[:max_results]:
-        brand_elem = item.find("p", class_=lambda classes: classes and "font-bold" in classes and "font-open-sans" in classes)
-        brand = brand_elem.get_text(strip=True) if brand_elem else None
-
-        name_elem = item.find("h2", class_=lambda classes: classes and "title" in classes.lower())
-        raw_name = name_elem.get_text(strip=True) if name_elem else "Produit inconnu"
-        name = f"{brand} - {raw_name}" if brand and raw_name != "Produit inconnu" else raw_name
-
-        price_elem = item.find("div", attrs={"data-testid": "default"})
-        if not price_elem:
-            price_elem = item.find("div", class_=lambda classes: classes and "price" in classes.lower())
-        price = price_elem.get_text(strip=True) if price_elem else None
-
-        packaging_elem = item.find("p", class_=lambda classes: classes and "packaging" in classes.lower())
-        packaging = packaging_elem.get_text(strip=True) if packaging_elem else None
-
-        img_elem = item.find("img", class_=lambda classes: classes and "image" in classes.lower()) or item.find("img")
-        image_url = img_elem.get("src") if img_elem else None
-
-        link_elem = item.find("a", class_=lambda classes: classes and "productcard__link" in classes.lower()) or item.find("a", href=True)
-        href = link_elem.get("href") if link_elem else None
-        external_id = href.rstrip("/").split("/")[-1] if href else None
-        product_url = None
-        if href:
-            product_url = href if href.startswith("http") else f"https://www.intermarche.com{href}"
-        category = category_lookup.get(product_url) if product_url else None
-
-        results.append(
-            {
-                "id": external_id,
-                "name": name,
-                "brand": brand,
-                "category": category,
-                "packaging": packaging,
-                "price": price,
-                "image": image_url,
-                "product_url": product_url,
-                "store": "Intermarché",
-            }
-        )
-
-    return results
-
-
-def requires_intermarche_store_selection(content: str) -> bool:
-    soup = BeautifulSoup(content, "html.parser")
-    page_text = soup.get_text(" ", strip=True).lower()
-    return (
-        "sélectionner un magasin" in page_text
-        or "selectionner un magasin" in page_text
-        or "storelocatore.switchbtn.add-list" in page_text
-    )
-
-
-def is_intermarche_bot_challenge(content: str) -> bool:
-    lowered = content.lower()
-    return (
-        "geo.captcha-delivery.com/interstitial" in lowered
-        or "datadome device check" in lowered
-        or "captcha-delivery.com" in lowered
-    )
-
-
-def is_camoufox_launch_failure(exc: Exception) -> bool:
-    lowered = str(exc).lower()
-    return (
-        "failed to launch the browser process" in lowered
-        or "browsertype.launch" in lowered
-        or "libgtk-3.so.0" in lowered
-        or "couldn't load xpcom" in lowered
-    )
-
-
-def load_intermarche_cookies() -> list[dict[str, Any]]:
-    cookies_path = Path(__file__).resolve().parents[3] / "data" / "cookies_intermarche.json"
+def load_intermarche_cookies(path: Path | None = None) -> list[dict[str, Any]]:
+    cookies_path = path or INTERMARCHE_COOKIES_PATH
     if not cookies_path.exists():
         return []
 
@@ -395,81 +119,308 @@ def build_intermarche_cookie_jar(cookies: list[dict[str, Any]]) -> httpx.Cookies
     return jar
 
 
-async def fetch_product_breadcrumb_category_http(client: httpx.AsyncClient, product_url: str) -> str | None:
-    response = await client.get(product_url)
-    response.raise_for_status()
-    return extract_category_from_product_breadcrumb(response.text)
+def extract_pdv_ref_from_cookies(cookies: list[dict[str, Any]]) -> str | None:
+    """Recover the selected store id (`ref`) from the session cookies.
+
+    The browser stores the selection in the `itm_pdv` cookie as URL-encoded
+    JSON (`{"ref":"11131",...}`); `novaParams` carries the same id under
+    `pdvRef`. Returns None when no store is selected — the API still answers,
+    but from the default catalog instead of the user's store.
+    """
+    for cookie_name, ref_key in (("itm_pdv", "ref"), ("novaParams", "pdvRef")):
+        for cookie in cookies:
+            if cookie.get("name") != cookie_name:
+                continue
+            value = (cookie.get("value") or "").strip()
+            if not value:
+                continue
+            try:
+                payload = json.loads(urllib.parse.unquote(value))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                ref = payload.get(ref_key)
+                if ref:
+                    return str(ref)
+    return None
 
 
-async def hydrate_product_categories_from_detail_pages_http(
-    client: httpx.AsyncClient, items: list[dict[str, str | None]]
-) -> None:
-    pending = [item for item in items if item.get("product_url") and not item.get("category")]
-    if not pending:
-        return
+def build_search_query(
+    keyword: str,
+    page: int = 1,
+    per_page: int = 40,
+    sort_by: str | None = None,
+    promotions_only: bool = False,
+) -> dict[str, Any]:
+    """Compose the JSON `query` payload expected by /api/products.
 
-    for item in pending:
-        try:
-            category = await fetch_product_breadcrumb_category_http(client, str(item["product_url"]))
-        except Exception:
-            continue
-        if category:
-            item["category"] = category
+    The site encodes the search UI (keyword, page, sort `trier`/`ordre`,
+    promotions-only switch) in this single JSON document.
+    """
+    if sort_by in INTERMARCHE_SORT_TYPES:
+        sort_type, sort_direction = INTERMARCHE_SORT_TYPES[sort_by]
+    else:
+        sort_type, sort_direction = "pertinence", None
 
-
-async def search_intermarche_via_http(
-    queries: list[str],
-    max_results: int,
-    cookies: list[dict[str, Any]],
-) -> dict[str, list[dict[str, str | None]]]:
-    results: dict[str, list[dict[str, str | None]]] = {}
-    proxy_url = get_intermarche_proxy_url()
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+    return {
+        "keyword": keyword,
+        "slugs": [],
+        "categoryId": "",
+        "page": page,
+        "perPage": per_page,
+        "filters": [],
+        "apiFilters": [],
+        "sort": {"type": sort_type, "direction": sort_direction},
+        "headingId": "-1",
+        "catalogs": ["PDV"],
+        "isPromo": bool(promotions_only),
+        "type": "SEARCH",
     }
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        headers=headers,
-        cookies=build_intermarche_cookie_jar(cookies),
-        proxy=proxy_url,
-        timeout=httpx.Timeout(30.0),
-        trust_env=not proxy_url,
-    ) as client:
-        for query in queries:
-            encoded_query = urllib.parse.quote(query)
-            search_url = f"https://www.intermarche.com/recherche/{encoded_query}"
-            response = await client.get(search_url)
-            content = response.text
-            dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
-            dump_path.parent.mkdir(parents=True, exist_ok=True)
-            dump_path.write_text(content, encoding="utf-8")
 
-            if response.status_code in {401, 403}:
-                raise RuntimeError(
-                    "Intermarché rejected the current HTTP session. "
-                    "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
-                )
-            response.raise_for_status()
-            if is_intermarche_bot_challenge(content):
-                raise RuntimeError(
-                    "Intermarché blocked the current session with DataDome. "
-                    "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
-                )
-            if requires_intermarche_store_selection(content):
-                raise RuntimeError(
-                    "Intermarché requires a selected store before search results can load. "
-                    "Refresh `data/cookies_intermarche.json` after selecting a store."
-                )
 
-            query_results = parse_intermarche_html(content, max_results=max_results)
-            await hydrate_product_categories_from_detail_pages_http(client, query_results)
-            results[query] = query_results
+def _product_price(product: dict[str, Any]) -> str | None:
+    prices = product.get("prices") if isinstance(product.get("prices"), dict) else None
+    if not prices:
+        return None
+    product_price = prices.get("productPrice")
+    if not isinstance(product_price, dict):
+        return None
+    concatenated = product_price.get("concatenated")
+    if concatenated:
+        return str(concatenated)
+    value = product_price.get("value")
+    currency = product_price.get("currency") or "€"
+    if value is None:
+        return None
+    rendered = str(value).replace(".", ",")
+    return f"{rendered}{currency}"
 
+
+def _product_image(informations: dict[str, Any]) -> str | None:
+    image = informations.get("image")
+    if isinstance(image, dict) and image.get("src"):
+        return str(image["src"])
+    all_images = informations.get("allImages")
+    if isinstance(all_images, list):
+        for entry in all_images:
+            if isinstance(entry, dict) and entry.get("src"):
+                return str(entry["src"])
+    return None
+
+
+def _category_id_for(product: dict[str, Any]) -> int | None:
+    """Deepest non-zero category id: subFamily > family > department."""
+    for key in ("subFamillyId", "famillyId", "departmentId"):
+        value = product.get(key)
+        if value:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def extract_category_from_tracking_code(tracking_code: str | None) -> str | None:
+    if not tracking_code:
+        return None
+    try:
+        decoded = base64.b64decode(tracking_code + "===").decode("utf-8", "ignore")
+    except Exception:
+        return None
+
+    family_markers = [
+        "sous-famille",
+        "sous-familles",
+        "famille",
+        "familles",
+        "rayon",
+        "rayons",
+    ]
+    lower = decoded.lower()
+    for marker in family_markers:
+        idx = lower.find(marker)
+        if idx == -1:
+            continue
+        tail = decoded[idx: idx + 300]
+        for stop_marker in [" pour la requête ", " dans la requête "]:
+            stop_idx = tail.lower().find(stop_marker)
+            if stop_idx != -1:
+                tail = tail[:stop_idx]
+                break
+        labels = re.findall(r'"([^"]+)"', tail)
+        labels = [label.strip() for label in labels if label.strip()]
+        if labels:
+            return " / ".join(dict.fromkeys(labels))
+    return None
+
+
+def _product_category(
+    product: dict[str, Any],
+    category_lookup: dict[int, str] | None,
+) -> str | None:
+    if category_lookup:
+        category_id = _category_id_for(product)
+        if category_id is not None and category_id in category_lookup:
+            return category_lookup[category_id]
+    return extract_category_from_tracking_code(product.get("trackingCode"))
+
+
+def parse_intermarche_products(
+    payload: dict[str, Any] | list[dict[str, Any]],
+    max_results: int = 10,
+    category_lookup: dict[int, str] | None = None,
+) -> list[dict[str, str | None]]:
+    """Map a /api/products payload to the raw-item format of normalize_search_result.
+
+    Skips editorial tiles (recipes/ads mixed into the results) that carry no
+    product identifier. The category is resolved from the /api/categories tree
+    when available, falling back to the base64 `trackingCode` label.
+    """
+    products = payload.get("products") if isinstance(payload, dict) else payload
+    if not isinstance(products, list):
+        return []
+
+    results: list[dict[str, str | None]] = []
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        external_id = str(product.get("ean") or product.get("id") or "").strip() or None
+        if external_id is None:
+            continue
+
+        informations = product.get("informations") if isinstance(product.get("informations"), dict) else {}
+        name = (informations.get("title") or "").strip() or "Produit inconnu"
+        brand = (informations.get("brand") or "").strip() or None
+        packaging = (informations.get("packaging") or "").strip() or None
+
+        product_url = None
+        url = product.get("url")
+        if url:
+            product_url = (
+                url if str(url).startswith("http") else f"{INTERMARCHE_BASE_URL}{url}"
+            )
+
+        results.append(
+            {
+                "id": external_id,
+                "name": name,
+                "brand": brand,
+                "category": _product_category(product, category_lookup),
+                "packaging": packaging,
+                "price": _product_price(product),
+                "image": _product_image(informations),
+                "product_url": product_url,
+            }
+        )
+        if len(results) >= max_results:
+            break
     return results
+
+
+def _walk_category_tree(nodes: list[dict[str, Any]], path: list[str], lookup: dict[int, str]) -> None:
+    for node in nodes:
+        title = node.get("title")
+        node_path = path + ([title] if title else [])
+        try:
+            node_id = int(node["id"])
+        except (KeyError, TypeError, ValueError):
+            node_id = None
+        if node_id is not None and node_path:
+            lookup[node_id] = " / ".join(node_path)
+        children = node.get("children") if isinstance(node.get("children"), list) else []
+        _walk_category_tree(children, node_path, lookup)
+
+
+def parse_intermarche_category_tree(tree: list[dict[str, Any]]) -> dict[int, str]:
+    """Flatten the /api/categories tree into a category id -> path lookup."""
+    lookup: dict[int, str] = {}
+    _walk_category_tree(tree, [], lookup)
+    return lookup
+
+
+async def fetch_intermarche_categories(
+    client: httpx.AsyncClient,
+    pdv_ref: str | None = None,
+) -> dict[int, str]:
+    """Fetch the store's category tree (/api/categories) as an id -> path map."""
+    params: dict[str, Any] = {"maxDepth": 4}
+    if pdv_ref:
+        params["pdvRef"] = pdv_ref
+    response = await client.get(
+        f"{INTERMARCHE_BASE_URL}/api/categories",
+        params=params,
+        headers={**_CHROME_HEADERS, "Referer": INTERMARCHE_DEFAULT_REFERER},
+    )
+    response.raise_for_status()
+    tree = response.json().get("tree")
+    if not isinstance(tree, list):
+        return {}
+    return parse_intermarche_category_tree(tree)
+
+
+def is_intermarche_bot_challenge(content: str) -> bool:
+    lowered = content.lower()
+    return (
+        "geo.captcha-delivery.com/interstitial" in lowered
+        or "datadome device check" in lowered
+        or "captcha-delivery.com" in lowered
+    )
+
+
+async def _fetch_products_page(
+    client: httpx.AsyncClient,
+    query: str,
+    pdv_ref: str | None,
+    page: int = 1,
+    per_page: int = 40,
+    sort_by: str | None = None,
+    promotions_only: bool = False,
+) -> list[dict[str, Any]]:
+    search_query = build_search_query(
+        query, page=page, per_page=per_page, sort_by=sort_by, promotions_only=promotions_only
+    )
+    params = {"query": json.dumps(search_query, separators=(",", ":"), ensure_ascii=False)}
+    if pdv_ref:
+        params["ref"] = pdv_ref
+    url = f"{INTERMARCHE_BASE_URL}/api/products"
+    headers = {**_CHROME_HEADERS, "Referer": f"{INTERMARCHE_DEFAULT_REFERER}{urllib.parse.quote(query)}"}
+
+    # The API occasionally returns an empty result set or a transient DataDome
+    # challenge (intermittent for cookie-less sessions); retry a couple of
+    # times before giving up on a query.
+    last_error: Exception | None = None
+    for _ in range(3):
+        try:
+            response = await client.get(url, params=params, headers=headers)
+        except httpx.HTTPError as exc:
+            last_error = exc
+            await asyncio.sleep(0.5)
+            continue
+        if response.status_code in {401, 403} or is_intermarche_bot_challenge(response.text):
+            last_error = IntermarcheAuthError(
+                "Intermarché rejected the current session (DataDome or expired cookies). "
+                "Refresh `data/cookies_intermarche.json` from a browser session "
+                "with a store selected."
+            )
+            await asyncio.sleep(1.0)
+            continue
+        response.raise_for_status()
+        try:
+            products = response.json().get("products")
+        except ValueError:
+            last_error = IntermarcheAuthError(
+                "Intermarché returned an unexpected response (DataDome). "
+                "Refresh `data/cookies_intermarche.json` from a browser session "
+                "with a store selected."
+            )
+            await asyncio.sleep(0.5)
+            continue
+        if isinstance(products, list) and products:
+            return products
+        await asyncio.sleep(0.5)
+    if last_error is not None:
+        raise last_error
+    return []
 
 
 async def search_intermarche(
@@ -479,135 +430,54 @@ async def search_intermarche(
     promotions_only: bool = False,
     cookies: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[dict[str, str | None]]]:
+    """Search the Intermarché JSON API (/api/products) for each query.
+
+    The store id is recovered from the session cookies (``itm_pdv``) and passed
+    as the ``ref`` query param; without a selected store the API still returns
+    results from its default catalog. ``sort_by`` and ``promotions_only`` map to
+    the JSON ``sort`` and ``isPromo`` fields of the query payload.
+    """
     if cookies is None:
         cookies = load_intermarche_cookies()
     proxy_url = get_intermarche_proxy_url()
-    initial_http_error: Exception | None = None
-    if cookies and not sort_by and not promotions_only:
-        try:
-            return await search_intermarche_via_http(queries, max_results, cookies)
-        except Exception as exc:
-            initial_http_error = exc
-
-    try:
-        from camoufox.async_api import AsyncCamoufox
-    except ImportError as exc:
-        raise RuntimeError(
-            "Camoufox is required for live Intermarché scraping. "
-            "Install the `camoufox[geoip]` package and run `python -m camoufox fetch`."
-        ) from exc
+    pdv_ref = extract_pdv_ref_from_cookies(cookies)
 
     results: dict[str, list[dict[str, str | None]]] = {}
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        cookies=build_intermarche_cookie_jar(cookies),
+        proxy=proxy_url,
+        timeout=httpx.Timeout(30.0),
+        trust_env=not proxy_url,
+    ) as client:
+        try:
+            category_lookup = await fetch_intermarche_categories(client, pdv_ref)
+        except Exception:
+            category_lookup = {}
 
-    try:
-        launch_options: dict[str, Any] = {
-            "headless": True,
-            "geoip": True,
-            "locale": "fr-FR",
-            "os": "macos",
-        }
-        if proxy_url:
-            launch_options["proxy"] = build_browser_proxy_config(proxy_url)
-        async with AsyncCamoufox(
-            **launch_options,
-        ) as browser:
-            context = await browser.new_context(locale="fr-FR", timezone_id="Europe/Paris")
-            if cookies:
-                await context.add_cookies(cookies)
-
-            page = await context.new_page()
-            await page.goto("https://www.intermarche.com/", wait_until="domcontentloaded")
-            await asyncio.sleep(2)
-
-            try:
-                accept_button = await page.wait_for_selector("button#agree", timeout=3_000)
-                if accept_button:
-                    await accept_button.click()
-            except Exception:
-                pass
-
-            sort_map = {
-                "prix_croissant": "Prix croissant",
-                "prix_decroissant": "Prix décroissant",
-                "prix_kg_croissant": "Prix/kg ou prix/l croissant",
-                "prix_kg_decroissant": "Prix/kg ou prix/l décroissant",
-            }
-
-            for query in queries:
-                encoded_query = urllib.parse.quote(query)
-                search_url = f"https://www.intermarche.com/recherche/{encoded_query}"
-                await page.goto(search_url, wait_until="domcontentloaded")
-                await asyncio.sleep(4)
-
-                if promotions_only:
-                    try:
-                        promo_p = page.locator('p:has-text("Promotions")')
-                        if await promo_p.count() > 0:
-                            promo_switch = promo_p.first.locator('xpath=../../..//input[@role="switch"]')
-                            if await promo_switch.count() > 0:
-                                await promo_switch.first.click(force=True)
-                                await asyncio.sleep(2)
-                    except Exception:
-                        pass
-
-                if sort_by:
-                    sort_text = sort_map.get(sort_by, "Pertinence")
-                    try:
-                        sort_button = page.locator("button#stime-select-button")
-                        if await sort_button.count() > 0:
-                            await sort_button.first.click()
-                            await asyncio.sleep(1)
-                            sort_option = page.locator(f'text="{sort_text}"')
-                            if await sort_option.count() > 0:
-                                await sort_option.first.click()
-                                await asyncio.sleep(2)
-                            else:
-                                await page.keyboard.press("Escape")
-                    except Exception:
-                        pass
-
-                content = await page.content()
-                dump_path = Path(__file__).resolve().parents[3] / "output" / "intermarche_results.html"
-                dump_path.parent.mkdir(parents=True, exist_ok=True)
-                dump_path.write_text(content, encoding="utf-8")
-                if is_intermarche_bot_challenge(content):
-                    raise RuntimeError(
-                        "Intermarché blocked the current session with DataDome. "
-                        "Refresh `data/cookies_intermarche.json` from a browser session that can open the search page."
-                    )
-                if requires_intermarche_store_selection(content):
-                    raise RuntimeError(
-                        "Intermarché requires a selected store before search results can load. "
-                        "Provide a valid `data/cookies_intermarche.json` file in the runtime image."
-                    )
-                query_results = parse_intermarche_html(content, max_results=max_results)
-                await hydrate_product_categories_from_detail_pages(context, query_results)
-                results[query] = query_results
-
-            await context.close()
-    except RuntimeError:
-        raise
-    except Exception as exc:
-        if initial_http_error is not None:
-            raise RuntimeError(
-                "Intermarché blocked both the cookie-based HTTP fallback and the browser session. "
-                "Refresh `data/cookies_intermarche.json` from a working browser session and retry."
-            ) from exc
-        if cookies and not sort_by and not promotions_only:
-            return await search_intermarche_via_http(queries, max_results, cookies)
-        if is_camoufox_launch_failure(exc):
-            raise RuntimeError(
-                "Camoufox could not launch in the current runtime. "
-                "Install the missing Firefox runtime libraries in the container "
-                "(for example `libgtk-3-0`) or provide `data/cookies_intermarche.json` "
-                "and retry without promotions filtering."
-            ) from exc
-        raise
-
+        for query in queries:
+            products = await _fetch_products_page(
+                client,
+                query,
+                pdv_ref,
+                per_page=max_results,
+                sort_by=sort_by,
+                promotions_only=promotions_only,
+            )
+            results[query] = parse_intermarche_products(
+                products, max_results=max_results, category_lookup=category_lookup
+            )
     return results
 
 
 if __name__ == "__main__":
-    html_path = os.environ.get("INTERMARCHE_HTML_PATH")
-    if html_path:
-        print(json.dumps(parse_intermarche_html(Path(html_path).read_text(encoding="utf-8")), indent=2, ensure_ascii=False))
+    import sys
+
+    query = sys.argv[1] if len(sys.argv) > 1 else "lait"
+    print(
+        json.dumps(
+            asyncio.run(search_intermarche(queries=[query], max_results=10)),
+            indent=2,
+            ensure_ascii=False,
+        )
+    )

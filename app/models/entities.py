@@ -33,7 +33,6 @@ class AccountType(str, Enum):
 
 class SupermarketStore(str, Enum):
     INTERMARCHE = "intermarche"
-    UBEREATS = "ubereats"
     CARREFOUR = "carrefour"
     LECLERC = "leclerc"
     AUCHAN = "auchan"
@@ -550,20 +549,6 @@ class SupermarketConnection(SQLModel, table=True):
     cookies_encrypted: str  # Fernet-encrypted JSON list of cookie dicts
     is_active: bool = Field(default=False, index=True)
     last_used_at: datetime | None = None
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
-
-
-class UbereatsAddress(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    label: str
-    formatted_address: str
-    subtitle: str | None = None
-    latitude: float
-    longitude: float
-    reference: str | None = None
-    reference_type: str = Field(default="GOOGLE_PLACES")
-    is_active: bool = Field(default=False, index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
