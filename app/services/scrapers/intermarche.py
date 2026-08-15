@@ -310,6 +310,7 @@ def parse_intermarche_products(
                 "price": _product_price(product),
                 "image": _product_image(informations),
                 "product_url": product_url,
+                "store": "Intermarché",
             }
         )
         if len(results) >= max_results:

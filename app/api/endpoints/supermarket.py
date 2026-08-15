@@ -114,7 +114,10 @@ def list_supported_stores() -> list[SupermarketStoreRead]:
             supports_search=definition.supports_search,
             supports_mapping=definition.supports_mapping,
             supports_cart_automation=definition.supports_cart_automation,
-            supports_promotions_filter=definition.supports_promotions_filter,
+            supports_sort=definition.supports_sort,
+            supports_promotions=definition.supports_promotions,
+            requires_store_selection=definition.requires_store_selection,
+            requires_login=definition.requires_login,
         )
         for definition in list_store_definitions()
     ]
