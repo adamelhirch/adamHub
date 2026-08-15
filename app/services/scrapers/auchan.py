@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
+
+from app.services.scrapers.proxy_session import ProxySession
 
 # Auchan serves search as server-rendered HTML at /recherche?text={query}.
 # Product cards are `<article class="product-thumbnail" data-id="{uuid}">`
@@ -85,21 +86,6 @@ def _journey_update_payload(context: AuchanStoreContext, journey_id: str) -> dic
         "journeyId": journey_id,
     }
     return payload
-
-
-def get_auchan_proxy_url() -> str | None:
-    for key in ("ADAMHUB_AUCHAN_PROXY_URL", "AUCHAN_PROXY_URL"):
-        value = (os.environ.get(key) or "").strip()
-        if value:
-            return _normalize_proxy_url(value)
-    return None
-
-
-def _normalize_proxy_url(proxy_url: str) -> str:
-    normalized = proxy_url.strip()
-    if "://" not in normalized:
-        normalized = f"http://{normalized}"
-    return normalized
 
 
 def load_auchan_cookies(path: Path | None = None) -> list[dict[str, Any]]:
@@ -312,8 +298,7 @@ def _build_json_headers(referer: str) -> dict[str, str]:
     }
 
 
-def _build_client(cookies: list[dict[str, Any]]) -> httpx.AsyncClient:
-    proxy_url = get_auchan_proxy_url()
+def _build_client(cookies: list[dict[str, Any]], proxy_url: str | None) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         cookies=build_auchan_cookie_jar(cookies),
         proxy=proxy_url,
@@ -346,14 +331,23 @@ async def get_auchan_journey(cookies: list[dict[str, Any]]) -> dict[str, Any]:
     """Fetch the current journey (selected store context) for the session."""
     if not cookies:
         raise AuchanAuthError("No Auchan cookies on disk.")
-    async with _build_client(cookies) as client:
-        response = await client.get(
+    scope = "auchan:journey"
+    session = ProxySession(scope, lambda proxy_url: _build_client(cookies, proxy_url))
+    try:
+        response = await session.client.get(
             f"{AUCHAN_BASE_URL}/journey",
             headers=_build_json_headers(f"{AUCHAN_BASE_URL}/"),
         )
         _raise_for_auth(response)
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+        session.release(ok=True)
+        return payload
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
 
 
 async def select_auchan_store(
@@ -369,8 +363,17 @@ async def select_auchan_store(
         cookies = load_auchan_cookies()
     if not cookies:
         raise AuchanAuthError("No Auchan cookies on disk.")
-    async with _build_client(cookies) as client:
-        return await _apply_auchan_store_context(client, context)
+    scope = "auchan:select-store"
+    session = ProxySession(scope, lambda proxy_url: _build_client(cookies, proxy_url))
+    try:
+        result = await _apply_auchan_store_context(session.client, context)
+        session.release(ok=True)
+        return result
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
 
 
 async def _apply_auchan_store_context(
@@ -449,15 +452,24 @@ async def list_auchan_offering_contexts(
         "Accept": "application/crest",
         "x-crest-renderer": "journey-renderer",
     }
-    async with _build_client(cookies) as client:
-        response = await client.get(
+    scope = f"auchan:offering-contexts:{zipcode}"
+    session = ProxySession(scope, lambda proxy_url: _build_client(cookies, proxy_url))
+    try:
+        response = await session.client.get(
             f"{AUCHAN_BASE_URL}/offering-contexts",
             params=params,
             headers=headers,
         )
         _raise_for_auth(response)
         response.raise_for_status()
-        return parse_auchan_offering_contexts(response.text)
+        payload = parse_auchan_offering_contexts(response.text)
+        session.release(ok=True)
+        return payload
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
 
 
 async def search_auchan(
@@ -487,15 +499,17 @@ async def search_auchan(
 
     sort_key = AUCHAN_SORT_KEYS.get(sort_by) if sort_by else None
 
+    scope = f"auchan:{json.dumps(queries, ensure_ascii=False)}"
+    session = ProxySession(scope, lambda proxy_url: _build_client(cookies, proxy_url))
     results: dict[str, list[dict[str, str | None]]] = {}
-    async with _build_client(cookies) as client:
+    try:
         if store_selection is not None:
-            await _apply_auchan_store_context(client, store_selection)
+            await _apply_auchan_store_context(session.client, store_selection)
         for query in queries:
             params: dict[str, Any] = {"text": query}
             if sort_key:
                 params["sort"] = sort_key
-            response = await client.get(
+            response = await session.client.get(
                 f"{AUCHAN_BASE_URL}/recherche",
                 params=params,
                 headers=_build_headers(f"{AUCHAN_BASE_URL}/"),
@@ -505,4 +519,10 @@ async def search_auchan(
             results[query] = parse_auchan_search_html(
                 response.text, max_results=max_results
             )
+        session.release(ok=True)
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
     return results

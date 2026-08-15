@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from app.services.scrapers.proxy_session import ProxySession
 
 
 CARREFOUR_BASE_URL = "https://www.carrefour.fr"
@@ -36,21 +37,6 @@ FLAG_CATEGORY_HINTS: dict[str, str] = {
 
 class CarrefourAuthError(RuntimeError):
     """Cookies are missing or rejected by Carrefour."""
-
-
-def get_carrefour_proxy_url() -> str | None:
-    for key in ("ADAMHUB_CARREFOUR_PROXY_URL", "CARREFOUR_PROXY_URL"):
-        value = (os.environ.get(key) or "").strip()
-        if value:
-            return _normalize_proxy_url(value)
-    return None
-
-
-def _normalize_proxy_url(proxy_url: str) -> str:
-    normalized = proxy_url.strip()
-    if "://" not in normalized:
-        normalized = f"http://{normalized}"
-    return normalized
 
 
 def load_carrefour_cookies(path: Path | None = None) -> list[dict[str, Any]]:
@@ -358,6 +344,105 @@ def _raise_for_auth(response: httpx.Response) -> None:
         )
 
 
+def _build_carrefour_client(
+    cookies: list[dict[str, Any]],
+    proxy_url: str | None,
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=CARREFOUR_BASE_URL,
+        cookies=build_carrefour_cookie_jar(cookies),
+        proxy=proxy_url,
+        timeout=httpx.Timeout(30.0),
+        trust_env=not proxy_url,
+        follow_redirects=False,
+    )
+
+
+async def _search_carrefour_query(
+    session: ProxySession,
+    query: str,
+    sort_key: str | None,
+    max_results: int,
+    promotions_only: bool,
+) -> list[dict[str, str | None]]:
+    referer = f"{CARREFOUR_BASE_URL}/"
+
+    params: dict[str, str] = {"q": query}
+    if sort_key:
+        params["sort"] = sort_key
+
+    # The catalog search endpoint is served as JSON when requested with
+    # XHR headers (observed in HAR: pages 2-19 + sort variants return
+    # application/json). The JSON payload carries the full product data
+    # (price, packaging, image, category) directly.
+    response = await session.client.get(
+        "/s",
+        params=params,
+        headers=_build_headers(referer, json_request=True),
+    )
+    _raise_for_auth(response)
+    response.raise_for_status()
+
+    try:
+        payload = response.json()
+    except json.JSONDecodeError as exc:
+        raise CarrefourAuthError(
+            "Carrefour returned a non-JSON response for the search query. "
+            "Cookies are likely stale — re-export `data/cookies_carrefour.json`."
+        ) from exc
+
+    items = parse_carrefour_search_json(
+        payload, max_results=max_results, promotions_only=promotions_only
+    )
+
+    # Follow pagination (up to max_results) via the links.next chain.
+    collected: dict[str, dict[str, str | None]] = {item["id"]: item for item in items}
+    page = 2
+    while len(collected) < max_results and page <= 20:
+        if isinstance(payload, dict):
+            links = payload.get("links") or {}
+            next_link = links.get("next") if isinstance(links, dict) else None
+        else:
+            next_link = None
+        if not isinstance(next_link, str) or not next_link:
+            break
+
+        next_params = dict(params)
+        parsed = urllib.parse.urlparse(next_link)
+        next_page = urllib.parse.parse_qs(parsed.query).get("page")
+        if next_page:
+            page = int(next_page[0])
+        else:
+            break
+        next_params["page"] = str(page)
+        response = await session.client.get(
+            "/s",
+            params=next_params,
+            headers=_build_headers(referer, json_request=True),
+        )
+        _raise_for_auth(response)
+        response.raise_for_status()
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise CarrefourAuthError(
+                "Carrefour returned a non-JSON response for the search page. "
+                "Cookies are likely stale — re-export `data/cookies_carrefour.json`."
+            ) from exc
+
+        page_items = parse_carrefour_search_json(
+            payload, max_results=max_results, promotions_only=promotions_only
+        )
+        for item in page_items:
+            if item["id"] not in collected:
+                collected[item["id"]] = item
+                if len(collected) >= max_results:
+                    break
+        page += 1
+
+    return list(collected.values())[:max_results]
+
+
 async def search_carrefour(
     queries: list[str],
     max_results: int = 30,
@@ -375,91 +460,18 @@ async def search_carrefour(
 
     sort_key = CARREFOUR_SORT_KEYS.get(sort_by) if sort_by else None
 
-    proxy_url = get_carrefour_proxy_url()
+    scope = f"carrefour:{json.dumps(queries, ensure_ascii=False)}"
+    session = ProxySession(scope, lambda proxy_url: _build_carrefour_client(cookies, proxy_url))
     results: dict[str, list[dict[str, str | None]]] = {}
-    async with httpx.AsyncClient(
-        base_url=CARREFOUR_BASE_URL,
-        cookies=build_carrefour_cookie_jar(cookies),
-        proxy=proxy_url,
-        timeout=httpx.Timeout(30.0),
-        trust_env=not proxy_url,
-        follow_redirects=False,
-    ) as client:
+    try:
         for query in queries:
-            referer = f"{CARREFOUR_BASE_URL}/"
-
-            params: dict[str, str] = {"q": query}
-            if sort_key:
-                params["sort"] = sort_key
-
-            # The catalog search endpoint is served as JSON when requested with
-            # XHR headers (observed in HAR: pages 2-19 + sort variants return
-            # application/json). The JSON payload carries the full product data
-            # (price, packaging, image, category) directly.
-            response = await client.get(
-                "/s",
-                params=params,
-                headers=_build_headers(referer, json_request=True),
+            results[query] = await _search_carrefour_query(
+                session, query, sort_key, max_results, promotions_only
             )
-            _raise_for_auth(response)
-            response.raise_for_status()
-
-            try:
-                payload = response.json()
-            except json.JSONDecodeError as exc:
-                raise CarrefourAuthError(
-                    "Carrefour returned a non-JSON response for the search query. "
-                    "Cookies are likely stale — re-export `data/cookies_carrefour.json`."
-                ) from exc
-
-            items = parse_carrefour_search_json(
-                payload, max_results=max_results, promotions_only=promotions_only
-            )
-
-            # Follow pagination (up to max_results) via the links.next chain.
-            collected: dict[str, dict[str, str | None]] = {item["id"]: item for item in items}
-            page = 2
-            while len(collected) < max_results and page <= 20:
-                if isinstance(payload, dict):
-                    links = payload.get("links") or {}
-                    next_link = links.get("next") if isinstance(links, dict) else None
-                else:
-                    next_link = None
-                if not isinstance(next_link, str) or not next_link:
-                    break
-
-                next_params = dict(params)
-                parsed = urllib.parse.urlparse(next_link)
-                next_page = urllib.parse.parse_qs(parsed.query).get("page")
-                if next_page:
-                    page = int(next_page[0])
-                else:
-                    break
-                next_params["page"] = str(page)
-                response = await client.get(
-                    "/s",
-                    params=next_params,
-                    headers=_build_headers(referer, json_request=True),
-                )
-                _raise_for_auth(response)
-                response.raise_for_status()
-                try:
-                    payload = response.json()
-                except json.JSONDecodeError as exc:
-                    raise CarrefourAuthError(
-                        "Carrefour returned a non-JSON response for the search page. "
-                        "Cookies are likely stale — re-export `data/cookies_carrefour.json`."
-                    ) from exc
-
-                page_items = parse_carrefour_search_json(
-                    payload, max_results=max_results, promotions_only=promotions_only
-                )
-                for item in page_items:
-                    if item["id"] not in collected:
-                        collected[item["id"]] = item
-                        if len(collected) >= max_results:
-                            break
-                page += 1
-
-            results[query] = list(collected.values())[:max_results]
+        session.release(ok=True)
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
     return results

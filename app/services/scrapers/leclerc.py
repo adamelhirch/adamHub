@@ -11,6 +11,8 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.scrapers.proxy_session import ProxySession
+
 # Leclerc Drive serves search as server-rendered HTML on a store-specific
 # subdomain (e.g. fd7-courses.leclercdrive.fr) once a point de livraison is
 # selected. The product list is embedded in the page as a JSON blob inside a
@@ -39,21 +41,6 @@ LECLERC_SORT_IDS = {
 
 class LeclercAuthError(RuntimeError):
     """Cookies are missing or rejected by Leclerc Drive."""
-
-
-def get_leclerc_proxy_url() -> str | None:
-    for key in ("ADAMHUB_LECLERC_PROXY_URL", "LECLERC_PROXY_URL"):
-        value = (os.environ.get(key) or "").strip()
-        if value:
-            return _normalize_proxy_url(value)
-    return None
-
-
-def _normalize_proxy_url(proxy_url: str) -> str:
-    normalized = proxy_url.strip()
-    if "://" not in normalized:
-        normalized = f"http://{normalized}"
-    return normalized
 
 
 def load_leclerc_cookies(path: Path | None = None) -> list[dict[str, Any]]:
@@ -257,20 +244,25 @@ async def search_leclerc(
 
     tri = LECLERC_SORT_IDS.get(sort_by) if sort_by else None
 
-    proxy_url = get_leclerc_proxy_url()
+    scope = f"leclerc:{json.dumps(queries, ensure_ascii=False)}"
+
+    def _build_client(proxy_url: str | None) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            cookies=build_leclerc_cookie_jar(cookies),
+            proxy=proxy_url,
+            timeout=httpx.Timeout(30.0),
+            trust_env=not proxy_url,
+            follow_redirects=True,
+        )
+
+    session = ProxySession(scope, _build_client)
     results: dict[str, list[dict[str, str | None]]] = {}
-    async with httpx.AsyncClient(
-        cookies=build_leclerc_cookie_jar(cookies),
-        proxy=proxy_url,
-        timeout=httpx.Timeout(30.0),
-        trust_env=not proxy_url,
-        follow_redirects=True,
-    ) as client:
+    try:
         for query in queries:
             params: dict[str, Any] = {"TexteRecherche": query}
             if tri is not None:
                 params["tri"] = tri
-            response = await client.get(
+            response = await session.client.get(
                 f"{base}/recherche.aspx",
                 params=params,
                 headers=_build_headers(f"{base}/"),
@@ -280,4 +272,10 @@ async def search_leclerc(
             results[query] = parse_leclerc_search_html(
                 response.text, max_results=max_results
             )
+        session.release(ok=True)
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
     return results

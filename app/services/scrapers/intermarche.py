@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import os
 import re
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from app.services.scrapers.proxy_session import ProxySession
 
 # Intermarché serves search as a JSON API:
 #   GET https://www.intermarche.com/api/products?query={json}&ref={pdv}
@@ -54,21 +55,6 @@ INTERMARCHE_DEFAULT_REFERER = f"{INTERMARCHE_BASE_URL}/recherche/"
 
 class IntermarcheAuthError(RuntimeError):
     """Intermarché rejected the current session (DataDome / auth)."""
-
-
-def get_intermarche_proxy_url() -> str | None:
-    for key in ("ADAMHUB_INTERMARCHE_PROXY_URL", "INTERMARCHE_PROXY_URL"):
-        value = (os.environ.get(key) or "").strip()
-        if value:
-            return normalize_proxy_url(value)
-    return None
-
-
-def normalize_proxy_url(proxy_url: str) -> str:
-    normalized = proxy_url.strip()
-    if "://" not in normalized:
-        normalized = f"http://{normalized}"
-    return normalized
 
 
 def load_intermarche_cookies(path: Path | None = None) -> list[dict[str, Any]]:
@@ -368,8 +354,25 @@ def is_intermarche_bot_challenge(content: str) -> bool:
     )
 
 
+def _build_intermarche_client(
+    cookies: list[dict[str, Any]],
+    proxy_url: str | None,
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        follow_redirects=True,
+        cookies=build_intermarche_cookie_jar(cookies),
+        proxy=proxy_url,
+        timeout=httpx.Timeout(30.0),
+        trust_env=not proxy_url,
+    )
+
+
+def _search_scope(queries: list[str]) -> str:
+    return f"intermarche:{json.dumps(queries, ensure_ascii=False)}"
+
+
 async def _fetch_products_page(
-    client: httpx.AsyncClient,
+    session: ProxySession,
     query: str,
     pdv_ref: str | None,
     page: int = 1,
@@ -388,13 +391,15 @@ async def _fetch_products_page(
 
     # The API occasionally returns an empty result set or a transient DataDome
     # challenge (intermittent for cookie-less sessions); retry a couple of
-    # times before giving up on a query.
+    # times before giving up on a query. A blocked proxy (403/DataDome/timeout)
+    # is released as failed and the pool hands out the next one.
     last_error: Exception | None = None
     for _ in range(3):
         try:
-            response = await client.get(url, params=params, headers=headers)
+            response = await session.client.get(url, params=params, headers=headers)
         except httpx.HTTPError as exc:
             last_error = exc
+            await session.rotate()
             await asyncio.sleep(0.5)
             continue
         if response.status_code in {401, 403} or is_intermarche_bot_challenge(response.text):
@@ -403,6 +408,7 @@ async def _fetch_products_page(
                 "Refresh `data/cookies_intermarche.json` from a browser session "
                 "with a store selected."
             )
+            await session.rotate()
             await asyncio.sleep(1.0)
             continue
         response.raise_for_status()
@@ -414,6 +420,7 @@ async def _fetch_products_page(
                 "Refresh `data/cookies_intermarche.json` from a browser session "
                 "with a store selected."
             )
+            await session.rotate()
             await asyncio.sleep(0.5)
             continue
         if isinstance(products, list) and products:
@@ -436,29 +443,26 @@ async def search_intermarche(
     The store id is recovered from the session cookies (``itm_pdv``) and passed
     as the ``ref`` query param; without a selected store the API still returns
     results from its default catalog. ``sort_by`` and ``promotions_only`` map to
-    the JSON ``sort`` and ``isPromo`` fields of the query payload.
+    the JSON ``sort`` and ``isPromo`` fields of the query payload. The shared
+    proxy pool keeps the same proxy for the whole search and rotates it when a
+    proxy gets blocked (403/DataDome/timeout).
     """
     if cookies is None:
         cookies = load_intermarche_cookies()
-    proxy_url = get_intermarche_proxy_url()
     pdv_ref = extract_pdv_ref_from_cookies(cookies)
 
+    scope = _search_scope(queries)
+    session = ProxySession(scope, lambda proxy_url: _build_intermarche_client(cookies, proxy_url))
     results: dict[str, list[dict[str, str | None]]] = {}
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        cookies=build_intermarche_cookie_jar(cookies),
-        proxy=proxy_url,
-        timeout=httpx.Timeout(30.0),
-        trust_env=not proxy_url,
-    ) as client:
+    try:
         try:
-            category_lookup = await fetch_intermarche_categories(client, pdv_ref)
+            category_lookup = await fetch_intermarche_categories(session.client, pdv_ref)
         except Exception:
             category_lookup = {}
 
         for query in queries:
             products = await _fetch_products_page(
-                client,
+                session,
                 query,
                 pdv_ref,
                 per_page=max_results,
@@ -468,6 +472,12 @@ async def search_intermarche(
             results[query] = parse_intermarche_products(
                 products, max_results=max_results, category_lookup=category_lookup
             )
+        session.release(ok=True)
+    except Exception:
+        session.release(ok=False)
+        raise
+    finally:
+        await session.aclose()
     return results
 
 
