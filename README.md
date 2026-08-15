@@ -24,7 +24,7 @@ Frontend pages already shipped:
 - `Calendar`: unified timeline, drag and drop scheduling, overlap prevention, meals, fitness sessions, tasks, events, subscriptions, manual items
 - `Tasks`: two-tab workspace with one-shot tasks plus a `Routine` tab for recurring habits
 - `Finances`: month summary, budgets, transactions, subscriptions, patrimony overview
-- `Groceries`: grocery list + pantry, store-backed items, Intermarche search/mapping, pantry restock from checked groceries
+- `Groceries`: grocery list + pantry, store-backed items, 4-store search/mapping (Intermarché, Carrefour, Leclerc, Auchan), pantry restock from checked groceries
 - `Recipes`: manual recipe authoring, ingredient-by-ingredient editing, meal planning, supermarket-backed ingredients, cooked confirmation
 - `Fitness`: session planning, measurements, stats, calendar-aware scheduling
 
