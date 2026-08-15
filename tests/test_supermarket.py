@@ -481,19 +481,36 @@ def test_leclerc_parser_extracts_embedded_json_from_search_html():
 def test_auchan_parser_extracts_product_cards_from_search_html():
     html = """
     <article itemscope itemtype="http://schema.org/Product"
-             class="product-thumbnail list__item" data-id="130ef860-aa6d-46f1-abb4-76ea4fce5214">
+             class="product-thumbnail list__item"
+             data-id="6baf949f-7d78-4d36-8458-3e96f5637688"
+             data-current-offer-id="789f635b-a479-5fbb-bd89-002578598430">
       <a class="product-thumbnail__details-wrapper"
-         href="/lait-de-savoie-lait-demi-ecreme-uht/pr-C1799228"
-         data-id="130ef860-aa6d-46f1-abb4-76ea4fce5214">
-        <p class="product-thumbnail__description" itemprop="name description">
-          <strong itemprop="brand">LAIT DE SAVOIE</strong>
-          Lait demi-écrémé UHT 6x1l
-        </p>
-        <div class="product-thumbnail__attributes">
-          <span class="product-attribute" aria-label="Contenance : 6x1l">6x1l</span>
+         href="/c-est-qui-le-patron-lait-demi-ecreme-equitable-uht/pr-C1169523"
+         data-id="6baf949f-7d78-4d36-8458-3e96f5637688">
+        <meta itemprop="image" content="https://cdn.auchan.fr/media/P020000000002QOPRIMARY_0x0/B2CD/">
+        <div class="product-thumbnail__details">
+          <p class="product-thumbnail__description" itemprop="name description">
+            <strong itemprop="brand">C'EST QUI LE PATRON ?!</strong>
+            Lait demi-écrémé équitable UHT
+          </p>
+          <div class="product-thumbnail__attributes">
+            <span class="product-attribute" aria-label="Contenance : 6x1L">6x1L</span>
+          </div>
         </div>
-        <meta itemprop="image" content="https://cdn.auchan.fr/media/S01000000040V28PRIMARY_0x0/B2CD/">
       </a>
+      <footer class="product-thumbnail__footer">
+        <div class="product-thumbnail__price product-price__container"
+             itemprop="offers" itemscope itemtype="http://schema.org/Offer">
+          <div class="product-price bolder text-dark-color">7,62€</div>
+          <meta itemprop="price" content="7.62">
+          <meta itemprop="priceCurrency" content="EUR">
+        </div>
+        <div class="quantity-selector quantity-selector--default"
+             data-product-id="6baf949f-7d78-4d36-8458-3e96f5637688"
+             data-offer-id="789f635b-a479-5fbb-bd89-002578598430"
+             data-seller-id="4c663296-54a8-45f6-b385-0be86b4dfe98">
+        </div>
+      </footer>
     </article>
     """
     items = parse_auchan_search_html(html, max_results=10)
@@ -501,11 +518,14 @@ def test_auchan_parser_extracts_product_cards_from_search_html():
     normalized = [
         normalize_search_result(SupermarketStore.AUCHAN, "lait", item) for item in items
     ]
-    assert normalized[0]["name"] == "Lait demi-écrémé UHT 6x1l"
-    assert normalized[0]["external_id"] == "130ef860-aa6d-46f1-abb4-76ea4fce5214"
-    assert normalized[0]["product_url"] == "https://www.auchan.fr/lait-de-savoie-lait-demi-ecreme-uht/pr-C1799228"
-    assert normalized[0]["image_url"] == "https://cdn.auchan.fr/media/S01000000040V28PRIMARY_0x0/B2CD/"
-    assert normalized[0]["price_text"] is None  # price is lazy-loaded, not in HTML
+    assert normalized[0]["name"] == "Lait demi-écrémé équitable UHT"
+    assert normalized[0]["external_id"] == "6baf949f-7d78-4d36-8458-3e96f5637688"
+    assert normalized[0]["product_url"] == "https://www.auchan.fr/c-est-qui-le-patron-lait-demi-ecreme-equitable-uht/pr-C1169523"
+    assert normalized[0]["price_text"] == "7,62 €"
+    assert normalized[0]["price_amount"] == 7.62
+    # cart identifiers are preserved in the raw item
+    assert items[0]["offer_id"] == "789f635b-a479-5fbb-bd89-002578598430"
+    assert items[0]["seller_id"] == "4c663296-54a8-45f6-b385-0be86b4dfe98"
 
 
 def test_leclerc_and_auchan_search_raise_without_cookies_offline():
