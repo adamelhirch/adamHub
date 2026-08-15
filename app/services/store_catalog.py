@@ -71,7 +71,13 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         key=SupermarketStore.INTERMARCHE,
         label="Intermarché",
         scraper_name="intermarche",
-        notes="Live HTML scraping with optional Camoufox fallback.",
+        notes=(
+            "Intermarché search via the public /api/products JSON API. Prices are "
+            "store-specific: the selected store id is recovered from "
+            "data/cookies_intermarche.json (itm_pdv cookie) and passed as `ref`. "
+            "Search works without cookies (default catalog) but the store's own "
+            "prices require a session with a store selected."
+        ),
     ),
     SupermarketStoreDefinition(
         key=SupermarketStore.UBEREATS,
@@ -437,6 +443,7 @@ async def fetch_search_results(
         raw_results = await search_intermarche(
             queries=queries,
             max_results=max_results,
+            sort_by=sort_by,
             promotions_only=promotions_only,
             cookies=cookies,
         )
@@ -504,11 +511,11 @@ async def run_intermarche_scraper(
     sort_by: str | None = None,
     promotions_only: bool = False,
 ) -> list[SupermarketSearchCache]:
-    del sort_by
     normalized = await fetch_search_results(
         store=SupermarketStore.INTERMARCHE,
         queries=queries,
         max_results=max_results,
+        sort_by=sort_by,
         promotions_only=promotions_only,
     )
     return upsert_search_cache(session, SupermarketStore.INTERMARCHE, normalized)
