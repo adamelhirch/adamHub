@@ -90,6 +90,8 @@ from app.schemas.pantry import (
 )
 from app.schemas.skills import SkillExecuteRequest, SkillExecuteResponse
 from app.schemas.supermarket import (
+    AuchanOfferingContext,
+    AuchanStoreSelectionRequest,
     SupermarketConnectionImport,
     SupermarketConnectionRead,
     SupermarketCredentials,
@@ -98,6 +100,8 @@ from app.schemas.supermarket import (
     SupermarketSearchRequest,
     SupermarketSearchResult,
     SupermarketStoreRead,
+    SupermarketStoreSelectionRead,
+    SupermarketStoreSelectionRequest,
 )
 from app.schemas.tasks import TaskCreate, TaskRead, TaskSubtask, TaskUpdate
 from app.schemas.video import TranscriptSegmentRead, VideoSourceRead, VideoSourceRequest
@@ -186,6 +190,8 @@ __all__ = [
     "SavingsGoalCreate",
     "SavingsGoalRead",
     "SavingsGoalUpdate",
+    "AuchanOfferingContext",
+    "AuchanStoreSelectionRequest",
     "SupermarketConnectionImport",
     "SupermarketConnectionRead",
     "SupermarketCredentials",
@@ -194,6 +200,8 @@ __all__ = [
     "SupermarketSearchRequest",
     "SupermarketSearchResult",
     "SupermarketStoreRead",
+    "SupermarketStoreSelectionRead",
+    "SupermarketStoreSelectionRequest",
     "SubscriptionCreate",
     "SubscriptionProjection",
     "SubscriptionRead",

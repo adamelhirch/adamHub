@@ -94,12 +94,35 @@ Base : `www.auchan.fr` ; API JSON sous `api.auchan.fr`.
 
 ### Sélection de magasin / contexte
 
-- `GET https://www.auchan.fr/offering-contexts?address.zipcode=..&address.city=..&location.latitude=..&location.longitude=..` → contextes de vente (GROCERY / drive / livraison).
-- `GET https://www.auchan.fr/journey` → JSON du parcours courant (magasin sélectionné).
-- `POST https://www.auchan.fr/journey/update` → change le contexte/magasin.
+- `GET https://www.auchan.fr/journey` → JSON du parcours courant (magasin sélectionné). Sans sélection, l'id par défaut est `defa0178-defa-defa-defa-defa01720217` et `activeContexts[*].context` est `null`.
+- `GET https://www.auchan.fr/offering-contexts?address.zipcode=..&address.city=..&location.latitude=..&location.longitude=..&accuracy=MUNICIPALITY&position=1&sellerType=GROCERY&filters.pos=&filters.slots=&filters.validStoreReferences=&channels=PICK_UP%2CSHIPPING` → pages HTML des magasins sélectionnables. Nécessite les headers `Accept: application/crest` + `x-crest-renderer: journey-renderer` + `x-requested-with: XMLHttpRequest`. Chaque carte `div.journey-offering-context__wrapper` porte un `form.journey-offering-contexts__form.journeyChoice` avec les inputs cachés `sellerId`, `storeReference`, `channels` (+ nom/adresse/distance en `.place-pos__name` / `.place-pos__address` / `.journey-offering-context__pos-distance`).
+- `POST https://www.auchan.fr/journey/update` (form-urlencoded) → change le contexte/magasin. Payload :
+
+  ```
+  offeringContext.seller.id=4c663296-54a8-45f6-b385-0be86b4dfe98
+  offeringContext.channels[0]=PICK_UP
+  offeringContext.storeReference=6007
+  address.zipcode=31400&address.city=Toulouse&address.country=France
+  location.latitude=43.604464&location.longitude=1.444243
+  accuracy=MUNICIPALITY&position=1&journeyId={id du /journey courant}
+  ```
+
+  La réponse renvoie le nouveau journey avec son nouvel `id`.
 
 Le prix réel dépend du contexte sélectionné (magasin) ; sans contexte, la
 recherche affiche « Afficher le prix » au lieu du prix.
+
+**Cookie `lark-journey` (piège de rendu) :** le POST `/journey/update` met à
+jour la session côté serveur mais ne pose PAS de cookie. Le rendu SSR de la
+recherche lit le magasin sélectionné depuis le cookie **`lark-journey`**
+(contenant l'id du journey) que le JS navigateur pose après l'update. Le scraper
+doit donc poser `lark-journey={journey.id}` (+ `lark-history=true`) sur le
+même cookie jar que le GET `/recherche`, sinon le prix ne s'affiche pas.
+
+**Aucun login requis :** le flux complet (offering-contexts → journey/update →
+recherche avec prix) fonctionne avec n'importe quelle session cookie valide,
+sans compte connecté (démontré par `data/live-capture/auchan-paslogin.har`).
+Le silent-check-sso est optionnel.
 
 ### Recherche produit
 
@@ -275,9 +298,23 @@ par la session cookies.
    dépendent du point de livraison sélectionné → il faut persister le
    `SupermarketStoreSelection` (déjà prévu) pour reconstruire l'URL.
 3. **Auchan** : le prix est dans le HTML quand un magasin est sélectionné
-   (`meta[itemprop=price]`). Le contexte magasin est porté par les cookies de
-   session ; sans lui, le HTML affiche « Afficher le prix » et le prix est
-   absent (renvoyé `None` par le scraper).
+   (`meta[itemprop=price]`). Le contexte magasin est sélectionné via
+   `POST /journey/update` + le cookie `lark-journey`, et **ne requiert pas de
+   login** (session cookie valide suffit). Sans sélection, le HTML affiche
+   « Afficher le prix » et le prix est absent (renvoyé `None` par le scraper).
+
+### Matrice connexion — recherche de prix
+
+| Enseigne | Login requis | Magasin sélectionné requis | Statut |
+| --- | --- | --- | --- |
+| Intermarché | Non (catalogue par défaut) | Oui pour les prix du magasin (`itm_pdv` dans les cookies) | Live |
+| Carrefour | Non (JSON public) | Oui (Drive sélectionné dans la session cookies) | Live |
+| Leclerc | Non* (endpoint JSON + cookies) | Oui (sous-domaine `fdN-courses` du Drive) | À valider |
+| Auchan | **Non** (session cookie valide) | **Oui** (`POST /supermarket/auchan/selected-store`) | **Live validé** |
+
+*Aucune des quatre enseignes n'exige un compte connecté pour la recherche avec
+prix ; toutes exigent un contexte magasin. Le panier, lui, reste hors
+périmètre pour Auchan (endpoints `checkout/v1/carts` + `consentId`).
 
 ## Reste à valider en live (bloqué sans session)
 

@@ -100,7 +100,13 @@ Request shape:
 - `supermarket.delete_connection` — Delete a saved supermarket connection.
   - `input_schema`: `connection_id`: int
 
-- `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (HTML scraping with promotions filter), 'carrefour', 'leclerc' or 'auchan' (Drive JSON API + cookies; leclerc/auchan endpoints need live validation).
+- `supermarket.list_offering_contexts` — List the Auchan stores selectable for an address. Each entry carries `seller_id`, `store_reference`, `channel`, `name`, `address` and `distance` — feed them to `supermarket.select_auchan_store`.
+  - `input_schema`: `zipcode`: string, `city`: string, `latitude`: float, `longitude`: float, `country`: string?
+
+- `supermarket.select_auchan_store` — Select the Auchan store used for search (POST /journey/update + persist). Auchan prices are only server-rendered once a store is selected; searching without one returns a 400 'sélectionnez un magasin'.
+  - `input_schema`: `seller_id`: string, `store_reference`: string, `store_label`: string, `channel`: string?, `location_label`: string?, `zipcode`: string?, `city`: string?, `country`: string?, `latitude`: float?, `longitude`: float?
+
+- `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (JSON API), 'carrefour' (JSON endpoint), 'leclerc' (JSON API + cookies) or 'auchan' (server-rendered HTML; works without login but requires a selected store via `supermarket.select_auchan_store`).
   - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?, `queries`: string[], `max_results`: int?, `promotions_only`: bool?
 
 - `grocery.add_item` — Add an item to grocery list
