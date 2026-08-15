@@ -1,8 +1,9 @@
 # AdamHUB Connect (extension Chrome)
 
-Petite extension qui synchronise tes sessions **Carrefour**, **Intermarché** et
-**Uber Eats** avec ton instance AdamHUB. Elle évite la corvée d'export manuel
-des cookies — un clic dans la popup, et le hub a une session valide.
+Petite extension qui synchronise tes sessions **Carrefour**, **Intermarché**,
+**Leclerc** et **Auchan** avec ton instance AdamHUB. Elle évite la corvée
+d'export manuel des cookies — un clic dans la popup, et le hub a une session
+valide.
 
 ## Installation (sideload)
 
@@ -37,8 +38,8 @@ L'authentification se fait via le hub :
 ## Connecter un magasin
 
 1. Connecte-toi normalement sur **carrefour.fr** / **intermarche.com** /
-   **ubereats.com** dans Chrome (avec l'adresse de livraison choisie côté
-   Carrefour/UE).
+   **leclercdrive.fr** / **auchan.fr** dans Chrome (avec l'adresse de
+   livraison choisie côté Drive).
 2. Clique l'icône AdamHUB → bouton **Connecter** à côté du magasin.
 3. L'extension lit les cookies (y compris les `HttpOnly`) via l'API
    `chrome.cookies` et les pousse vers
@@ -58,14 +59,14 @@ connexion est créée par magasin avec une étiquette vide (`label: ""`).
 
 ## Permissions demandées
 
-- `cookies` — pour lire les cookies des 3 domaines (HttpOnly inclus)
+- `cookies` — pour lire les cookies des domaines magasins (HttpOnly inclus)
 - `storage` — pour **mémoriser le token JWT et l'horodatage `lastSync`**
   localement
 - `scripting` + `tabs` — pour lire le token depuis l'onglet AdamHUB ouvert
 - `host_permissions` limitées à `127.0.0.1:5173` / `localhost:5173` et
   `127.0.0.1:8000` / `localhost:8000` (hub local), plus `*.carrefour.fr`,
-  `*.intermarche.com`, `*.ubereats.com`. L'extension ne touche **aucun**
-  autre site.
+  `*.intermarche.com`, `*.leclercdrive.fr`, `*.auchan.fr`. L'extension ne
+  touche **aucun** autre site.
 
 L'extension n'envoie de données qu'au hub local codé en dur
 (`http://127.0.0.1:8000`).

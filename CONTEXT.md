@@ -55,7 +55,7 @@ _Avoid_: Restock record, sync entry
 ### Supermarket connections
 
 **SupermarketStore**:
-A supported online grocery retailer (Intermarché, Uber Eats, Carrefour) with defined capabilities: search, product mapping, and cart automation.
+A supported online grocery retailer (Intermarché, Carrefour) with defined capabilities: search, product mapping, and cart automation.
 _Avoid_: Retailer, supermarket brand, vendor
 
 **SupermarketConnection**:
@@ -66,10 +66,6 @@ _Avoid_: Session, login, credential
 A cached product row returned by a store search; it is the only trusted source of store metadata, and other records reference it by id instead of trusting client-supplied store fields.
 _Avoid_: Search result, product cache, lookup
 
-**UbereatsAddress**:
-A saved delivery address (with geocoded coordinates and a place reference) usable when scraping or ordering through Uber Eats; only one can be active at a time.
-_Avoid_: Delivery address, saved location
-
 **Store-backed**:
 Describes a grocery, pantry or recipe-ingredient record whose store metadata (identifiers, label, price, product link) was resolved from a SupermarketSearchCache row rather than supplied by a client.
 _Avoid_: Store-linked, supermarket-backed, mapped product
@@ -79,7 +75,7 @@ The durable link between a recipe ingredient or pantry item and a specific store
 _Avoid_: Product link, store mapping, product assignment
 
 **SupermarketStoreSelection**:
-The chosen physical store location for a store (for example, a specific Uber Eats store) that store searches target.
+The chosen physical store location for a store that store searches target.
 _Avoid_: Selected store, store location
 
 ### Auth & tenancy

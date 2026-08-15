@@ -423,12 +423,11 @@ def test_mapping_rejects_fabricated_snapshot_without_cache_id(client, auth_heade
 # ── P3: Leclerc + Auchan (Drive) registry, parsers and credentials ────────────
 
 
-def test_store_registry_lists_five_stores_including_leclerc_and_auchan():
+def test_store_registry_lists_four_stores_including_leclerc_and_auchan():
     definitions = list_store_definitions()
     keys = [definition.key for definition in definitions]
-    assert len(keys) == 5
+    assert len(keys) == 4
     assert SupermarketStore.INTERMARCHE in keys
-    assert SupermarketStore.UBEREATS in keys
     assert SupermarketStore.CARREFOUR in keys
     assert SupermarketStore.LECLERC in keys
     assert SupermarketStore.AUCHAN in keys

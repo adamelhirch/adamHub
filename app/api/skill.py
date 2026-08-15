@@ -19,20 +19,7 @@ def skill_manifest() -> dict:
         "base_url": settings.public_base_url,
         "auth": {"type": "api_key", "header": "X-API-Key"},
         "actions": action_catalog_manifest(),
-        "workflows": {
-            "ubereats_grocery": (
-                "End-to-end Uber Eats grocery skill. SETUP (once): ubereats.geocode_address → "
-                "ubereats.save_address (activate=true) → ubereats.list_stores → "
-                "ubereats.set_selected_store. DAILY USE: ubereats.search_products(query, sort_by) "
-                "→ ubereats.add_to_cart(cache_id) (also mirrors to grocery list). "
-                "AFTER DELIVERY: ubereats.import_order_to_pantry(tracking_url) for the user's own "
-                "orders. THIRD-PARTY ORDERS (friend ordered for the user): the API can't read those "
-                "items — ASK the user to share screenshots of the tracking page, EXTRACT items via "
-                "your vision capability, then call ubereats.import_third_party_order with the "
-                "parsed list. MANUAL EDITS: pantry.update_item / pantry.consume_item / "
-                "pantry.delete_item / grocery.* — let the user fine-tune anything."
-            ),
-        },
+        "workflows": {},
     }
 
 

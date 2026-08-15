@@ -69,7 +69,6 @@ DOMAIN_ACTION_PREFIXES = {
     "recipes": ["recipe", "video", "meal_plan"],
     "subscriptions": ["subscription"],
     "tasks": ["task"],
-    "ubereats": ["ubereats"],
 }
 
 # Section groupings (title, owning prefixes) for the full action catalog
@@ -79,7 +78,7 @@ CATALOG_SECTIONS = [
     ("Tasks", ["task"]),
     ("Finance", ["finance"]),
     ("Fitness", ["fitness"]),
-    ("Groceries and supermarket", ["supermarket", "ubereats", "grocery"]),
+    ("Groceries and supermarket", ["supermarket", "grocery"]),
     ("Video intake", ["video"]),
     ("Recipes", ["recipe"]),
     ("Meal plans", ["meal_plan"]),

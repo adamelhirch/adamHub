@@ -12,10 +12,6 @@ import type {
   SupermarketMapping,
   SupermarketProduct,
   SupermarketStoreKey,
-  UbereatsGeocodeResult,
-  UbereatsSavedAddress,
-  UbereatsSortKey,
-  UbereatsStoreOption,
 } from '../store/groceryStore';
 
 function storeLabelFor(store: string | null | undefined): string {
@@ -89,7 +85,7 @@ const PRIORITY_LABEL: Record<number, { label: string; color: string }> = {
   3: { label: 'Normale', color: 'text-blue-600 bg-blue-50' },
 };
 
-const TAB_LIST = ['Liste de courses', 'Garde-manger', 'Uber Eats'] as const;
+const TAB_LIST = ['Liste de courses', 'Garde-manger'] as const;
 type Tab = (typeof TAB_LIST)[number];
 
 // ─── Helper: group items ──────────────────────────────────────────────────────
@@ -763,23 +759,9 @@ export default function GroceriesPage() {
     searchResults, searchLoading, searchError, searchSupermarket, clearSearchResults,
     pantryMappings, fetchPantryMapping, savePantryMapping, deleteMapping, hasCachedProducts,
     selectedStore, setSelectedStore,
-    ubereatsLocation, ubereatsSelectedStore, ubereatsStores, ubereatsStoresLoading, ubereatsError,
-    fetchUbereatsLocation, fetchSelectedUbereatsStore, fetchUbereatsStores, selectUbereatsStore,
-    ubereatsAddresses, ubereatsGeocodeResults, ubereatsGeocodeLoading,
-    fetchUbereatsAddresses, geocodeUbereatsAddress, clearUbereatsGeocodeResults,
-    saveUbereatsAddress, activateUbereatsAddress, deleteUbereatsAddress,
-    ubereatsCart, ubereatsCartAdding, ubereatsCartError,
-    fetchUbereatsCart, addToUbereatsCart,
-    ubereatsPastOrders, ubereatsPastOrdersLoading, ubereatsImportLoading, ubereatsLastImport, ubereatsImportError,
-    fetchUbereatsPastOrders, importUbereatsOrderToPantry, clearUbereatsImportFeedback,
     connections, fetchConnections, activateConnection, deleteConnection,
   } = useGroceryStore();
 
-  const [showUbereatsModal, setShowUbereatsModal] = useState(false);
-  const [ubereatsSortBy, setUbereatsSortBy] = useState<UbereatsSortKey>('recommended');
-  const isUbereats = selectedStore === 'ubereats';
-  const ubereatsReady = !!ubereatsSelectedStore && !!ubereatsLocation?.label;
-  const canSearch = !isUbereats || ubereatsReady;
   const currentStoreLabel = STORE_LABELS[selectedStore];
 
   const [activeTab, setActiveTab] = useState<Tab>('Liste de courses');
@@ -866,28 +848,8 @@ export default function GroceriesPage() {
     fetchItems();
     fetchPantry();
     fetchPantryOverview();
-    fetchUbereatsLocation();
-    fetchSelectedUbereatsStore();
-    fetchUbereatsAddresses();
     fetchConnections();
   }, []);
-
-  // Auto-refresh UE cart when user activates the UE store flow
-  useEffect(() => {
-    if (isUbereats && ubereatsReady && !ubereatsCart) {
-      void fetchUbereatsCart();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUbereats, ubereatsReady]);
-
-  // Refresh UE carts (with item details) and past orders every time the UE tab is opened.
-  useEffect(() => {
-    if (activeTab === 'Uber Eats') {
-      void fetchUbereatsCart({ includeDetails: true });
-      void fetchUbereatsPastOrders(10);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
 
   useEffect(() => {
     const value = imQuery.trim();
@@ -1109,7 +1071,7 @@ export default function GroceriesPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === 'Liste de courses' ? 'Rechercher un article…' : activeTab === 'Garde-manger' ? 'Rechercher dans le garde-manger…' : 'Rechercher dans les paniers UE…'}
+            placeholder={activeTab === 'Liste de courses' ? 'Rechercher un article…' : 'Rechercher dans le garde-manger…'}
             className="w-full rounded-xl border border-apple-gray-200 bg-white py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50 sm:w-64"
           />
           {search && (
@@ -1133,16 +1095,11 @@ export default function GroceriesPage() {
                   : 'border-transparent text-apple-gray-500 hover:text-black'
               }`}
             >
-              {tab === 'Liste de courses' ? <ShoppingBasket className="w-4 h-4" /> : tab === 'Garde-manger' ? <Package className="w-4 h-4" /> : <Store className="w-4 h-4" />}
+              {tab === 'Liste de courses' ? <ShoppingBasket className="w-4 h-4" /> : <Package className="w-4 h-4" />}
               {tab}
               {tab === 'Liste de courses' && uncheckedItems.length > 0 && (
                 <span className="bg-apple-blue text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
                   {uncheckedItems.length}
-                </span>
-              )}
-              {tab === 'Uber Eats' && (ubereatsCart?.carts?.length ?? 0) > 0 && (
-                <span className="bg-emerald-600 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
-                  {ubereatsCart!.carts.length}
                 </span>
               )}
             </button>
@@ -1196,17 +1153,6 @@ export default function GroceriesPage() {
                       onActivate={activateConnection}
                       onDelete={deleteConnection}
                     />
-                    {isUbereats && (
-                      <UbereatsStatusBar
-                        ready={ubereatsReady}
-                        location={ubereatsLocation?.label ?? null}
-                        storeLabel={ubereatsSelectedStore?.store_label ?? null}
-                        onOpenSetup={() => setShowUbereatsModal(true)}
-                      />
-                    )}
-                    {isUbereats && ubereatsReady && (
-                      <UbereatsSortChips selected={ubereatsSortBy} onChange={setUbereatsSortBy} />
-                    )}
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
@@ -1215,14 +1161,14 @@ export default function GroceriesPage() {
                           placeholder="Ex: lait, poulet, yaourt…"
                           value={imQuery}
                           onChange={(e) => setImQuery(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly, sortBy: ubereatsSortBy }); }}}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly }); }}}
                           className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-400/40"
                         />
                       </div>
                       <button
                         type="button"
-                        onClick={() => { if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly, sortBy: ubereatsSortBy }); }}
-                        disabled={searchLoading || !imQuery.trim() || !canSearch}
+                        onClick={() => { if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly }); }}
+                        disabled={searchLoading || !imQuery.trim()}
                         className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -1231,8 +1177,8 @@ export default function GroceriesPage() {
                       {imQueryHasCache && (
                         <button
                           type="button"
-                          onClick={() => { if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { forceRefresh: true, promotionsOnly, sortBy: ubereatsSortBy }); }}
-                          disabled={searchLoading || !imQuery.trim() || !canSearch}
+                          onClick={() => { if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { forceRefresh: true, promotionsOnly }); }}
+                          disabled={searchLoading || !imQuery.trim()}
                           className="px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           Actualiser
@@ -1240,22 +1186,20 @@ export default function GroceriesPage() {
                       )}
                     </div>
 
-                    {!isUbereats && (
-                      <label className="mt-2 flex items-center gap-2 text-sm text-apple-gray-600">
-                        <input
-                          type="checkbox"
-                          checked={promotionsOnly}
-                          onChange={(e) => setPromotionsOnly(e.target.checked)}
-                          className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
-                        />
-                        Promotions uniquement
-                      </label>
-                    )}
+                    <label className="mt-2 flex items-center gap-2 text-sm text-apple-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={promotionsOnly}
+                        onChange={(e) => setPromotionsOnly(e.target.checked)}
+                        className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                      />
+                      Promotions uniquement
+                    </label>
 
                     {/* Loading hint */}
                     {searchLoading && (
                       <p className="text-xs text-apple-gray-400 mt-2 animate-pulse">
-                        ⏳ {isUbereats ? `Recherche sur ${ubereatsSelectedStore?.store_label ?? 'Uber Eats'}…` : 'Le scraper Intermarché est en cours… (~15-30s)'}
+                        ⏳ Le scraper Intermarché est en cours… (~15-30s)
                       </p>
                     )}
 
@@ -1264,15 +1208,10 @@ export default function GroceriesPage() {
                       <p className="text-xs text-red-500 mt-2">❌ {searchError}</p>
                     )}
 
-                    {/* UE cart banner */}
-                    {isUbereats && ubereatsReady && (
-                      <UbereatsCartBanner cart={ubereatsCart} error={ubereatsCartError} onRefresh={fetchUbereatsCart} />
-                    )}
-
                     {/* Product results */}
                     {searchResults.length > 0 && !searchLoading && (
                       <div className="mt-3">
-                        <p className="text-xs text-apple-gray-400 mb-2">{searchResults.length} résultat(s) — cliquez pour pré-remplir{isUbereats ? ', ou + pour ajouter au panier UE' : ''}</p>
+                        <p className="text-xs text-apple-gray-400 mb-2">{searchResults.length} résultat(s) — cliquez pour pré-remplir</p>
                         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
                           {searchResults.map((p) => (
                             <div
@@ -1302,25 +1241,6 @@ export default function GroceriesPage() {
                                   {p.price_text && <p className="text-[11px] font-bold text-red-600 mt-1">{p.price_text}</p>}
                                 </div>
                               </button>
-                              {isUbereats && p.store === 'ubereats' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!ubereatsReady) return;
-                                    void addToUbereatsCart(p.cache_id, 1).catch(() => {});
-                                  }}
-                                  disabled={!ubereatsReady || !!ubereatsCartAdding[p.cache_id]}
-                                  title={ubereatsReady ? 'Ajouter au panier Uber Eats' : 'Configure d’abord ton magasin Uber Eats'}
-                                  className="absolute top-1.5 right-1.5 flex items-center justify-center w-7 h-7 rounded-full bg-black/85 text-white shadow-md hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {ubereatsCartAdding[p.cache_id] ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Plus className="w-3.5 h-3.5" />
-                                  )}
-                                </button>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -1471,7 +1391,7 @@ export default function GroceriesPage() {
                   searchError={searchError}
                   onSearch={async () => {
                     if (mappingQuery.trim()) {
-                      await searchSupermarket(selectedStore, mappingQuery.trim(), { promotionsOnly, sortBy: ubereatsSortBy });
+                      await searchSupermarket(selectedStore, mappingQuery.trim(), { promotionsOnly });
                     }
                   }}
                   onClose={() => {
@@ -1497,7 +1417,7 @@ export default function GroceriesPage() {
                   canRefresh={mappingQueryHasCache}
                   onRefresh={async () => {
                     if (mappingQuery.trim()) {
-                      await searchSupermarket(selectedStore, mappingQuery.trim(), { forceRefresh: true, promotionsOnly, sortBy: ubereatsSortBy });
+                      await searchSupermarket(selectedStore, mappingQuery.trim(), { forceRefresh: true, promotionsOnly });
                     }
                   }}
                 />
@@ -1547,17 +1467,6 @@ export default function GroceriesPage() {
                       onActivate={activateConnection}
                       onDelete={deleteConnection}
                     />
-                    {isUbereats && (
-                      <UbereatsStatusBar
-                        ready={ubereatsReady}
-                        location={ubereatsLocation?.label ?? null}
-                        storeLabel={ubereatsSelectedStore?.store_label ?? null}
-                        onOpenSetup={() => setShowUbereatsModal(true)}
-                      />
-                    )}
-                    {isUbereats && ubereatsReady && (
-                      <UbereatsSortChips selected={ubereatsSortBy} onChange={setUbereatsSortBy} />
-                    )}
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
@@ -1570,7 +1479,7 @@ export default function GroceriesPage() {
                             if (e.key === 'Enter') {
                               e.preventDefault();
                               if (pantrySearchQuery.trim()) {
-                                void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { promotionsOnly, sortBy: ubereatsSortBy });
+                                void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { promotionsOnly });
                               }
                             }
                           }}
@@ -1581,10 +1490,10 @@ export default function GroceriesPage() {
                         type="button"
                         onClick={() => {
                           if (pantrySearchQuery.trim()) {
-                            void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { promotionsOnly, sortBy: ubereatsSortBy });
+                            void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { promotionsOnly });
                           }
                         }}
-                        disabled={searchLoading || !pantrySearchQuery.trim() || !canSearch}
+                        disabled={searchLoading || !pantrySearchQuery.trim()}
                         className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -1595,10 +1504,10 @@ export default function GroceriesPage() {
                           type="button"
                           onClick={() => {
                             if (pantrySearchQuery.trim()) {
-                              void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { forceRefresh: true, promotionsOnly, sortBy: ubereatsSortBy });
+                              void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { forceRefresh: true, promotionsOnly });
                             }
                           }}
-                          disabled={searchLoading || !pantrySearchQuery.trim() || !canSearch}
+                          disabled={searchLoading || !pantrySearchQuery.trim()}
                           className="px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           Actualiser
@@ -1606,17 +1515,15 @@ export default function GroceriesPage() {
                       )}
                     </div>
 
-                    {!isUbereats && (
-                      <label className="flex items-center gap-2 text-sm text-apple-gray-600">
-                        <input
-                          type="checkbox"
-                          checked={promotionsOnly}
-                          onChange={(e) => setPromotionsOnly(e.target.checked)}
-                          className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
-                        />
-                        Promotions uniquement
-                      </label>
-                    )}
+                    <label className="flex items-center gap-2 text-sm text-apple-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={promotionsOnly}
+                        onChange={(e) => setPromotionsOnly(e.target.checked)}
+                        className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                      />
+                      Promotions uniquement
+                    </label>
 
                     {searchLoading && (
                       <p className="text-xs text-apple-gray-400 animate-pulse">⏳ Recherche du produit magasin…</p>
@@ -1759,70 +1666,13 @@ export default function GroceriesPage() {
             </>
           )}
 
-          {/* ── UBER EATS TAB ────────────────────────────────────────────── */}
-          {activeTab === 'Uber Eats' && (
-            <>
-              <UbereatsCartsPanel
-                cart={ubereatsCart}
-                error={ubereatsCartError}
-                filterText={search}
-                onRefresh={() => fetchUbereatsCart({ includeDetails: true })}
-                onOpenSetup={() => setShowUbereatsModal(true)}
-                ready={ubereatsReady}
-                activeAddressLabel={ubereatsLocation?.label ?? null}
-              />
-              <UbereatsImportPanel
-                pastOrders={ubereatsPastOrders}
-                pastOrdersLoading={ubereatsPastOrdersLoading}
-                importLoading={ubereatsImportLoading}
-                lastImport={ubereatsLastImport}
-                error={ubereatsImportError}
-                onImport={async (value) => {
-                  await importUbereatsOrderToPantry(value).catch(() => {});
-                }}
-                onRefreshOrders={() => fetchUbereatsPastOrders(10)}
-                onDismissFeedback={clearUbereatsImportFeedback}
-              />
-            </>
-          )}
-
         </div>
       </div>
-
-      {showUbereatsModal && (
-        <UbereatsSetupModal
-          location={ubereatsLocation}
-          stores={ubereatsStores}
-          loading={ubereatsStoresLoading}
-          error={ubereatsError}
-          selectedStoreId={ubereatsSelectedStore?.external_store_id ?? null}
-          addresses={ubereatsAddresses}
-          geocodeResults={ubereatsGeocodeResults}
-          geocodeLoading={ubereatsGeocodeLoading}
-          onClose={() => setShowUbereatsModal(false)}
-          onLoadStores={() => fetchUbereatsStores(25)}
-          onSelectStore={async (option) => {
-            await selectUbereatsStore(option);
-            setShowUbereatsModal(false);
-          }}
-          onSearchAddress={geocodeUbereatsAddress}
-          onClearGeocode={clearUbereatsGeocodeResults}
-          onSaveAddress={async (payload) => {
-            await saveUbereatsAddress(payload);
-          }}
-          onActivateAddress={async (id) => {
-            await activateUbereatsAddress(id);
-            void fetchUbereatsStores(25);
-          }}
-          onDeleteAddress={deleteUbereatsAddress}
-        />
-      )}
     </div>
   );
 }
 
 // ─── Store selector chips ────────────────────────────────────────────────────
-// Direct supermarket stores (everything that's not Uber Eats).
 const DIRECT_STORE_OPTIONS: { key: SupermarketStoreKey; label: string }[] = [
   { key: 'intermarche', label: 'Intermarché' },
   { key: 'carrefour',   label: 'Carrefour'   },
@@ -1837,44 +1687,9 @@ function StoreSelector({
   selected: SupermarketStoreKey;
   onChange: (store: SupermarketStoreKey) => void;
 }) {
-  const isUbereats = selected === 'ubereats';
-  const channelOptions: { key: 'direct' | 'ubereats'; label: string }[] = [
-    { key: 'direct', label: 'Magasins direct' },
-    { key: 'ubereats', label: 'Uber Eats' },
-  ];
-
-  const handleChannelChange = (channel: 'direct' | 'ubereats') => {
-    if (channel === 'ubereats') {
-      onChange('ubereats');
-    } else if (selected === 'ubereats') {
-      onChange(DIRECT_STORE_OPTIONS[0]?.key ?? 'intermarche');
-    }
-  };
-
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="inline-flex items-center rounded-full border border-apple-gray-200 bg-white p-0.5">
-        {channelOptions.map((opt) => {
-          const isActive = opt.key === 'ubereats' ? isUbereats : !isUbereats;
-          return (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => handleChannelChange(opt.key)}
-              className={`px-3 py-1 text-xs font-semibold rounded-full transition-colors ${
-                isActive
-                  ? opt.key === 'ubereats'
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-red-600 text-white'
-                  : 'text-apple-gray-500 hover:text-apple-gray-700'
-              }`}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
-      </div>
-      {!isUbereats && DIRECT_STORE_OPTIONS.length > 1 && (
+      {DIRECT_STORE_OPTIONS.length > 1 && (
         <div className="inline-flex items-center rounded-full border border-apple-gray-200 bg-white p-0.5">
           {DIRECT_STORE_OPTIONS.map((opt) => (
             <button
@@ -1890,298 +1705,6 @@ function StoreSelector({
               {opt.label}
             </button>
           ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Uber Eats carts panel (full tab) ────────────────────────────────────────
-function UbereatsCartsPanel({
-  cart,
-  error,
-  filterText,
-  onRefresh,
-  onOpenSetup,
-  ready,
-  activeAddressLabel,
-}: {
-  cart: { carts: { draft_order_uuid: string | null; title: string | null; subtotal_text: string | null; item_count: number | null; store_image_urls: string[]; details: { items: { item_uuid: string; cart_item_uuid: string; title: string; quantity: number; price_cents: number | null; image_url: string | null }[] } | null }[] } | null;
-  error: string | null;
-  filterText: string;
-  onRefresh: () => void | Promise<void>;
-  onOpenSetup: () => void;
-  ready: boolean;
-  activeAddressLabel: string | null;
-}) {
-  const carts = cart?.carts ?? [];
-  const filter = filterText.trim().toLowerCase();
-  const cartTotalCents = (items: { quantity: number; price_cents: number | null }[]) =>
-    items.reduce((sum, it) => sum + (it.price_cents ?? 0) * (it.quantity || 1), 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-[28px] border border-white/60 bg-white/80 p-4 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Uber Eats</p>
-          <p className="text-sm font-semibold text-black truncate">
-            {carts.length === 0
-              ? 'Aucun panier actif'
-              : `${carts.length} panier${carts.length > 1 ? 's' : ''} actif${carts.length > 1 ? 's' : ''}`}
-          </p>
-          {activeAddressLabel && (
-            <p className="text-[11px] text-apple-gray-500 truncate">Livraison : {activeAddressLabel}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={onOpenSetup}
-            className="px-3 py-1.5 rounded-lg border border-apple-gray-200 text-xs font-semibold text-apple-gray-700 hover:bg-apple-gray-50"
-          >
-            Configurer
-          </button>
-          <button
-            type="button"
-            onClick={() => void onRefresh()}
-            className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
-          >
-            Rafraîchir
-          </button>
-        </div>
-      </div>
-
-      {error && <p className="text-xs text-red-500">❌ {error}</p>}
-
-      {!ready && (
-        <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-          Configure d'abord ton magasin Uber Eats depuis l'onglet "Liste de courses".
-        </div>
-      )}
-
-      {ready && carts.length === 0 && (
-        <div className="rounded-[28px] border border-white/60 bg-white/80 py-10 text-center text-sm text-apple-gray-500 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
-          <ShoppingBasket className="w-8 h-8 text-apple-gray-300 mx-auto mb-2" />
-          Aucun panier actif. Ajoute des articles depuis la liste de courses.
-        </div>
-      )}
-
-      {carts.map((c) => {
-        const items = c.details?.items ?? [];
-        const visibleItems = filter
-          ? items.filter((it) => it.title.toLowerCase().includes(filter))
-          : items;
-        const total = cartTotalCents(items);
-        return (
-          <div
-            key={c.draft_order_uuid ?? c.title ?? Math.random().toString(36)}
-            className="rounded-[28px] border border-white/60 bg-white/80 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl overflow-hidden"
-          >
-            <div className="flex items-center gap-3 border-b border-apple-gray-100 px-5 py-4">
-              {c.store_image_urls[0] ? (
-                <img src={c.store_image_urls[0]} alt={c.title ?? ''} className="w-12 h-12 rounded-xl object-cover" />
-              ) : (
-                <div className="w-12 h-12 rounded-xl bg-apple-gray-100 flex items-center justify-center">
-                  <Store className="w-5 h-5 text-apple-gray-400" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-black truncate">{c.title ?? 'Magasin Uber Eats'}</p>
-                <p className="text-[11px] text-apple-gray-500">
-                  {c.item_count ?? items.length} article{(c.item_count ?? items.length) > 1 ? 's' : ''}
-                  {total > 0 && ` · ${(total / 100).toFixed(2).replace('.', ',')} €`}
-                </p>
-              </div>
-              <a
-                href="https://www.ubereats.com/feed?marketplace=GROCERY"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
-              >
-                Ouvrir UE →
-              </a>
-            </div>
-
-            {visibleItems.length === 0 ? (
-              <p className="py-6 text-center text-xs text-apple-gray-400">
-                {filter ? 'Aucun article ne correspond.' : 'Panier vide ou détails non chargés.'}
-              </p>
-            ) : (
-              <div className="divide-y divide-apple-gray-50">
-                {visibleItems.map((it) => (
-                  <div key={it.cart_item_uuid} className="flex items-center gap-3 px-5 py-3">
-                    {it.image_url ? (
-                      <img src={it.image_url} alt={it.title} className="w-12 h-12 rounded-lg object-contain bg-white p-1 border border-apple-gray-100" />
-                    ) : (
-                      <div className="w-12 h-12 rounded-lg bg-apple-gray-100 flex items-center justify-center">
-                        <Package className="w-5 h-5 text-apple-gray-300" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-black truncate">{it.title}</p>
-                      {it.price_cents != null && it.price_cents > 0 && (
-                        <p className="text-[11px] text-apple-gray-500">
-                          {(it.price_cents / 100).toFixed(2).replace('.', ',')} €
-                          {it.quantity > 1 && ` × ${it.quantity}`}
-                        </p>
-                      )}
-                    </div>
-                    <span className="shrink-0 text-xs font-semibold text-apple-gray-700 bg-apple-gray-100 rounded-full px-2.5 py-1">
-                      ×{it.quantity}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Uber Eats import-to-pantry panel ────────────────────────────────────────
-function UbereatsImportPanel({
-  pastOrders,
-  pastOrdersLoading,
-  importLoading,
-  lastImport,
-  error,
-  onImport,
-  onRefreshOrders,
-  onDismissFeedback,
-}: {
-  pastOrders: { uuid: string; store_title: string | null; store_image_url: string | null; completed_at: string | null; num_items: number; total_quantity: number; is_cancelled: boolean }[];
-  pastOrdersLoading: boolean;
-  importLoading: boolean;
-  lastImport: { order_uuid: string; store_label: string | null; items_imported: number; items_updated: number; items: { name: string; quantity: number; created: boolean }[] } | null;
-  error: string | null;
-  onImport: (value: string) => void | Promise<void>;
-  onRefreshOrders: () => void | Promise<void>;
-  onDismissFeedback: () => void;
-}) {
-  const [trackingInput, setTrackingInput] = useState('');
-
-  const formatDate = (iso: string | null): string => {
-    if (!iso) return '';
-    try {
-      const d = new Date(iso);
-      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
-    } catch {
-      return iso;
-    }
-  };
-
-  return (
-    <div className="rounded-[28px] border border-white/60 bg-white/80 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Importer une commande livrée</p>
-          <p className="text-xs text-apple-gray-500 mt-0.5">
-            Reflète les substitutions et ruptures de stock dans le garde-manger.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void onRefreshOrders()}
-          disabled={pastOrdersLoading}
-          className="text-xs font-semibold text-emerald-700 hover:underline disabled:opacity-50"
-        >
-          {pastOrdersLoading ? '…' : 'Rafraîchir'}
-        </button>
-      </div>
-
-      {/* Tracking URL / UUID input */}
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={trackingInput}
-          onChange={(e) => setTrackingInput(e.target.value)}
-          placeholder="Colle un lien de suivi ou un ID de commande Uber Eats"
-          className="flex-1 rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
-        />
-        <button
-          type="button"
-          onClick={async () => {
-            if (!trackingInput.trim()) return;
-            await onImport(trackingInput.trim());
-            setTrackingInput('');
-          }}
-          disabled={importLoading || !trackingInput.trim()}
-          className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
-        >
-          {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Importer'}
-        </button>
-      </div>
-
-      {/* Feedback */}
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 flex items-start justify-between gap-2">
-          <span>❌ {error}</span>
-          <button onClick={onDismissFeedback} className="hover:underline">×</button>
-        </div>
-      )}
-      {lastImport && (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 space-y-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="font-semibold">
-              ✅ {lastImport.items_imported} ajouté{lastImport.items_imported > 1 ? 's' : ''}
-              {lastImport.items_updated > 0 && `, ${lastImport.items_updated} mis à jour`}
-              {lastImport.store_label && ` depuis ${lastImport.store_label}`}
-            </p>
-            <button onClick={onDismissFeedback} className="hover:underline">×</button>
-          </div>
-          {lastImport.items.length > 0 && (
-            <ul className="list-disc list-inside text-emerald-700/80 max-h-32 overflow-y-auto">
-              {lastImport.items.slice(0, 6).map((it, i) => (
-                <li key={i}>
-                  {it.name}
-                  {it.quantity > 1 && ` × ${it.quantity}`}
-                </li>
-              ))}
-              {lastImport.items.length > 6 && <li>… et {lastImport.items.length - 6} autres</li>}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {/* Recent orders quick-pick */}
-      {pastOrders.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-apple-gray-500">Récentes</p>
-          <div className="space-y-2">
-            {pastOrders.slice(0, 5).map((order) => (
-              <div
-                key={order.uuid}
-                className={`rounded-xl border p-3 flex items-center gap-3 ${
-                  order.is_cancelled ? 'border-apple-gray-200 bg-apple-gray-50 opacity-60' : 'border-apple-gray-200 bg-white hover:border-emerald-300'
-                }`}
-              >
-                {order.store_image_url ? (
-                  <img src={order.store_image_url} alt={order.store_title ?? ''} className="w-10 h-10 rounded-lg object-cover" />
-                ) : (
-                  <div className="w-10 h-10 rounded-lg bg-apple-gray-100 flex items-center justify-center">
-                    <Store className="w-4 h-4 text-apple-gray-400" />
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-black truncate">{order.store_title ?? 'Commande Uber Eats'}</p>
-                  <p className="text-[11px] text-apple-gray-500">
-                    {formatDate(order.completed_at)} · {order.num_items} produit{order.num_items > 1 ? 's' : ''}
-                    {order.is_cancelled && ' · Annulée'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void onImport(order.uuid)}
-                  disabled={importLoading || order.is_cancelled}
-                  className="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  Importer
-                </button>
-              </div>
-            ))}
-          </div>
         </div>
       )}
     </div>
@@ -2248,497 +1771,3 @@ function ConnectionStrip({
   );
 }
 
-// ─── Uber Eats sort chips ────────────────────────────────────────────────────
-function UbereatsSortChips({
-  selected,
-  onChange,
-}: {
-  selected: UbereatsSortKey;
-  onChange: (sort: UbereatsSortKey) => void;
-}) {
-  const options: { key: UbereatsSortKey; label: string }[] = [
-    { key: 'recommended', label: 'Recommandé' },
-    { key: 'price_asc', label: 'Prix ↑' },
-    { key: 'price_desc', label: 'Prix ↓' },
-  ];
-  return (
-    <div className="mb-3 flex items-center gap-2">
-      <span className="text-[11px] font-semibold text-apple-gray-500">Trier :</span>
-      <div className="inline-flex items-center rounded-full border border-apple-gray-200 bg-white p-0.5">
-        {options.map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => onChange(o.key)}
-            className={`px-3 py-1 text-[11px] font-semibold rounded-full transition-colors ${
-              selected === o.key ? 'bg-emerald-600 text-white' : 'text-apple-gray-500 hover:text-apple-gray-700'
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Uber Eats status bar ────────────────────────────────────────────────────
-function UbereatsStatusBar({
-  ready,
-  location,
-  storeLabel,
-  onOpenSetup,
-}: {
-  ready: boolean;
-  location: string | null;
-  storeLabel: string | null;
-  onOpenSetup: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpenSetup}
-      className={`mb-3 flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs transition-colors ${
-        ready
-          ? 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100'
-          : 'border-amber-200 bg-amber-50 hover:bg-amber-100'
-      }`}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <Store className={`w-4 h-4 shrink-0 ${ready ? 'text-emerald-600' : 'text-amber-600'}`} />
-        <div className="min-w-0">
-          <p className={`font-semibold ${ready ? 'text-emerald-700' : 'text-amber-700'}`}>
-            {ready ? storeLabel : 'Configurer Uber Eats'}
-          </p>
-          <p className="text-[11px] text-apple-gray-500 truncate">
-            {location ?? 'Aucune adresse de livraison'}
-          </p>
-        </div>
-      </div>
-      <span className={`shrink-0 text-[11px] font-semibold ${ready ? 'text-emerald-600' : 'text-amber-600'}`}>
-        {ready ? 'Modifier' : 'Configurer →'}
-      </span>
-    </button>
-  );
-}
-
-// ─── Uber Eats cart banner ───────────────────────────────────────────────────
-function UbereatsCartBanner({
-  cart,
-  error,
-  onRefresh,
-}: {
-  cart: { focused: { items: { quantity: number }[] } | null; carts: { item_count: number | null; subtotal_text: string | null }[] } | null;
-  error: string | null;
-  onRefresh: () => void | Promise<void>;
-}) {
-  const focusedCount = cart?.focused?.items?.reduce((acc, it) => acc + (it.quantity || 0), 0) ?? 0;
-  const fallbackCart = cart?.carts?.[0];
-  const itemCount = focusedCount || fallbackCart?.item_count || 0;
-  const subtotal = fallbackCart?.subtotal_text || null;
-
-  return (
-    <div className="mt-2 mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2 min-w-0">
-        <ShoppingBasket className="w-4 h-4 text-emerald-700 shrink-0" />
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-emerald-800">
-            Panier Uber Eats : {itemCount} article{itemCount > 1 ? 's' : ''}
-          </p>
-          {subtotal && <p className="text-[11px] text-emerald-700/80 truncate">{subtotal}</p>}
-          {error && <p className="text-[11px] text-red-500">{error}</p>}
-        </div>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          type="button"
-          onClick={() => void onRefresh()}
-          className="text-[11px] font-semibold text-emerald-700 hover:underline"
-        >
-          Rafraîchir
-        </button>
-        <a
-          href="https://www.ubereats.com/feed?marketplace=GROCERY"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[11px] font-semibold text-emerald-700 hover:underline"
-        >
-          Ouvrir UE →
-        </a>
-      </div>
-    </div>
-  );
-}
-
-// ─── Uber Eats setup modal ───────────────────────────────────────────────────
-function UbereatsSetupModal({
-  location,
-  stores,
-  loading,
-  error,
-  selectedStoreId,
-  addresses,
-  geocodeResults,
-  geocodeLoading,
-  onClose,
-  onLoadStores,
-  onSelectStore,
-  onSearchAddress,
-  onClearGeocode,
-  onSaveAddress,
-  onActivateAddress,
-  onDeleteAddress,
-}: {
-  location: { label: string | null; title: string | null; formatted_address: string | null; latitude: number | null; longitude: number | null } | null;
-  stores: UbereatsStoreOption[];
-  loading: boolean;
-  error: string | null;
-  selectedStoreId: string | null;
-  addresses: UbereatsSavedAddress[];
-  geocodeResults: UbereatsGeocodeResult[];
-  geocodeLoading: boolean;
-  onClose: () => void;
-  onLoadStores: () => void | Promise<void>;
-  onSelectStore: (store: UbereatsStoreOption) => Promise<void>;
-  onSearchAddress: (query: string) => Promise<void>;
-  onClearGeocode: () => void;
-  onSaveAddress: (payload: {
-    label: string;
-    formatted_address: string;
-    subtitle?: string;
-    latitude: number;
-    longitude: number;
-    reference?: string;
-    reference_type?: string;
-    activate?: boolean;
-  }) => Promise<void>;
-  onActivateAddress: (addressId: number) => Promise<void>;
-  onDeleteAddress: (addressId: number) => Promise<void>;
-}) {
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [searchInput, setSearchInput] = useState('');
-  const [pickedResult, setPickedResult] = useState<UbereatsGeocodeResult | null>(null);
-  const [labelInput, setLabelInput] = useState('');
-  const [savingAddress, setSavingAddress] = useState(false);
-  const [addressFormError, setAddressFormError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!stores.length && !loading) {
-      void onLoadStores();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Debounced address autocomplete (Nominatim min 2 chars)
-  useEffect(() => {
-    const trimmed = searchInput.trim();
-    if (trimmed.length < 2 || pickedResult) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      void onSearchAddress(trimmed);
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [searchInput, pickedResult, onSearchAddress]);
-
-  const resetAddressForm = () => {
-    setShowAddForm(false);
-    setSearchInput('');
-    setPickedResult(null);
-    setLabelInput('');
-    setAddressFormError(null);
-    onClearGeocode();
-  };
-
-  const handlePickResult = (result: UbereatsGeocodeResult) => {
-    setPickedResult(result);
-    setLabelInput(result.title);
-    onClearGeocode();
-  };
-
-  const handleSaveAddress = async (e: React.FormEvent, activate: boolean) => {
-    e.preventDefault();
-    setAddressFormError(null);
-    if (!pickedResult) {
-      setAddressFormError('Choisis d\'abord une adresse dans les suggestions.');
-      return;
-    }
-    if (!labelInput.trim()) {
-      setAddressFormError('Donne un nom à cette adresse (ex: Domicile, Bureau).');
-      return;
-    }
-    setSavingAddress(true);
-    try {
-      await onSaveAddress({
-        label: labelInput.trim(),
-        formatted_address: pickedResult.formatted_address,
-        subtitle: pickedResult.subtitle ?? undefined,
-        latitude: pickedResult.latitude,
-        longitude: pickedResult.longitude,
-        reference: pickedResult.reference ?? undefined,
-        reference_type: pickedResult.reference_type,
-        activate,
-      });
-      resetAddressForm();
-      if (activate) {
-        void onLoadStores();
-      }
-    } catch (err) {
-      setAddressFormError(err instanceof Error ? err.message : 'Erreur d\'enregistrement');
-    } finally {
-      setSavingAddress(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-apple-gray-100">
-          <div>
-            <h2 className="text-lg font-bold text-black">Configurer Uber Eats</h2>
-            <p className="text-xs text-apple-gray-500 mt-0.5">Choisis ton adresse et ton magasin de courses.</p>
-          </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-apple-gray-100 text-apple-gray-500">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* Addresses section */}
-          <section>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-apple-gray-500">Adresses enregistrées</h3>
-              {!showAddForm && (
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm(true)}
-                  className="flex items-center gap-1 text-xs font-semibold text-apple-blue hover:underline"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Ajouter une adresse
-                </button>
-              )}
-            </div>
-
-            {addresses.length === 0 && !showAddForm && (
-              <p className="text-sm text-apple-gray-500 py-4 text-center rounded-xl border border-dashed border-apple-gray-200">
-                Aucune adresse enregistrée. Clique sur "Ajouter une adresse" pour commencer.
-              </p>
-            )}
-
-            {addresses.length > 0 && (
-              <div className="space-y-2">
-                {addresses.map((address) => (
-                  <div
-                    key={address.id}
-                    className={`rounded-xl border-2 p-3 flex items-center gap-3 ${
-                      address.is_active
-                        ? 'border-emerald-500 bg-emerald-50'
-                        : 'border-apple-gray-200 bg-white'
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-black truncate">{address.label}</p>
-                        {address.is_active && (
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-apple-gray-500 truncate">{address.formatted_address}</p>
-                    </div>
-                    {!address.is_active && (
-                      <button
-                        type="button"
-                        onClick={() => void onActivateAddress(address.id)}
-                        className="shrink-0 px-3 py-1.5 rounded-lg bg-apple-blue text-white text-xs font-semibold hover:bg-blue-600"
-                      >
-                        Activer
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => void onDeleteAddress(address.id)}
-                      className="shrink-0 p-1.5 rounded-lg text-apple-gray-400 hover:bg-red-50 hover:text-red-500"
-                      title="Supprimer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {showAddForm && (
-              <div className="mt-3 rounded-xl border border-apple-gray-200 bg-white p-4 space-y-3">
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
-                  <input
-                    type="text"
-                    value={searchInput}
-                    onChange={(e) => {
-                      setSearchInput(e.target.value);
-                      if (pickedResult) setPickedResult(null);
-                    }}
-                    placeholder="Rechercher une adresse (rue, code postal, ville…)"
-                    autoFocus
-                    className="w-full pl-9 pr-9 py-2.5 rounded-xl border border-apple-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
-                  />
-                  {geocodeLoading && (
-                    <Loader2 className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-apple-gray-400 animate-spin" />
-                  )}
-                </div>
-
-                {!pickedResult && geocodeResults.length > 0 && (
-                  <div className="rounded-xl border border-apple-gray-200 bg-white max-h-60 overflow-y-auto divide-y divide-apple-gray-100">
-                    {geocodeResults.map((result, idx) => (
-                      <button
-                        key={`${result.reference}-${idx}`}
-                        type="button"
-                        onClick={() => handlePickResult(result)}
-                        className="w-full text-left px-3 py-2 hover:bg-apple-gray-50"
-                      >
-                        <p className="text-sm font-medium text-black truncate">{result.title}</p>
-                        <p className="text-[11px] text-apple-gray-500 truncate">{result.subtitle}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {pickedResult && (
-                  <div className="rounded-xl bg-apple-gray-50 border border-apple-gray-200 px-3 py-2 flex items-start gap-2">
-                    <Check className="w-4 h-4 mt-0.5 text-emerald-600 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-black truncate">{pickedResult.title}</p>
-                      <p className="text-[11px] text-apple-gray-500 truncate">{pickedResult.formatted_address}</p>
-                      <p className="text-[10px] text-apple-gray-400 mt-0.5">
-                        {pickedResult.latitude.toFixed(4)}, {pickedResult.longitude.toFixed(4)}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPickedResult(null);
-                        setSearchInput('');
-                      }}
-                      className="shrink-0 text-xs text-apple-gray-500 hover:underline"
-                    >
-                      Changer
-                    </button>
-                  </div>
-                )}
-
-                <input
-                  type="text"
-                  value={labelInput}
-                  onChange={(e) => setLabelInput(e.target.value)}
-                  placeholder="Nom de l'adresse (ex: Domicile, Bureau)"
-                  className="w-full rounded-xl border border-apple-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
-                />
-
-                {addressFormError && <p className="text-xs text-red-500">{addressFormError}</p>}
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={(e) => void handleSaveAddress(e, true)}
-                    disabled={savingAddress || !pickedResult || !labelInput.trim()}
-                    className="px-4 py-2 rounded-xl bg-apple-blue text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    {savingAddress ? 'Enregistrement…' : 'Enregistrer & activer'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => void handleSaveAddress(e, false)}
-                    disabled={savingAddress || !pickedResult || !labelInput.trim()}
-                    className="px-4 py-2 rounded-xl border border-apple-gray-200 text-sm font-semibold text-apple-gray-700 hover:bg-apple-gray-50 disabled:opacity-50"
-                  >
-                    Enregistrer seulement
-                  </button>
-                  <button
-                    type="button"
-                    onClick={resetAddressForm}
-                    className="px-4 py-2 rounded-xl text-sm font-medium text-apple-gray-500 hover:bg-apple-gray-100"
-                  >
-                    Annuler
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Active location summary */}
-            {location?.label && !showAddForm && (
-              <p className="mt-3 text-[11px] text-apple-gray-400">
-                Adresse active dans la session : <span className="font-medium text-apple-gray-600">{location.label}</span>
-              </p>
-            )}
-          </section>
-
-          {/* Stores section */}
-          <section>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-apple-gray-500">Magasins disponibles</h3>
-              <button
-                type="button"
-                onClick={() => void onLoadStores()}
-                disabled={loading}
-                className="text-xs font-semibold text-apple-blue hover:underline disabled:opacity-50"
-              >
-                {loading ? 'Chargement…' : 'Actualiser'}
-              </button>
-            </div>
-
-            {error && <p className="mb-3 text-xs text-red-500">❌ {error}</p>}
-
-            {loading && stores.length === 0 ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-apple-gray-400" />
-              </div>
-            ) : stores.length === 0 ? (
-              <p className="text-sm text-apple-gray-500 py-6 text-center">
-                Aucun magasin pour cette adresse. Vérifie tes cookies ou change d'adresse.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {stores.map((store) => {
-                  const isSelected = selectedStoreId === store.uuid;
-                  return (
-                    <button
-                      key={store.uuid}
-                      type="button"
-                      onClick={() => void onSelectStore(store)}
-                      className={`w-full text-left rounded-xl border-2 p-3 flex items-center gap-3 transition-all ${
-                        isSelected
-                          ? 'border-emerald-500 bg-emerald-50'
-                          : 'border-apple-gray-200 bg-white hover:border-red-300 hover:bg-red-50/30'
-                      }`}
-                    >
-                      {store.image_url ? (
-                        <img src={store.image_url} alt={store.name} className="w-12 h-12 rounded-lg object-cover" />
-                      ) : (
-                        <div className="w-12 h-12 rounded-lg bg-apple-gray-100 flex items-center justify-center">
-                          <Store className="w-5 h-5 text-apple-gray-400" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-black truncate">{store.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-apple-gray-500">
-                          {store.rating != null && <span>★ {store.rating.toFixed(1)}</span>}
-                          {store.subtitle && <span>{store.subtitle}</span>}
-                        </div>
-                      </div>
-                      {isSelected && (
-                        <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-}
