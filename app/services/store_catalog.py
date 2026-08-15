@@ -51,7 +51,7 @@ from app.services.scrapers.carrefour import search_carrefour
 from app.services.scrapers.intermarche import search_intermarche
 from app.services.scrapers.leclerc import search_leclerc
 
-CACHE_TTL_DAYS = 15
+CACHE_TTL_HOURS = 12
 
 
 @dataclass(frozen=True, slots=True)
@@ -539,10 +539,10 @@ def upsert_search_cache(
     session: Session,
     store: SupermarketStore,
     results: list[dict[str, Any]],
-    ttl_days: int = CACHE_TTL_DAYS,
+    ttl_hours: int = CACHE_TTL_HOURS,
 ) -> list[SupermarketSearchCache]:
     now = datetime.now(UTC)
-    expires_at = now + timedelta(days=ttl_days)
+    expires_at = now + timedelta(hours=ttl_hours)
 
     session.exec(
         delete(SupermarketSearchCache).where(
