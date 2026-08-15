@@ -147,6 +147,24 @@ The reliable path is cookies: the AdamHUB Connect browser extension (`extension/
 
 **Auchan does not require a logged-in account**: any valid session cookie is enough — the price is server-rendered in the search HTML once a store is selected via `POST /api/v1/supermarket/auchan/selected-store` (wired to `POST /journey/update`), and `GET /api/v1/supermarket/auchan/offering-contexts` lists the selectable stores for an address. Searching without a selected store returns a clear "sélectionnez un magasin" error.
 
+### Matrice connexion (recherche avec prix)
+
+Compilée depuis les validations live des workers T2-T5 (détails dans
+`docs/supermarket-reverse-engineering.md`). Les flags de capacité sont exposés
+par `GET /api/v1/supermarket/stores` (`supports_sort`, `supports_promotions`,
+`requires_store_selection`, `requires_login`).
+
+| Enseigne | Login requis | Magasin sélectionné requis | Tri | Promos | Statut |
+| --- | --- | --- | --- | --- | --- |
+| Intermarché | Non | Oui (`itm_pdv` cookie, prix magasin) | Oui (`sort`) | Oui (`isPromo`) | Live |
+| Carrefour | Non | Oui (Drive dans la session cookies) | Oui (`sort`) | Oui (filtre client) | Live |
+| Leclerc | Non | Oui (sous-domaine `fdN` Drive) | Oui (`tri`) | Non | À valider |
+| Auchan | Non | Oui (`POST selected-store`) | Oui (`sort`) | Non | Live validé |
+
+Aucune des quatre enseignes n'exige un compte connecté pour la recherche avec
+prix ; toutes exigent un contexte magasin pour que le prix corresponde au
+magasin.
+
 Login/password is a **best-effort alternative per store**: `POST /api/v1/supermarket/connections/import` accepts an optional `credentials` object `{username, password}` which is encrypted at rest (same Fernet container as cookies) and only works where a programmatic login exists without captcha/2FA. It is not wired to any scraper yet — the Leclerc reverse-engineered endpoint in particular needs **live validation** against a real session before relying on it. The browser extension remains the reliable path.
 
 ## Testing

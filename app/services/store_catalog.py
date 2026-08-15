@@ -61,23 +61,43 @@ class SupermarketStoreDefinition:
     supports_search: bool = True
     supports_mapping: bool = True
     supports_cart_automation: bool = False
-    supports_promotions_filter: bool = False
+    supports_sort: bool = False
+    supports_promotions: bool = False
+    requires_store_selection: bool = False
+    requires_login: bool = False
     scraper_name: str | None = None
     notes: str | None = None
 
 
+# Connection matrix (compiled from the live observations of the T2-T5 workers,
+# see docs/supermarket-reverse-engineering.md "Matrice connexion"):
+#
+#   Enseigne     | Login requis | Sélection magasin requise        | Statut
+#   Intermarché  | Non          | Oui (itm_pdv cookie, prix mag.) | Live
+#   Carrefour    | Non          | Oui (Drive dans la session)     | Live
+#   Leclerc      | Non          | Oui (sous-domaine fdN Drive)    | À valider
+#   Auchan       | Non          | Oui (POST selected-store)       | Live validé
+#
+# Aucune des quatre enseignes n'exige un compte connecté pour la recherche avec
+# prix (requires_login=False partout) ; toutes exigent un contexte magasin pour
+# que le prix corresponde au magasin (requires_store_selection=True). La
+# sélection est soit explicite (Auchan), soit portée par la session cookies ou
+# l'URL de base (Intermarché/Carrefour/Leclerc).
 STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
     SupermarketStoreDefinition(
         key=SupermarketStore.INTERMARCHE,
         label="Intermarché",
         scraper_name="intermarche",
-        supports_promotions_filter=True,
+        supports_sort=True,
+        supports_promotions=True,
+        requires_store_selection=True,
         notes=(
             "Intermarché search via the public /api/products JSON API. Prices are "
             "store-specific: the selected store id is recovered from "
             "data/cookies_intermarche.json (itm_pdv cookie) and passed as `ref`. "
             "Search works without cookies (default catalog) but the store's own "
-            "prices require a session with a store selected."
+            "prices require a session with a store selected. Sorting and the "
+            "promotions-only filter map to the JSON `sort` and `isPromo` fields."
         ),
     ),
     SupermarketStoreDefinition(
@@ -85,16 +105,24 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         label="Carrefour",
         scraper_name="carrefour",
         supports_mapping=False,
+        supports_sort=True,
+        supports_promotions=True,
+        requires_store_selection=True,
         notes=(
             "Carrefour search via the /s?q=… JSON endpoint (application/json, "
-            "XHR headers). Requires data/cookies_carrefour.json from a logged-in "
-            "browser session with a Drive store selected (prices are store-specific)."
+            "XHR headers). Requires data/cookies_carrefour.json from a browser "
+            "session with a Drive store selected (prices are store-specific; the "
+            "selection lives in the session cookies). Sorting maps to the `sort` "
+            "param and promotions-only is filtered client-side from the offers "
+            "blocks (see docs/supermarket-reverse-engineering.md)."
         ),
     ),
     SupermarketStoreDefinition(
         key=SupermarketStore.LECLERC,
         label="Leclerc",
         scraper_name="leclerc",
+        supports_sort=True,
+        requires_store_selection=True,
         notes=(
             "Leclerc Drive search via HTML SSR of recherche.aspx (JSON blob "
             "inside initOptions('...pnlElementProduit', {..})). Requires "
@@ -109,13 +137,16 @@ STORE_REGISTRY: tuple[SupermarketStoreDefinition, ...] = (
         key=SupermarketStore.AUCHAN,
         label="Auchan",
         scraper_name="auchan",
+        supports_sort=True,
+        requires_store_selection=True,
         notes=(
             "Auchan search via server-rendered /recherche HTML; the price is in "
             "the offers block once a store is selected for the session. Works "
             "without login (any valid session cookie) but requires a store "
             "selection: POST /supermarket/auchan/selected-store (journey/update) "
             "before searching, and GET /supermarket/auchan/offering-contexts to "
-            "list the selectable stores. Prices are store-specific."
+            "list the selectable stores. Prices are store-specific. Sorting maps "
+            "to the `sort` query param."
         ),
     ),
 )

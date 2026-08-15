@@ -90,6 +90,7 @@ def test_parse_intermarche_products_handles_missing_fields():
     assert results[0]["id"] == "sku-1"
     assert results[0]["name"] == "Panzani - Pates"
     assert results[0]["product_url"] == "https://www.intermarche.com/produit/pates-123"
+    assert results[0]["store"] == "Intermarché"
     assert results[1]["image"] is None
     assert results[1]["product_url"] is None
     assert results[1]["price"] is None
@@ -177,6 +178,7 @@ def test_parse_intermarche_products_maps_real_fixture_products():
     assert normalized["packaging"] == "les 4 bouteilles de 50cl - 200cl"
     assert normalized["price_text"] == "4,08€"
     assert normalized["price_amount"] == 4.08
+    assert results[0]["store"] == "Intermarché"
     assert normalized["product_url"].startswith("https://www.intermarche.com/produit/")
     assert normalized["image_url"].startswith("https://")
 
@@ -517,10 +519,48 @@ def test_store_registry_lists_four_stores_including_leclerc_and_auchan():
     assert leclerc.scraper_name == "leclerc"
     assert auchan.scraper_name == "auchan"
     # Leclerc has no promotions-only query flag; the capability is only exposed
-    # on stores that implement it (Intermarché).
-    assert leclerc.supports_promotions_filter is False
+    # on stores that implement it (Intermarché + Carrefour).
+    assert leclerc.supports_promotions is False
+    assert auchan.supports_promotions is False
     intermarche = next(d for d in definitions if d.key == SupermarketStore.INTERMARCHE)
-    assert intermarche.supports_promotions_filter is True
+    assert intermarche.supports_promotions is True
+    carrefour = next(d for d in definitions if d.key == SupermarketStore.CARREFOUR)
+    assert carrefour.supports_promotions is True
+
+    # Every store supports sorting (param/JSON field confirmed live by T2-T5).
+    assert all(d.supports_sort for d in definitions)
+    # None of the four requires a logged-in account for search-with-price, but
+    # all require a store context for store-specific prices.
+    assert all(d.requires_login is False for d in definitions)
+    assert all(d.requires_store_selection for d in definitions)
+
+
+def test_supermarket_stores_endpoint_exposes_capability_flags(client, auth_headers):
+    response = client.get("/api/v1/supermarket/stores", headers=auth_headers)
+    assert response.status_code == 200
+    stores = {entry["key"]: entry for entry in response.json()}
+    assert set(stores) == {"intermarche", "carrefour", "leclerc", "auchan"}
+
+    intermarche = stores["intermarche"]
+    assert intermarche["supports_sort"] is True
+    assert intermarche["supports_promotions"] is True
+    assert intermarche["requires_store_selection"] is True
+    assert intermarche["requires_login"] is False
+
+    carrefour = stores["carrefour"]
+    assert carrefour["supports_sort"] is True
+    assert carrefour["supports_promotions"] is True
+
+    leclerc = stores["leclerc"]
+    assert leclerc["supports_sort"] is True
+    assert leclerc["supports_promotions"] is False
+    assert leclerc["requires_login"] is False
+
+    auchan = stores["auchan"]
+    assert auchan["supports_sort"] is True
+    assert auchan["supports_promotions"] is False
+    assert auchan["requires_store_selection"] is True
+    assert auchan["requires_login"] is False
 
 
 def test_leclerc_parser_extracts_embedded_json_from_search_html():
@@ -767,6 +807,7 @@ def test_auchan_parser_extracts_product_cards_from_search_html():
     """
     items = parse_auchan_search_html(html, max_results=10)
     assert len(items) == 1
+    assert items[0]["store"] == "Auchan"
     normalized = [
         normalize_search_result(SupermarketStore.AUCHAN, "lait", item) for item in items
     ]

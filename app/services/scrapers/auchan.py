@@ -233,6 +233,7 @@ def parse_auchan_search_html(html: str, max_results: int) -> list[dict[str, str 
             "price": price,
             "image": image,
             "product_url": product_url,
+            "store": "Auchan",
         }
         if len(results) >= max_results:
             break

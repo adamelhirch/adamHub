@@ -242,7 +242,7 @@ async def search_leclerc(
     1..6 confirmed in the live capture). ``promotions_only`` is accepted for
     interface parity and ignored: Leclerc has no promotions-only query flag on
     `recherche.aspx` (promos live on a separate page), so the store definition
-    exposes ``supports_promotions_filter`` so callers can skip the flag.
+    exposes ``supports_promotions`` so callers can skip the flag.
     """
     del promotions_only
     base = _resolve_store_base_url(store_base_url)
