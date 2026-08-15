@@ -4,7 +4,7 @@ import {
   ShoppingBasket, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
   ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil,
 } from 'lucide-react';
-import { useGroceryStore, STORE_LABELS } from '../store/groceryStore';
+import { useGroceryStore, STORE_LABELS, STORE_CAPABILITIES } from '../store/groceryStore';
 import type {
   GroceryItem,
   PantryItem,
@@ -612,6 +612,7 @@ function PantryMappingPanel({
   setQuery,
   promotionsOnly,
   setPromotionsOnly,
+  supportsPromotions,
   searchResults,
   searchLoading,
   searchError,
@@ -628,6 +629,7 @@ function PantryMappingPanel({
   setQuery: (value: string) => void;
   promotionsOnly: boolean;
   setPromotionsOnly: (value: boolean) => void;
+  supportsPromotions: boolean;
   searchResults: SupermarketProduct[];
   searchLoading: boolean;
   searchError: string | null;
@@ -706,15 +708,17 @@ function PantryMappingPanel({
           )}
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-apple-gray-600">
-          <input
-            type="checkbox"
-            checked={promotionsOnly}
-            onChange={(e) => setPromotionsOnly(e.target.checked)}
-            className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
-          />
-          Promotions uniquement
-        </label>
+        {supportsPromotions && (
+          <label className="flex items-center gap-2 text-sm text-apple-gray-600">
+            <input
+              type="checkbox"
+              checked={promotionsOnly}
+              onChange={(e) => setPromotionsOnly(e.target.checked)}
+              className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+            />
+            Promotions uniquement
+          </label>
+        )}
 
         {searchError && <p className="text-xs text-red-500">{searchError}</p>}
 
@@ -763,6 +767,8 @@ export default function GroceriesPage() {
   } = useGroceryStore();
 
   const currentStoreLabel = STORE_LABELS[selectedStore];
+  const selectedCapabilities = STORE_CAPABILITIES[selectedStore];
+  const supportsPromotions = selectedCapabilities.supports_promotions;
 
   const [activeTab, setActiveTab] = useState<Tab>('Liste de courses');
   const [search, setSearch] = useState('');
@@ -1186,20 +1192,22 @@ export default function GroceriesPage() {
                       )}
                     </div>
 
-                    <label className="mt-2 flex items-center gap-2 text-sm text-apple-gray-600">
-                      <input
-                        type="checkbox"
-                        checked={promotionsOnly}
-                        onChange={(e) => setPromotionsOnly(e.target.checked)}
-                        className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
-                      />
-                      Promotions uniquement
-                    </label>
+                    {supportsPromotions && (
+                      <label className="mt-2 flex items-center gap-2 text-sm text-apple-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={promotionsOnly}
+                          onChange={(e) => setPromotionsOnly(e.target.checked)}
+                          className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                        />
+                        Promotions uniquement
+                      </label>
+                    )}
 
                     {/* Loading hint */}
                     {searchLoading && (
                       <p className="text-xs text-apple-gray-400 mt-2 animate-pulse">
-                        ⏳ Le scraper Intermarché est en cours… (~15-30s)
+                        ⏳ Le scraper {currentStoreLabel} est en cours… (~15-30s)
                       </p>
                     )}
 
@@ -1386,6 +1394,7 @@ export default function GroceriesPage() {
                   setQuery={setMappingQuery}
                   promotionsOnly={promotionsOnly}
                   setPromotionsOnly={setPromotionsOnly}
+                  supportsPromotions={supportsPromotions}
                   searchResults={searchResults}
                   searchLoading={searchLoading}
                   searchError={searchError}
@@ -1515,15 +1524,17 @@ export default function GroceriesPage() {
                       )}
                     </div>
 
-                    <label className="flex items-center gap-2 text-sm text-apple-gray-600">
-                      <input
-                        type="checkbox"
-                        checked={promotionsOnly}
-                        onChange={(e) => setPromotionsOnly(e.target.checked)}
-                        className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
-                      />
-                      Promotions uniquement
-                    </label>
+                    {supportsPromotions && (
+                      <label className="flex items-center gap-2 text-sm text-apple-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={promotionsOnly}
+                          onChange={(e) => setPromotionsOnly(e.target.checked)}
+                          className="h-4 w-4 rounded border-apple-gray-300 text-red-600 focus:ring-red-400"
+                        />
+                        Promotions uniquement
+                      </label>
+                    )}
 
                     {searchLoading && (
                       <p className="text-xs text-apple-gray-400 animate-pulse">⏳ Recherche du produit magasin…</p>
@@ -1676,8 +1687,8 @@ export default function GroceriesPage() {
 const DIRECT_STORE_OPTIONS: { key: SupermarketStoreKey; label: string }[] = [
   { key: 'intermarche', label: 'Intermarché' },
   { key: 'carrefour',   label: 'Carrefour'   },
-  // { key: 'leclerc',   label: 'Leclerc'   },
-  // { key: 'auchan',    label: 'Auchan'    },
+  { key: 'leclerc',     label: 'Leclerc'     },
+  { key: 'auchan',      label: 'Auchan'      },
 ];
 
 function StoreSelector({
@@ -1687,6 +1698,7 @@ function StoreSelector({
   selected: SupermarketStoreKey;
   onChange: (store: SupermarketStoreKey) => void;
 }) {
+  const requiresStoreSelection = STORE_CAPABILITIES[selected].requires_store_selection;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {DIRECT_STORE_OPTIONS.length > 1 && (
@@ -1706,6 +1718,12 @@ function StoreSelector({
             </button>
           ))}
         </div>
+      )}
+      {requiresStoreSelection && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+          <Store className="w-3 h-3" />
+          magasin requis
+        </span>
       )}
     </div>
   );

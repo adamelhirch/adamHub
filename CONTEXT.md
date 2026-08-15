@@ -55,7 +55,7 @@ _Avoid_: Restock record, sync entry
 ### Supermarket connections
 
 **SupermarketStore**:
-A supported online grocery retailer (Intermarché, Carrefour) with defined capabilities: search, product mapping, and cart automation.
+A supported online grocery retailer (Intermarché, Carrefour, Leclerc, Auchan) with defined capabilities (search, mapping, sort, promotions, store-selection/login requirements).
 _Avoid_: Retailer, supermarket brand, vendor
 
 **SupermarketConnection**:

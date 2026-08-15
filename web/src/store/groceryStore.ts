@@ -51,11 +51,29 @@ export interface PantryOverview {
   expiring_within_7_days: number;
 }
 
-export type SupermarketStoreKey = 'intermarche' | 'carrefour';
+export type SupermarketStoreKey = 'intermarche' | 'carrefour' | 'leclerc' | 'auchan';
 
 export const STORE_LABELS: Record<SupermarketStoreKey, string> = {
   intermarche: 'Intermarché',
   carrefour: 'Carrefour',
+  leclerc: 'Leclerc',
+  auchan: 'Auchan',
+};
+
+export interface SupermarketStoreCapabilities {
+  supports_sort: boolean;
+  supports_promotions: boolean;
+  requires_store_selection: boolean;
+  requires_login: boolean;
+}
+
+// Mirrors the connection matrix served by GET /supermarket/stores (source of
+// truth: app/services/store_catalog.py STORE_REGISTRY).
+export const STORE_CAPABILITIES: Record<SupermarketStoreKey, SupermarketStoreCapabilities> = {
+  intermarche: { supports_sort: true, supports_promotions: true, requires_store_selection: true, requires_login: false },
+  carrefour:   { supports_sort: true, supports_promotions: true, requires_store_selection: true, requires_login: false },
+  leclerc:     { supports_sort: true, supports_promotions: false, requires_store_selection: true, requires_login: false },
+  auchan:      { supports_sort: true, supports_promotions: false, requires_store_selection: true, requires_login: false },
 };
 
 export interface SupermarketConnection {
