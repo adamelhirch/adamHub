@@ -16,12 +16,6 @@ const STORES = {
     homepage: "https://www.intermarche.com/",
     sessionMarker: null,
   },
-  ubereats: {
-    label: "Uber Eats",
-    cookieDomains: [".ubereats.com", "www.ubereats.com"],
-    homepage: "https://www.ubereats.com/fr/",
-    sessionMarker: "sid",
-  },
   leclerc: {
     label: "Leclerc",
     cookieDomains: [".leclercdrive.fr", "www.leclercdrive.fr"],
