@@ -320,7 +320,7 @@ Réponse : `application/json` sous la forme
 | Cas | Résultat attendu | Constat |
 |---|---|---|
 | Recherche sans cookies | `CarrefourAuthError` (pas de cookies) | Le scraper lève avant tout appel réseau quand `data/cookies_carrefour.json` manque (testé offline) |
-| Recherche avec cookies depuis une IP data-center | 403 Cloudflare | Confirmé live depuis l'environnement dev : 403 HTML même avec les cookies frais — Cloudflare bloque les IP data-center ; un proxy résidentiel (`ADAMHUB_CARREFOUR_PROXY_URL`) est requis hors navigateur |
+| Recherche avec cookies depuis une IP data-center | 403 Cloudflare | Confirmé live depuis l'environnement dev : 403 HTML même avec les cookies frais — Cloudflare bloque les IP data-center ; un proxy résidentiel du pool partagé (`data/proxies.txt`, voir README « Pool de proxies ») est requis hors navigateur |
 | Recherche avec cookies depuis un navigateur réel (HAR) | 200 JSON | Confirmé dans `carrefour.har` / `carrefourr-recherche.har` : pages 2-19 + variantes `sort` servent du JSON |
 | Prix sans login | Prix visibles sans login | Les offres (`offers.*.*.attributes.price`) sont présentes dans le JSON sans compte ; un Drive store doit être sélectionné pour que le prix corresponde au magasin |
 

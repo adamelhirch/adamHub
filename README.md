@@ -167,6 +167,17 @@ magasin.
 
 Login/password is a **best-effort alternative per store**: `POST /api/v1/supermarket/connections/import` accepts an optional `credentials` object `{username, password}` which is encrypted at rest (same Fernet container as cookies) and only works where a programmatic login exists without captcha/2FA. It is not wired to any scraper yet — the Leclerc reverse-engineered endpoint in particular needs **live validation** against a real session before relying on it. The browser extension remains the reliable path.
 
+### Pool de proxies
+
+Cloudflare/DataDome bloque les IP data-center : la recherche supermarché passe par un **pool de proxies résidentiels partagé** (`app/services/proxy_pool.py`) entre les quatre enseignes. Il remplace les anciennes env vars proxy par enseigne, désormais supprimées.
+
+- **Fichier** : `data/proxies.txt` (chemin configurable via `ADAMHUB_PROXIES_FILE`), **1 ligne = 1 proxy** au format `login:password@hostname:port` (une IP résidentielle française par proxy). Lignes de commentaire `#` et lignes vides ignorées. Le fichier est gitignoré : remplissez-le localement.
+- **Sticky par recherche** : un appel `search` multi-queries (`queries=["lait","farine","oeufs"]`) garde le **même proxy** pour toutes ses requêtes.
+- **Rotation sur blocage** : à la première requête bloquée (403, DataDome/Cloudflare, 429, timeout), le proxy est marqué bloqué et le suivant est essayé.
+- **Cooldown** : un proxy bloqué est mis en pause `ADAMHUB_PROXY_COOLDOWN_SECONDS` (défaut `600` s) avant de revenir en rotation (round-robin sur les proxies sains).
+- **Pool partagé** : un seul pool pour les quatre enseignes — un proxy grillé par DataDome est probablement grillé partout.
+- **Pool vide** : fichier absent ou vide → les scrapers passent en **accès direct**, sans erreur.
+
 ## Testing
 
 Backend:
