@@ -95,10 +95,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--proxy-url",
-        default=(
-            os.environ.get("ADAMHUB_INTERMARCHE_PROXY_URL", "").strip()
-            or os.environ.get("INTERMARCHE_PROXY_URL", "").strip()
-        ),
+        default="",
         help="Proxy URL optionnel, ex: http://user:pass@host:port",
     )
     parser.add_argument(
