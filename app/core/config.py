@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24 * 30  # 30 days
 
+    # Shared supermarket proxy pool (app/services/proxy_pool.py). proxies_file
+    # is the 1-proxy-per-line list (login:password@host:port), cooldown_seconds
+    # is how long a blocked proxy stays paused before it can rotate back in.
+    proxies_file: str = "data/proxies.txt"
+    proxy_cooldown_seconds: int = 600
+
 
 def validate_security_config(settings: Settings) -> None:
     """Refuse startup when secrets/CORS fall back to insecure defaults.
