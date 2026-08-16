@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>AdamHUB Connect — Options</title>
-    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <header>
@@ -11,13 +11,76 @@
       <span class="account-badge">Options</span>
     </header>
 
-    <section class="status">
-      <p>
-        Les réglages (URL du hub, ports du frontend, fréquence de synchro et
-        activation par enseigne) arrivent ici dans une prochaine version.
-        Valeurs actuelles par défaut : hub <code>http://127.0.0.1:8000</code>,
-        frontend <code>5173</code>/<code>5174</code>.
-      </p>
-    </section>
+    <main>
+      <form id="options-form" novalidate>
+        <div class="field">
+          <label for="api-url">URL API (hub)</label>
+          <input
+            id="api-url"
+            name="apiUrl"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="http://127.0.0.1:8000"
+          />
+          <p class="hint">Adresse http(s) du backend AdamHUB.</p>
+        </div>
+
+        <div class="field">
+          <label for="frontend-url">URL frontend</label>
+          <input
+            id="frontend-url"
+            name="frontendUrl"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="http://localhost:5173"
+          />
+          <p class="hint">Adresse http(s) de l'app AdamHUB.</p>
+        </div>
+
+        <div class="field">
+          <label for="sync-interval">Fréquence de synchro (heures)</label>
+          <input
+            id="sync-interval"
+            name="syncIntervalHours"
+            type="number"
+            min="0.1"
+            step="0.1"
+            inputmode="decimal"
+          />
+          <p class="hint">Toutes les combien d'heures l'extension re-synchronise les sessions.</p>
+        </div>
+
+        <div class="field">
+          <label for="cooldown">Cooldown (minutes)</label>
+          <input
+            id="cooldown"
+            name="cooldownMinutes"
+            type="number"
+            min="0"
+            step="1"
+            inputmode="numeric"
+          />
+          <p class="hint">Délai minimal entre deux synchros d'une même enseigne.</p>
+        </div>
+
+        <fieldset id="stores">
+          <legend>Enseignes actives</legend>
+          <p class="hint">Décoche une enseigne pour la mettre en pause.</p>
+          <!-- Store toggles injected by options.js from lib/stores.js. -->
+        </fieldset>
+
+        <div class="actions">
+          <button type="submit" class="primary">Enregistrer</button>
+          <button type="button" id="reset">Réinitialiser</button>
+          <span id="save-status" class="status hidden" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+    </main>
+
+    <script src="options.js" type="module"></script>
   </body>
 </html>

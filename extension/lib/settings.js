@@ -12,19 +12,11 @@ import { STORE_KEYS } from "./stores.js";
 export const SETTINGS_STORAGE_KEY = "settings";
 
 const URL_RE = /^https?:\/\/.+/;
-const PORT_RE = /^\d+$/;
 
-function isValidPort(value) {
-  return (
-    (typeof value === "number" && Number.isInteger(value)) ||
-    (typeof value === "string" && PORT_RE.test(value))
-  );
-}
-
-function toPort(value) {
-  const port = typeof value === "string" ? Number(value) : value;
-  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
-}
+const LOOPBACK_ALIASES = {
+  "127.0.0.1": "localhost",
+  localhost: "127.0.0.1",
+};
 
 function defaultStoreToggles() {
   return Object.fromEntries(STORE_KEYS.map((key) => [key, { enabled: true }]));
@@ -36,7 +28,7 @@ function defaultStoreToggles() {
  */
 export const DEFAULT_SETTINGS = Object.freeze({
   apiUrl: "http://127.0.0.1:8000",
-  frontendUrls: Object.freeze([5173, 5174]),
+  frontendUrl: "http://localhost:5173",
   syncIntervalHours: 6,
   cooldownMinutes: 30,
   stores: Object.freeze(defaultStoreToggles()),
@@ -61,26 +53,11 @@ export function validateSettings(input = {}) {
     errors.push("apiUrl invalide");
   }
 
-  let frontendUrls = [...DEFAULT_SETTINGS.frontendUrls];
-  if (src.frontendUrls !== undefined) {
-    if (Array.isArray(src.frontendUrls)) {
-      const seen = new Set();
-      const ports = [];
-      for (const entry of src.frontendUrls) {
-        if (!isValidPort(entry)) continue;
-        const port = toPort(entry);
-        if (port === null || seen.has(port)) continue;
-        seen.add(port);
-        ports.push(port);
-      }
-      if (ports.length > 0) {
-        frontendUrls = ports;
-      } else {
-        errors.push("frontendUrls invalide");
-      }
-    } else {
-      errors.push("frontendUrls invalide");
-    }
+  let frontendUrl = DEFAULT_SETTINGS.frontendUrl;
+  if (typeof src.frontendUrl === "string" && URL_RE.test(src.frontendUrl)) {
+    frontendUrl = src.frontendUrl;
+  } else if (src.frontendUrl !== undefined) {
+    errors.push("frontendUrl invalide");
   }
 
   let syncIntervalHours = DEFAULT_SETTINGS.syncIntervalHours;
@@ -117,22 +94,50 @@ export function validateSettings(input = {}) {
   return {
     valid: errors.length === 0,
     errors,
-    settings: { apiUrl, frontendUrls, syncIntervalHours, cooldownMinutes, stores },
+    settings: { apiUrl, frontendUrl, syncIntervalHours, cooldownMinutes, stores },
   };
 }
 
 /**
- * Derive the full list of frontend origins (127.0.0.1 + localhost) from a list
- * of ports. Used both to open the hub and to match open AdamHUB tabs.
+ * Derive the base origins that identify "the frontend" from its configured
+ * URL. For loopback hosts both spellings are returned (localhost and
+ * 127.0.0.1) so a tab opened on either host matches a config pointing at the
+ * other. Used both to open the hub and to match open AdamHUB tabs.
  *
- * @param {number[]} ports
- * @returns {string[]}
+ * @param {string} frontendUrl
+ * @returns {string[]} normalized origins (scheme://host[:port])
  */
-export function expandFrontendUrls(ports) {
-  const urls = [];
-  for (const port of ports) {
-    urls.push(`http://127.0.0.1:${port}/`);
-    urls.push(`http://localhost:${port}/`);
+export function frontendOrigins(frontendUrl) {
+  let parsed;
+  try {
+    parsed = new URL(frontendUrl);
+  } catch {
+    return [];
   }
-  return urls;
+  const origins = [parsed.origin];
+  const alias = LOOPBACK_ALIASES[parsed.hostname];
+  if (alias) {
+    parsed.hostname = alias;
+    origins.push(parsed.origin);
+  }
+  return origins;
+}
+
+/**
+ * Whether a tab URL points at the configured frontend. Loopback-host tolerant
+ * (localhost ↔ 127.0.0.1) and path-insensitive: origin comparison only.
+ *
+ * @param {string|null|undefined} tabUrl
+ * @param {string} frontendUrl
+ * @returns {boolean}
+ */
+export function matchesFrontend(tabUrl, frontendUrl) {
+  if (typeof tabUrl !== "string" || tabUrl === "") return false;
+  let tab;
+  try {
+    tab = new URL(tabUrl);
+  } catch {
+    return false;
+  }
+  return frontendOrigins(frontendUrl).includes(tab.origin);
 }

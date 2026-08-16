@@ -5,13 +5,12 @@
 
 import { STORES, STORE_KEYS, getStore } from "./stores.js";
 import { createAuth } from "./auth.js";
-import { validateSettings, expandFrontendUrls, SETTINGS_STORAGE_KEY } from "./settings.js";
+import { validateSettings, SETTINGS_STORAGE_KEY } from "./settings.js";
 import { normalizeCookie, buildPayload, shouldSync } from "./sync.js";
 
 export const ALARM_NAME = "adamhub-sync";
 export const LAST_SYNC_KEY = "lastSync";
 export const IMPORT_PATH = "/api/v1/supermarket/connections/import";
-export const DEFAULT_FRONTEND_URL = "http://127.0.0.1:5173/";
 
 /**
  * Map a tab URL to its store key (or null when the URL is not a store domain).
@@ -89,8 +88,7 @@ export function createWorker({ chrome, fetchFn = globalThis.fetch, now = () => D
 
   async function openHub() {
     const settings = await loadSettings();
-    const url = expandFrontendUrls(settings.frontendUrls)[0] ?? DEFAULT_FRONTEND_URL;
-    await chrome.tabs.create({ url });
+    await chrome.tabs.create({ url: settings.frontendUrl });
   }
 
   async function scheduleAlarm() {
