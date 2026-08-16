@@ -1025,6 +1025,73 @@ def test_auchan_search_endpoint_returns_400_without_selected_store(client, auth_
     assert "Sélectionnez un magasin" in response.json()["detail"]
 
 
+def test_geocode_auchan_address_uses_open_api_when_coords_missing(monkeypatch):
+    import asyncio
+
+    import httpx as real_httpx
+
+    from app.services.scrapers import auchan as auchan_module
+
+    def handler(request: real_httpx.Request) -> real_httpx.Response:
+        return real_httpx.Response(
+            200,
+            json={"features": [{"geometry": {"coordinates": [1.47056, 43.589648]}}]},
+        )
+
+    class _MockClient(real_httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = real_httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(auchan_module.httpx, "AsyncClient", _MockClient)
+
+    lat, lng = asyncio.run(auchan_module.geocode_auchan_address("31400", "Toulouse"))
+    assert lat == 43.589648
+    assert lng == 1.47056
+
+
+def test_geocode_auchan_address_keeps_provided_coords(monkeypatch):
+    import asyncio
+
+    import httpx as real_httpx
+
+    from app.services.scrapers import auchan as auchan_module
+
+    def handler(request: real_httpx.Request) -> real_httpx.Response:
+        raise AssertionError("should not call network when coords provided")
+
+    class _MockClient(real_httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = real_httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(auchan_module.httpx, "AsyncClient", _MockClient)
+
+    lat, lng = asyncio.run(auchan_module.geocode_auchan_address("31400", "Toulouse", 43.5, 1.4))
+    assert lat == 43.5
+    assert lng == 1.4
+
+
+def test_geocode_auchan_address_returns_none_on_error(monkeypatch):
+    import asyncio
+
+    import httpx as real_httpx
+
+    from app.services.scrapers import auchan as auchan_module
+
+    def handler(request: real_httpx.Request) -> real_httpx.Response:
+        raise real_httpx.ConnectError("boom")
+
+    class _MockClient(real_httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = real_httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(auchan_module.httpx, "AsyncClient", _MockClient)
+
+    assert asyncio.run(auchan_module.geocode_auchan_address("31400", "Toulouse")) == (None, None)
+
+
 def test_connection_import_with_credentials_stores_encrypted(test_engine):
     with Session(test_engine) as session:
         connection = upsert_connection(

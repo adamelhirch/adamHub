@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 
@@ -248,8 +249,8 @@ async def list_auchan_offering_contexts_endpoint(
     user: CurrentOrOwnerUser,
     zipcode: str = Query(..., min_length=3, max_length=16),
     city: str = Query(..., min_length=2, max_length=128),
-    latitude: float = Query(..., ge=-90, le=90),
-    longitude: float = Query(..., ge=-180, le=180),
+    latitude: float | None = Query(default=None, ge=-90, le=90),
+    longitude: float | None = Query(default=None, ge=-180, le=180),
     country: str = Query(default="France", max_length=128),
 ) -> list[AuchanOfferingContext]:
     from app.services.scrapers.auchan import (
@@ -314,6 +315,15 @@ async def select_auchan_store_endpoint(
         )
     except AuchanAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Auchan a refusé la sélection du magasin (HTTP "
+                f"{exc.response.status_code}). Vérifie l'adresse et les "
+                "coordonnées, puis réessaie."
+            ),
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
