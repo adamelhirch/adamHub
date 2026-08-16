@@ -10,6 +10,22 @@ import httpx
 
 from app.services.scrapers.proxy_session import ProxySession
 
+try:  # pragma: no cover - exercised via CURL_CFFI_AVAILABLE flag in tests
+    from curl_cffi.requests import AsyncSession as CurlCffiAsyncSession
+    from curl_cffi.requests.cookies import Cookies as CurlCffiCookies
+
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CurlCffiAsyncSession = None  # type: ignore[assignment]
+    CurlCffiCookies = None  # type: ignore[assignment]
+    CURL_CFFI_AVAILABLE = False
+
+# curl_cffi impersonation target. Cloudflare fingerprints the TLS/HTTP2
+# handshake, not just the User-Agent: curl_cffi's `chrome` profile reproduces a
+# real Chrome handshake (v146 at the time of writing), which defeats the 403
+# challenge that plain httpx hits.
+CURL_IMPERSONATE = "chrome"
+
 
 CARREFOUR_BASE_URL = "https://www.carrefour.fr"
 CARREFOUR_COOKIES_PATH = Path(__file__).resolve().parents[3] / "data" / "cookies_carrefour.json"
@@ -306,20 +322,26 @@ _CHROME_USER_AGENT = (
 _SEC_CH_UA = '"Chromium";v="147", "Not.A/Brand";v="8"'
 
 
-def _build_headers(referer: str, *, json_request: bool = True) -> dict[str, str]:
+def _build_headers(
+    referer: str, *, json_request: bool = True, impersonated: bool = False
+) -> dict[str, str]:
     headers: dict[str, str] = {
-        "User-Agent": _CHROME_USER_AGENT,
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "fr,en;q=0.9",
         "Origin": CARREFOUR_BASE_URL,
         "Referer": referer,
         "priority": "u=1, i",
-        "sec-ch-ua": _SEC_CH_UA,
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"macOS"',
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-origin",
     }
+    if not impersonated:
+        # Only the plain-httpx path sets fingerprint headers itself. When
+        # curl_cffi impersonates, it fills User-Agent + sec-ch-ua from its own
+        # Chrome profile — sending our own would desync the fingerprint.
+        headers["User-Agent"] = _CHROME_USER_AGENT
+        headers["sec-ch-ua"] = _SEC_CH_UA
+        headers["sec-ch-ua-mobile"] = "?0"
+        headers["sec-ch-ua-platform"] = '"macOS"'
     if json_request:
         headers["Accept"] = "application/json, text/plain, */*"
         headers["sec-fetch-dest"] = "empty"
@@ -344,9 +366,37 @@ def _raise_for_auth(response: httpx.Response) -> None:
         )
 
 
-def _build_carrefour_client(
-    cookies: list[dict[str, Any]],
-    proxy_url: str | None,
+def _build_curl_cookie_jar(cookies: list[dict[str, Any]]) -> CurlCffiCookies:
+    jar = CurlCffiCookies()
+    for cookie in cookies:
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not name or value is None:
+            continue
+        jar.set(name, value, domain=cookie.get("domain"), path=cookie.get("path", "/"))
+    return jar
+
+
+def _build_curl_cffi_client(
+    cookies: list[dict[str, Any]], proxy_url: str | None
+) -> CurlCffiAsyncSession:
+    """Build a curl_cffi AsyncSession impersonating Chrome.
+
+    The pool proxies (residential, shared egress) are themselves flagged by
+    Cloudflare — a 403 comes back even with impersonation. The direct
+    connection with the impersonated handshake clears the challenge, so the
+    proxy is intentionally ignored on this path.
+    """
+    return CurlCffiAsyncSession(
+        impersonate=CURL_IMPERSONATE,
+        base_url=CARREFOUR_BASE_URL,
+        cookies=_build_curl_cookie_jar(cookies),
+        timeout=30.0,
+    )
+
+
+def _build_httpx_client(
+    cookies: list[dict[str, Any]], proxy_url: str | None
 ) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=CARREFOUR_BASE_URL,
@@ -356,6 +406,15 @@ def _build_carrefour_client(
         trust_env=not proxy_url,
         follow_redirects=False,
     )
+
+
+def _build_carrefour_client(
+    cookies: list[dict[str, Any]],
+    proxy_url: str | None,
+) -> Any:
+    if CURL_CFFI_AVAILABLE:
+        return _build_curl_cffi_client(cookies, proxy_url)
+    return _build_httpx_client(cookies, proxy_url)
 
 
 async def _search_carrefour_query(
@@ -378,7 +437,7 @@ async def _search_carrefour_query(
     response = await session.client.get(
         "/s",
         params=params,
-        headers=_build_headers(referer, json_request=True),
+        headers=_build_headers(referer, json_request=True, impersonated=CURL_CFFI_AVAILABLE),
     )
     _raise_for_auth(response)
     response.raise_for_status()
@@ -418,7 +477,7 @@ async def _search_carrefour_query(
         response = await session.client.get(
             "/s",
             params=next_params,
-            headers=_build_headers(referer, json_request=True),
+            headers=_build_headers(referer, json_request=True, impersonated=CURL_CFFI_AVAILABLE),
         )
         _raise_for_auth(response)
         response.raise_for_status()

@@ -15,6 +15,7 @@ from app.models import SupermarketStore
 from app.services.scrapers.carrefour import (
     CARREFOUR_BASE_URL,
     CARREFOUR_SORT_KEYS,
+    _build_headers,
     build_carrefour_cookie_jar,
     load_carrefour_cookies,
     parse_carrefour_search,
@@ -153,17 +154,23 @@ def _monkeypatch_transport(monkeypatch, handler) -> None:
     """Route the scraper's httpx.AsyncClient onto a MockTransport.
 
     Patches the module-level `httpx` module so the scraper's AsyncClient call
-    gets a transport, while keeping the rest of httpx intact.
+    gets a transport, while keeping the rest of httpx intact. Also forces the
+    httpx fallback path (curl_cffi preferred when installed) and empties the
+    shared proxy pool so the transport mock is actually used, offline.
     """
     import httpx as real_httpx
 
     class _MockClient(real_httpx.AsyncClient):
         def __init__(self, *args, **kwargs):
+            kwargs.pop("proxy", None)
+            kwargs.pop("trust_env", None)
             kwargs["transport"] = real_httpx.MockTransport(handler)
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr("app.services.scrapers.carrefour.httpx", real_httpx)
     monkeypatch.setattr("app.services.scrapers.carrefour.httpx.AsyncClient", _MockClient)
+    monkeypatch.setattr("app.services.scrapers.carrefour.CURL_CFFI_AVAILABLE", False)
+    _monkeypatch_empty_pool(monkeypatch)
 
 
 def test_search_carrefour_wires_sort_param_and_parses_offline(monkeypatch, tmp_path):
@@ -234,3 +241,128 @@ def _monkeypatch_cookie_file(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         "app.services.scrapers.carrefour.CARREFOUR_COOKIES_PATH", fake_cookie_file
     )
+
+
+def _monkeypatch_empty_pool(monkeypatch) -> None:
+    """Force the shared proxy pool to be empty so builds run direct."""
+    from app.services import proxy_pool as proxy_pool_mod
+
+    monkeypatch.setattr(proxy_pool_mod, "_pool", proxy_pool_mod.ProxyPool([]))
+
+
+def _monkeypatch_curl_cffi(monkeypatch, handler) -> list[dict]:
+    """Route the scraper's curl_cffi AsyncSession onto a fake.
+
+    The fake records the constructor kwargs (impersonate target, cookies,
+    base_url) and serves canned responses through ``handler(url, kwargs)``,
+    which returns (status_code, payload) or raises. Returns the recorded
+    constructor kwargs for assertions.
+    """
+    import asyncio
+
+    constructed: list[dict] = []
+
+    class _FakeResponse:
+        def __init__(self, status_code: int, payload):
+            self.status_code = status_code
+            self.headers = {"content-type": "application/json"}
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+
+    class _FakeCurlSession:
+        def __init__(self, **kwargs):
+            constructed.append(kwargs)
+
+        async def get(self, url: str, **kwargs):
+            status, payload = handler(url, kwargs)
+            return _FakeResponse(status, payload)
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr("app.services.scrapers.carrefour.CurlCffiAsyncSession", _FakeCurlSession)
+    monkeypatch.setattr("app.services.scrapers.carrefour.CURL_CFFI_AVAILABLE", True)
+    return constructed
+
+
+def test_build_headers_impersonated_drops_fingerprint_headers():
+    """When curl_cffi impersonates, UA/sec-ch-ua come from its own profile."""
+    from app.services.scrapers.carrefour import _build_headers
+
+    impersonated = _build_headers(
+        f"{CARREFOUR_BASE_URL}/", json_request=True, impersonated=True
+    )
+    assert "User-Agent" not in impersonated
+    assert "sec-ch-ua" not in impersonated
+    assert "sec-ch-ua-platform" not in impersonated
+    assert impersonated["x-requested-with"] == "XMLHttpRequest"
+
+    plain = _build_headers(f"{CARREFOUR_BASE_URL}/", json_request=True, impersonated=False)
+    assert plain["User-Agent"].startswith("Mozilla/5.0")
+    assert plain["sec-ch-ua"].startswith('"Chromium"')
+
+
+def test_search_carrefour_prefers_curl_cffi_impersonation(monkeypatch, tmp_path):
+    """The curl_cffi path (impersonate=chrome) is used when available."""
+    import asyncio as _asyncio
+
+    payload = _load("search_page1.json")
+    constructed = _monkeypatch_curl_cffi(monkeypatch, lambda url, kwargs: (200, payload))
+    _monkeypatch_cookie_file(monkeypatch, tmp_path)
+    _monkeypatch_empty_pool(monkeypatch)
+
+    results = _asyncio.run(search_carrefour(queries=["lait"], max_results=10))
+
+    assert len(results["lait"]) == 10
+    assert results["lait"][0]["store"] == "Carrefour"
+    assert constructed, "curl_cffi session was never constructed"
+    kwargs = constructed[0]
+    assert kwargs["impersonate"] == "chrome"
+    assert kwargs["base_url"] == CARREFOUR_BASE_URL
+    assert kwargs.get("cookies") is not None
+
+
+def test_search_carrefour_curl_cffi_path_raises_auth_on_403(monkeypatch, tmp_path):
+    """_raise_for_auth still guards the curl_cffi path (403 -> CarrefourAuthError)."""
+    import asyncio as _asyncio
+    import pytest as _pytest
+
+    from app.services.scrapers.carrefour import CarrefourAuthError
+
+    constructed = _monkeypatch_curl_cffi(monkeypatch, lambda url, kwargs: (403, "forbidden"))
+    _monkeypatch_cookie_file(monkeypatch, tmp_path)
+    _monkeypatch_empty_pool(monkeypatch)
+
+    with _pytest.raises(CarrefourAuthError, match="rejected the current session"):
+        _asyncio.run(search_carrefour(queries=["lait"]))
+
+    assert constructed
+
+
+def test_search_carrefour_httpx_fallback_without_curl_cffi(monkeypatch, tmp_path):
+    """Without curl_cffi the httpx path still works (non-regression)."""
+    import asyncio as _asyncio
+
+    payload = _load("search_page1.json")
+    constructed = _monkeypatch_curl_cffi(monkeypatch, lambda url, kwargs: (200, payload))
+    _monkeypatch_cookie_file(monkeypatch, tmp_path)
+    _monkeypatch_empty_pool(monkeypatch)
+
+    def handler(request):
+        return _handler_response(payload)
+
+    # Force the httpx fallback path with a MockTransport.
+    _monkeypatch_transport(monkeypatch, handler)
+    # curl_cffi flag must be False for the fallback to engage.
+    monkeypatch.setattr("app.services.scrapers.carrefour.CURL_CFFI_AVAILABLE", False)
+
+    results = _asyncio.run(search_carrefour(queries=["lait"], max_results=10))
+
+    assert len(results["lait"]) == 10
+    assert not constructed, "curl_cffi session should not be built on fallback"
