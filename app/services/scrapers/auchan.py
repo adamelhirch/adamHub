@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +69,12 @@ class AuchanStoreContext:
     latitude: float | None = None
     longitude: float | None = None
 
+    async def resolve_coordinates(self) -> tuple[float | None, float | None]:
+        """Return (lat, lng), geocoding from the address when not provided."""
+        return await geocode_auchan_address(
+            self.zipcode, self.city, self.latitude, self.longitude
+        )
+
 
 def _journey_update_payload(context: AuchanStoreContext, journey_id: str) -> dict[str, str]:
     """Compose the form-urlencoded payload for POST /journey/update."""
@@ -86,6 +92,45 @@ def _journey_update_payload(context: AuchanStoreContext, journey_id: str) -> dic
         "journeyId": journey_id,
     }
     return payload
+
+
+async def geocode_auchan_address(
+    zipcode: str | None,
+    city: str | None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> tuple[float | None, float | None]:
+    """Resolve an address to (lat, lng), falling back to the French open API.
+
+    Returns the provided coordinates when both are set; otherwise geocodes
+    ``zipcode``/``city`` via api-adresse.data.gouv.fr (no key, CORS-free,
+    server-side so browser extensions cannot interfere).
+    """
+    if latitude is not None and longitude is not None:
+        return latitude, longitude
+
+    query = " ".join(part for part in (zipcode, city) if part)
+    if not query.strip():
+        return None, None
+
+    params = {"q": query.strip(), "limit": "1"}
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            response = await client.get(
+                "https://api-adresse.data.gouv.fr/search/", params=params
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return None, None
+
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if not features:
+        return None, None
+    coords = features[0].get("geometry", {}).get("coordinates") if features[0] else None
+    if not coords or len(coords) < 2:
+        return None, None
+    return float(coords[1]), float(coords[0])
 
 
 def load_auchan_cookies(path: Path | None = None) -> list[dict[str, Any]]:
@@ -363,6 +408,11 @@ async def select_auchan_store(
         cookies = load_auchan_cookies()
     if not cookies:
         raise AuchanAuthError("No Auchan cookies on disk.")
+
+    if context.latitude is None or context.longitude is None:
+        lat, lng = await context.resolve_coordinates()
+        context = replace(context, latitude=lat, longitude=lng)
+
     scope = "auchan:select-store"
     session = ProxySession(scope, lambda proxy_url: _build_client(cookies, proxy_url))
     try:
@@ -422,8 +472,8 @@ async def list_auchan_offering_contexts(
     *,
     zipcode: str,
     city: str,
-    latitude: float,
-    longitude: float,
+    latitude: float | None = None,
+    longitude: float | None = None,
     country: str = "France",
     cookies: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str | None]]:
@@ -433,12 +483,16 @@ async def list_auchan_offering_contexts(
     if not cookies:
         raise AuchanAuthError("No Auchan cookies on disk.")
 
+    latitude, longitude = await geocode_auchan_address(
+        zipcode, city, latitude, longitude
+    )
+
     params: dict[str, str] = {
         "address.zipcode": zipcode,
         "address.city": city,
         "address.country": country,
-        "location.latitude": str(latitude),
-        "location.longitude": str(longitude),
+        "location.latitude": str(latitude or ""),
+        "location.longitude": str(longitude or ""),
         "accuracy": "MUNICIPALITY",
         "position": "1",
         "sellerType": "GROCERY",
