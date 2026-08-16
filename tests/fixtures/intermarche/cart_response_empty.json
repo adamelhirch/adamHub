@@ -1,0 +1,19 @@
+{
+  "id": "515ffd9e-538e-447a-983e-69ca17363fac",
+  "synchronizeDateTime": "2026-08-15T03:03:12.964741391+02:00",
+  "isPresentAlcoholProduct": false,
+  "amount": 0.0,
+  "animations": [],
+  "valuations": {
+    "collectors": [],
+    "discountAmount": 0,
+    "loyaltyAmount": 0
+  },
+  "itemsNumber": 0,
+  "metaData": {},
+  "carts": [],
+  "discounts": {
+    "amount": 0,
+    "values": []
+  }
+}

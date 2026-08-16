@@ -1,0 +1,42 @@
+{
+  "carts": [
+    {
+      "items": [
+        {
+          "id": "37731",
+          "quantity": 1,
+          "price": 5.07,
+          "amount": 5.07,
+          "acceptSubstitution": true,
+          "item": {
+            "itemId": "37731",
+            "idProduit": "37731",
+            "produitEan13": "2449185000000",
+            "pviIncrement": null,
+            "prix": 5.07,
+            "privateData": "{\"nfProductId\":37731}",
+            "poidsMinimum": null,
+            "substituable": true,
+            "dispoCataloguePdv": true,
+            "stock": 19,
+            "catalog": "PDV",
+            "libelle": "Parmigiano reggiano AOP sous film au lait cru de vache 28,4% de mg",
+            "compatibleConsigne": true,
+            "marque": "Tout frais, Tout prêt !",
+            "conditionnement": "La portion de 155 Gr environ",
+            "qteMaxPanier": 19,
+            "isPresentAlcoholProduct": false
+          }
+        }
+      ],
+      "catalog": "PDV",
+      "amount": 5.07,
+      "seller": {
+        "id": "ITM",
+        "name": "Intermarché"
+      },
+      "acceptSubstitution": true
+    }
+  ],
+  "synchronizeDateTime": "2026-08-15T03:02:27+02:00"
+}

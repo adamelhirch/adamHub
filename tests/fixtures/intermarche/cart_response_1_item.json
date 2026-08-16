@@ -1,0 +1,145 @@
+{
+  "id": "515ffd9e-538e-447a-983e-69ca17363fac",
+  "synchronizeDateTime": "2026-08-15T03:02:27.188232892+02:00",
+  "isPresentAlcoholProduct": false,
+  "amount": 5.07,
+  "animations": [],
+  "valuations": {
+    "collectors": [],
+    "discountAmount": 0.0,
+    "loyaltyAmount": 0.0,
+    "discountStatus": "SUCCESS"
+  },
+  "itemsNumber": 1,
+  "metaData": {
+    "invalid": {
+      "advantages": [],
+      "unavailables": [],
+      "stocks": [],
+      "partialStocks": [],
+      "exceededQuantities": [],
+      "discounts": []
+    },
+    "unsynchronized": {
+      "clientItems": [],
+      "serverItems": []
+    }
+  },
+  "carts": [
+    {
+      "items": [
+        {
+          "id": "37731",
+          "modificationDate": "2026-08-15T03:02:27.144485347+02:00",
+          "quantity": 1,
+          "price": 5.07,
+          "amount": 5.07,
+          "acceptSubstitution": true,
+          "item": {
+            "itemId": "37731",
+            "idProduit": "2449185000000",
+            "identifier": 37731,
+            "produitEan13": "2449185000000",
+            "typeProduit": {
+              "code": "PPV",
+              "value": "PPV"
+            },
+            "pviIncrement": 1,
+            "prix": 5.07,
+            "prixBarre": 0.0,
+            "privateData": "{\"nfProductId\":37731}",
+            "prixKg": 32.69,
+            "poidsMinimum": 155,
+            "substituable": true,
+            "dispoCataloguePdv": true,
+            "stock": 19,
+            "avantages": [],
+            "images": [
+              "https://driveimg1.intermarche.com/fr/Content/images/boitmal/produit/zoom/AD52786BE12402207CAAF5BE13DE2FCE.jpg"
+            ],
+            "idSousFamille": 16632,
+            "catalog": "PDV",
+            "precommande": false,
+            "libelle": "Parmigiano reggiano AOP sous film au lait cru de vache 28,4% de mg",
+            "compatibleConsigne": true,
+            "marque": "Tout frais, Tout prêt !",
+            "capacite": 155,
+            "conditionnement": "La portion de 155 Gr environ",
+            "favori": false,
+            "qteMaxPanier": 99,
+            "produitsLot": [],
+            "poidsNet": 155,
+            "poidsUnite": 0,
+            "volume": 0,
+            "isTrad": false,
+            "isPresentAlcoholProduct": false,
+            "eligibleMealVoucher": false,
+            "unitPrice": 32.69,
+            "onlineExclusive": false,
+            "idFamille": 16595,
+            "vignetteCollector": 0,
+            "idUnivers": 2212,
+            "idRayon": 16591,
+            "latestBestPrice": 32.69,
+            "unitePrixVente": {
+              "value": "€/Kg"
+            },
+            "pictogrammes": [
+              {
+                "idPicto": 20336,
+                "idCategorie": 10,
+                "libelleCategorie": "Type de stockage",
+                "image": "https://driveimg1.intermarche.com/fr/Ressources/images/publication/27976.png",
+                "infoBulle": "A conserver au frais "
+              }
+            ],
+            "nbPiece": 0,
+            "familyCodeNomenclature": "1004",
+            "collectorPartenaire": false,
+            "volumeSurcharge": false
+          }
+        }
+      ],
+      "catalog": "PDV",
+      "amount": 5.07,
+      "seller": {
+        "id": "ITM",
+        "name": "Intermarché"
+      },
+      "itemsNumber": 1,
+      "lots": [],
+      "animations": [],
+      "valuations": {
+        "collectors": [],
+        "discountAmount": 0.0,
+        "loyaltyAmount": 0,
+        "discountStatus": "SUCCESS"
+      },
+      "weight": 0.155,
+      "volume": 0.0,
+      "bacsNumber": 1,
+      "metaData": {
+        "invalid": {
+          "advantages": [],
+          "unavailables": [],
+          "stocks": [],
+          "partialStocks": [],
+          "exceededQuantities": [],
+          "discounts": []
+        },
+        "unsynchronized": {}
+      },
+      "acceptSubstitution": true,
+      "discounts": {
+        "amount": 0.0,
+        "values": [],
+        "status": "SUCCESS"
+      }
+    }
+  ],
+  "discounts": {
+    "amount": 0.0,
+    "values": [],
+    "status": "SUCCESS"
+  }
+}
