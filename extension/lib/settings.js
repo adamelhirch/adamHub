@@ -4,6 +4,13 @@
 
 import { STORE_KEYS } from "./stores.js";
 
+/**
+ * The chrome.storage.sync key under which the options page persists the user's
+ * settings and the background worker reads them back. Defined here so both
+ * surfaces share a single source of truth.
+ */
+export const SETTINGS_STORAGE_KEY = "settings";
+
 const URL_RE = /^https?:\/\/.+/;
 const PORT_RE = /^\d+$/;
 
