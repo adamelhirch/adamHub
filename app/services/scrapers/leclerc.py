@@ -89,8 +89,17 @@ def build_leclerc_cookie_jar(cookies: list[dict[str, Any]]) -> httpx.Cookies:
 
 
 def _resolve_store_base_url(store_base_url: str | None) -> str:
-    """Return the store base URL, from the explicit arg or the env var."""
-    base = (store_base_url or LECLERC_DEFAULT_BASE_URL or "").rstrip("/")
+    """Return the store base URL, from the explicit arg or the env var.
+
+    The env var is read at call time (not module import time): the value lives
+    in the local `.env` (docker-compose `env_file` exports it into the process
+    env) or in the operator's shell, and a long-running worker must pick it up
+    when it appears after the module was first imported.
+    """
+    configured = (
+        os.environ.get("ADAMHUB_LECLERC_BASE_URL") or LECLERC_DEFAULT_BASE_URL
+    )
+    base = (store_base_url or configured or "").rstrip("/")
     if not base:
         raise LeclercAuthError(
             "Leclerc store base URL is not configured. Set ADAMHUB_LECLERC_BASE_URL "

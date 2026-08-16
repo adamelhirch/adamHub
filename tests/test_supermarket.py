@@ -681,6 +681,43 @@ def _run_search_leclerc_with_fake_client(cookies, **kwargs):
     return requests
 
 
+def test_leclerc_resolves_store_base_url_from_env_at_call_time(monkeypatch):
+    """ADAMHUB_LECLERC_BASE_URL must be read at execution time, not module import.
+
+    The store subdomain + magasin path live in the local .env (docker-compose
+    env_file) or the process env; the value can be present long after the
+    scraper module was first imported (e.g. a long-running uvicorn worker).
+    """
+    from app.services.scrapers.leclerc import _resolve_store_base_url
+
+    monkeypatch.setenv(
+        "ADAMHUB_LECLERC_BASE_URL",
+        "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
+    )
+    assert (
+        _resolve_store_base_url(None)
+        == "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran"
+    )
+
+
+def test_leclerc_resolve_store_base_url_explicit_arg_overrides_env(monkeypatch):
+    from app.services.scrapers.leclerc import _resolve_store_base_url
+
+    monkeypatch.setenv("ADAMHUB_LECLERC_BASE_URL", "https://env.invalid/base")
+    assert (
+        _resolve_store_base_url("https://arg.invalid/other")
+        == "https://arg.invalid/other"
+    )
+
+
+def test_leclerc_resolve_store_base_url_raises_without_config(monkeypatch):
+    from app.services.scrapers.leclerc import _resolve_store_base_url
+
+    monkeypatch.delenv("ADAMHUB_LECLERC_BASE_URL", raising=False)
+    with pytest.raises(LeclercAuthError, match="ADAMHUB_LECLERC_BASE_URL"):
+        _resolve_store_base_url(None)
+
+
 def test_leclerc_search_sends_tri_param_for_sort_by():
     cookies = [{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}]
     requests = _run_search_leclerc_with_fake_client(cookies, sort_by="price_asc")
