@@ -1,7 +1,15 @@
 import os
 from functools import lru_cache
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Export the local .env into os.environ before any Settings read. pydantic-
+# settings only consumes .env for its own model fields; other modules (e.g. the
+# supermarket scrapers) read os.environ directly, so without this a value set
+# in .env (Leclerc base URL, proxies file, …) would be invisible to them in
+# local dev (`cp .env.example .env` + uvicorn, no docker env_file).
+load_dotenv()
 
 
 def current_env() -> str:

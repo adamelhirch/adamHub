@@ -681,6 +681,86 @@ def _run_search_leclerc_with_fake_client(cookies, **kwargs):
     return requests
 
 
+def test_leclerc_resolves_store_base_url_from_env_at_call_time(monkeypatch):
+    """ADAMHUB_LECLERC_BASE_URL must be read at execution time, not module import.
+
+    The store subdomain + magasin path live in the local .env (docker-compose
+    env_file) or the process env; the value can be present long after the
+    scraper module was first imported (e.g. a long-running uvicorn worker).
+    """
+    from app.services.scrapers.leclerc import _resolve_store_base_url
+
+    monkeypatch.setenv(
+        "ADAMHUB_LECLERC_BASE_URL",
+        "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
+    )
+    assert (
+        _resolve_store_base_url(None)
+        == "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran"
+    )
+
+
+def test_leclerc_resolve_store_base_url_explicit_arg_overrides_env(monkeypatch):
+    from app.services.scrapers.leclerc import _resolve_store_base_url
+
+    monkeypatch.setenv("ADAMHUB_LECLERC_BASE_URL", "https://env.invalid/base")
+    assert (
+        _resolve_store_base_url("https://arg.invalid/other")
+        == "https://arg.invalid/other"
+    )
+
+
+def test_leclerc_resolve_store_base_url_raises_without_config(monkeypatch):
+    from app.services.scrapers import leclerc as leclerc_module
+
+    # Clear both sources: the env var (call-time read) and the module-level
+    # snapshot taken at import (which can hold the value when a local .env was
+    # loaded by app.core.config before this module was imported).
+    monkeypatch.delenv("ADAMHUB_LECLERC_BASE_URL", raising=False)
+    monkeypatch.setattr(leclerc_module, "LECLERC_DEFAULT_BASE_URL", "")
+    with pytest.raises(LeclercAuthError, match="ADAMHUB_LECLERC_BASE_URL"):
+        leclerc_module._resolve_store_base_url(None)
+
+
+def test_leclerc_base_url_loaded_from_dotenv_into_os_environ(tmp_path):
+    """Local dev: `cp .env.example .env` + uvicorn must reach the scraper.
+
+    app.core.config loads the local .env into os.environ (load_dotenv), so a
+    value written in .env after the module was imported is visible to
+    `_resolve_store_base_url` — no docker-compose env_file required. The test
+    runs a fresh interpreter against a temp .env to exercise import-time
+    behavior.
+    """
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    (tmp_path / ".env").write_text(
+        "ADAMHUB_LECLERC_BASE_URL=https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran\n",
+        encoding="utf-8",
+    )
+    code = textwrap.dedent(
+        """
+        import os
+        os.environ["ADAMHUB_ENV"] = "development"
+        from app.core.config import Settings  # must load .env into os.environ
+        from app.services.scrapers.leclerc import _resolve_store_base_url
+        print("RESOLVED:", _resolve_store_base_url(None))
+        """
+    )
+    env = {k: v for k, v in os.environ.items() if k != "ADAMHUB_LECLERC_BASE_URL"}
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RESOLVED: https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran" in result.stdout
+
+
 def test_leclerc_search_sends_tri_param_for_sort_by():
     cookies = [{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}]
     requests = _run_search_leclerc_with_fake_client(cookies, sort_by="price_asc")
