@@ -76,6 +76,44 @@ export const STORE_CAPABILITIES: Record<SupermarketStoreKey, SupermarketStoreCap
   auchan:      { supports_sort: true, supports_promotions: false, requires_store_selection: true, requires_login: false },
 };
 
+// Stores whose search requires a branché account connection (cookies). Auchan
+// is excluded: it works without login via the filesystem cookie fallback.
+export const ACCOUNT_REQUIRED_STORES: SupermarketStoreKey[] = ['intermarche', 'carrefour', 'leclerc'];
+
+// One selectable Auchan store, as served by GET /supermarket/auchan/offering-contexts.
+export interface AuchanOfferingContext {
+  pos_id: string | null;
+  pos_type: string | null;
+  seller_id: string;
+  store_reference: string | null;
+  channel: string | null;
+  name: string | null;
+  address: string | null;
+  distance: string | null;
+}
+
+// Persisted Auchan store selection (GET/POST /supermarket/auchan/selected-store).
+export interface AuchanSelectedStore {
+  external_store_id: string;
+  store_label: string;
+  location_label: string | null;
+  updated_at: string;
+}
+
+// Payload for POST /supermarket/auchan/selected-store.
+export interface AuchanStoreSelectionPayload {
+  seller_id: string;
+  store_reference: string;
+  channel?: string;
+  store_label: string;
+  location_label?: string | null;
+  zipcode?: string | null;
+  city?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
 export interface SupermarketConnection {
   id: number;
   store: SupermarketStoreKey;
@@ -224,6 +262,16 @@ interface GroceryStore {
   fetchConnections: () => Promise<void>;
   activateConnection: (connectionId: number) => Promise<void>;
   deleteConnection: (connectionId: number) => Promise<void>;
+
+  // Auchan store selection (no login required)
+  auchanContexts: AuchanOfferingContext[];
+  auchanSelectedStore: AuchanSelectedStore | null;
+  auchanLoading: boolean;
+  auchanError: string | null;
+  fetchAuchanOfferingContexts: (zipcode: string, city: string, lat: number, lng: number) => Promise<void>;
+  selectAuchanStore: (payload: AuchanStoreSelectionPayload) => Promise<void>;
+  fetchSelectedAuchanStore: () => Promise<void>;
+  clearAuchanStore: () => void;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -335,6 +383,26 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
     const { forceRefresh = false, promotionsOnly = false } = options;
     set({ searchLoading: true, searchError: null, searchResults: [] });
     try {
+      // Explicit pre-checks: never let an account-less store or an Auchan
+      // search without a selected store fail silently on the POST /search.
+      const hasConnection = get().connections.some((c) => c.store === store);
+      if (store !== 'auchan' && !hasConnection) {
+        set({
+          searchLoading: false,
+          searchError: `Compte requis : branche une connexion ${STORE_LABELS[store]} via l'extension AdamHUB Connect pour rechercher les prix.`,
+          searchResults: [],
+        });
+        return;
+      }
+      if (store === 'auchan' && !get().auchanSelectedStore) {
+        set({
+          searchLoading: false,
+          searchError: 'Sélectionne un magasin Auchan avant de lancer une recherche.',
+          searchResults: [],
+        });
+        return;
+      }
+
       const limit = 30;
       const supportsCacheReuse = store === 'intermarche';
       if (supportsCacheReuse && !forceRefresh && !promotionsOnly) {
@@ -475,5 +543,56 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
   deleteConnection: async (connectionId) => {
     await api.delete(`/supermarket/connections/${connectionId}`);
     await get().fetchConnections();
+  },
+
+  // ── Auchan store selection (works without login) ─────────────────────
+  auchanContexts: [],
+  auchanSelectedStore: null,
+  auchanLoading: false,
+  auchanError: null,
+
+  fetchAuchanOfferingContexts: async (zipcode, city, lat, lng) => {
+    set({ auchanLoading: true, auchanError: null, auchanContexts: [] });
+    try {
+      const res = await api.get('/supermarket/auchan/offering-contexts', {
+        params: { zipcode, city, latitude: lat, longitude: lng, country: 'France' },
+      });
+      set({ auchanContexts: Array.isArray(res.data) ? res.data : [] });
+    } catch (e: unknown) {
+      set({ auchanContexts: [], auchanError: extractErrorMessage(e, 'Erreur lors de la recherche des magasins Auchan') });
+    } finally {
+      set({ auchanLoading: false });
+    }
+  },
+
+  selectAuchanStore: async (payload) => {
+    set({ auchanLoading: true, auchanError: null });
+    try {
+      const res = await api.post('/supermarket/auchan/selected-store', payload);
+      set({ auchanSelectedStore: res.data, auchanContexts: [], searchResults: [], searchError: null });
+    } catch (e: unknown) {
+      set({ auchanError: extractErrorMessage(e, 'Erreur lors de la sélection du magasin Auchan') });
+    } finally {
+      set({ auchanLoading: false });
+    }
+  },
+
+  fetchSelectedAuchanStore: async () => {
+    try {
+      const res = await api.get('/supermarket/auchan/selected-store');
+      set({ auchanSelectedStore: res.data ?? null });
+    } catch {
+      set({ auchanSelectedStore: null });
+    }
+  },
+
+  clearAuchanStore: () => {
+    set({
+      auchanSelectedStore: null,
+      auchanContexts: [],
+      auchanError: null,
+      searchResults: [],
+      searchError: null,
+    });
   },
 }));
