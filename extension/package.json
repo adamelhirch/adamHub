@@ -1,0 +1,13 @@
+{
+  "name": "adamhub-connect-extension",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "AdamHUB Connect — extension Chrome. Socle logique (lib/) testé avec vitest.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

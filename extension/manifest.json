@@ -2,20 +2,23 @@
   "manifest_version": 3,
   "name": "AdamHUB Connect",
   "short_name": "AdamHUB",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Synchronise tes sessions Carrefour, Intermarché, Leclerc et Auchan avec ton hub AdamHUB.",
   "action": {
     "default_title": "AdamHUB Connect",
     "default_popup": "popup.html"
   },
+  "options_page": "options.html",
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "permissions": [
+    "alarms",
     "cookies",
-    "storage",
+    "notifications",
     "scripting",
+    "storage",
     "tabs"
   ],
   "host_permissions": [
