@@ -629,6 +629,93 @@ def test_leclerc_parser_respects_max_results_on_real_fixture():
     assert len(parse_leclerc_search_html(html, max_results=2)) == 2
 
 
+def test_leclerc_parser_collects_full_products_across_all_widget_blobs():
+    """A names-only suggestion carousel must not shadow the full main list.
+
+    The live page embeds several `pnlElementProduit` initOptions blobs (main
+    results + suggestion carousels). The empirical curl_cffi capture returned
+    10 names with price_text=None/external_id=None because the first blob
+    matched was a names-only carousel: the parser must merge every blob and
+    prefer the entry carrying id + price.
+    """
+    html = """
+    <script>
+      Utilitaires.widget.initOptions('ctl00_ctl00_mainMutiUnivers_main_ctl02_pnlElementProduit',
+        {"objContenu":{"lstElements":[
+          {"objElement":{"sLibelleLigne1":"Suggestion sans prix"}},
+          {"objElement":{"sLibelleLigne1":"Suggestion sans prix 2"}}
+        ]}});
+    </script>
+    <script>
+      Utilitaires.widget.initOptions('ctl00_ctl00_mainMutiUnivers_main_ctl04_pnlElementProduit',
+        {"objContenu":{"lstElements":[
+          {"objElement":{"iIdProduit":32452,"sLibelleLigne1":"Lait de montagne D&#233;lisse",
+            "sPrixUnitaire":"6,72 €","sCategorie":"30"}}
+        ]}});
+    </script>
+    """
+    items = parse_leclerc_search_html(html, max_results=10)
+    by_name = {item["name"]: item for item in items}
+    lait = by_name["Lait de montagne Délisse"]
+    assert lait["id"] == "32452"
+    assert lait["price"] == "6,72 €"
+
+
+def test_leclerc_parser_reads_id_and_price_from_lst_enfants_children():
+    """Products grouped under `lstEnfants` (declinaisons) carry the data.
+
+    A grouped card can have a label-only `objElement` while the full product
+    (iIdProduit + price) lives on the `lstEnfants` child.
+    """
+    html = """
+    <script>
+      Utilitaires.widget.initOptions('ctl00_ctl00_mainMutiUnivers_main_ctl04_pnlElementProduit',
+        {"objContenu":{"lstElements":[
+          {"objElement":{"sLibelleLigne1":"Lait demi-&#233;cr&#233;m&#233; D&#233;lisse"},
+           "lstEnfants":[
+             {"objElement":{"iIdProduit":2612,"sLibelleLigne1":"Lait demi-&#233;cr&#233;m&#233; D&#233;lisse",
+               "sPrixUnitaire":"5,94 €"}}
+           ]}
+        ]}});
+    </script>
+    """
+    items = parse_leclerc_search_html(html, max_results=10)
+    assert len(items) == 1
+    assert items[0]["id"] == "2612"
+    assert items[0]["price"] == "5,94 €"
+
+
+def test_leclerc_parser_formats_price_from_numeric_amount_when_text_missing():
+    """sPrixUnitaire can be absent while nrPVUnitaireTTC is present (fallback)."""
+    html = """
+    <script>
+      Utilitaires.widget.initOptions('ctl00_ctl00_mainMutiUnivers_main_ctl04_pnlElementProduit',
+        {"objContenu":{"lstElements":[
+          {"objElement":{"iIdProduit":2107,"sLibelleLigne1":"Lait demi-&#233;cr&#233;m&#233; D&#233;lisse",
+            "nrPVUnitaireTTC":6.72}}
+        ]}});
+    </script>
+    """
+    items = parse_leclerc_search_html(html, max_results=10)
+    assert items[0]["price"] == "6,72 €"
+
+
+def test_leclerc_parser_falls_back_to_sidunique_for_product_id():
+    """When iIdProduit and sId are missing, the `Produit{id}` sIdUnique works."""
+    html = """
+    <script>
+      Utilitaires.widget.initOptions('ctl00_ctl00_mainMutiUnivers_main_ctl04_pnlElementProduit',
+        {"objContenu":{"lstElements":[
+          {"objElement":{"sIdUnique":"Produit51980","sLibelleLigne1":"Lait D&#233;lisse",
+            "sPrixUnitaire":"3,39 €"}}
+        ]}});
+    </script>
+    """
+    items = parse_leclerc_search_html(html, max_results=10)
+    assert items[0]["id"] == "51980"
+    assert items[0]["price"] == "3,39 €"
+
+
 def test_leclerc_sort_ids_match_site_tri_datasource():
     assert LECLERC_SORT_IDS == {
         "default": 1,
@@ -667,9 +754,12 @@ def _run_search_leclerc_with_fake_client(cookies, **kwargs):
     def fake_client_cls(**client_kwargs):
         return _FakeLeclercClient(requests, **client_kwargs)
 
+    # Force the httpx fallback: curl_cffi is the preferred transport when
+    # installed (it is, in the dev env), so the httpx mock is only exercised
+    # when CURL_CFFI_AVAILABLE is off.
     with mock.patch(
         "app.services.scrapers.leclerc.httpx.AsyncClient", side_effect=fake_client_cls
-    ):
+    ), mock.patch("app.services.scrapers.leclerc.CURL_CFFI_AVAILABLE", False):
         asyncio.run(
             search_leclerc(
                 queries=["lait"],
@@ -819,7 +909,7 @@ def test_leclerc_search_raises_datadome_challenge_on_403_probe():
 
     with mock.patch(
         "app.services.scrapers.leclerc.httpx.AsyncClient", side_effect=fake_client_cls
-    ):
+    ), mock.patch("app.services.scrapers.leclerc.CURL_CFFI_AVAILABLE", False):
         with pytest.raises(LeclercAuthError, match="anti-bot challenge"):
             asyncio.run(
                 search_leclerc(
@@ -839,7 +929,7 @@ def test_leclerc_search_raises_generic_session_error_on_plain_403():
 
     with mock.patch(
         "app.services.scrapers.leclerc.httpx.AsyncClient", side_effect=fake_client_cls
-    ):
+    ), mock.patch("app.services.scrapers.leclerc.CURL_CFFI_AVAILABLE", False):
         with pytest.raises(LeclercAuthError, match="rejected the current session"):
             asyncio.run(
                 search_leclerc(
@@ -848,6 +938,154 @@ def test_leclerc_search_raises_generic_session_error_on_plain_403():
                     store_base_url="https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
                 )
             )
+
+
+class _FakeCurlLeclercResponse:
+    """Stand-in for a curl_cffi response (status_code / text / raise_for_status)."""
+
+    def __init__(self, status_code: int, text: str):
+        self.status_code = status_code
+        self.text = text
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def _run_search_leclerc_with_curl_cffi(monkeypatch, responses):
+    """Run search_leclerc over the mocked curl_cffi path (no network).
+
+    The fake session records constructor kwargs (impersonate, base_url,
+    cookies) and each request (url, params, headers), and serves ``responses``
+    in order (the last one repeats). Returns (constructed, requests, results).
+    """
+    import asyncio
+
+    constructed: list[dict] = []
+    requests: list[tuple] = []
+
+    class _FakeCurlSession:
+        def __init__(self, **kwargs):
+            constructed.append(kwargs)
+
+        async def get(self, url, params=None, headers=None):
+            requests.append((str(url), dict(params or {}), dict(headers or {})))
+            response = responses[0] if len(responses) == 1 else responses.pop(0)
+            return response
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        "app.services.scrapers.leclerc.CurlCffiAsyncSession", _FakeCurlSession
+    )
+    monkeypatch.setattr("app.services.scrapers.leclerc.CURL_CFFI_AVAILABLE", True)
+
+    results = asyncio.run(
+        search_leclerc(
+            queries=["lait"],
+            cookies=[{"name": "datadome", "value": "x", "domain": ".leclercdrive.fr", "path": "/"}],
+            store_base_url="https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran",
+        )
+    )
+    return constructed, requests, results
+
+
+def test_leclerc_search_prefers_curl_cffi_impersonation(monkeypatch):
+    """The curl_cffi path (impersonate=chrome) is used when available."""
+    fixture_html = LECLERC_FIXTURE.read_text(encoding="utf-8")
+    constructed, requests, results = _run_search_leclerc_with_curl_cffi(
+        monkeypatch, [_FakeCurlLeclercResponse(200, fixture_html)]
+    )
+
+    assert constructed, "curl_cffi session was never constructed"
+    kwargs = constructed[0]
+    assert kwargs["impersonate"] == "chrome"
+    assert (
+        kwargs["base_url"]
+        == "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran"
+    )
+    assert kwargs.get("cookies") is not None
+
+    url, params, headers = requests[0]
+    assert url == (
+        "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran/"
+        "recherche.aspx"
+    )
+    assert params == {"TexteRecherche": "lait"}
+    # The impersonated path drops our own User-Agent: curl_cffi fills UA +
+    # sec-ch-ua from its Chrome profile (sending both would desync the
+    # fingerprint). Same rule as the Carrefour fix.
+    assert "User-Agent" not in headers
+    assert headers["Accept-Language"] == "fr,en;q=0.9"
+
+    # The full pipeline (curl_cffi 200 -> parse) must yield id + price, the
+    # fields the empirical capture was missing.
+    assert results["lait"][0]["id"] == "32452"
+    assert results["lait"][0]["price"] == "6,72 €"
+
+
+def test_leclerc_search_curl_cffi_path_raises_datadome_challenge(monkeypatch):
+    """_raise_for_auth still guards the curl_cffi path (403 probe -> AuthError)."""
+    import pytest as _pytest
+
+    probe_body = (
+        '<html lang="fr"><head><title>leclercdrive.fr</title></head><body>'
+        'Please enable JS and disable any ad blocker'
+        "<script data-cfasync=\"false\">var dd={'rt':'i','cid':'abc','hsh':'def'};</script>"
+        "</body></html>"
+    )
+    with _pytest.raises(LeclercAuthError, match="anti-bot challenge"):
+        _run_search_leclerc_with_curl_cffi(
+            monkeypatch, [_FakeCurlLeclercResponse(403, probe_body)]
+        )
+
+
+def test_leclerc_search_curl_cffi_path_raises_generic_session_error(monkeypatch):
+    """A plain 403 on the curl_cffi path still maps to the session error."""
+    import pytest as _pytest
+
+    with _pytest.raises(LeclercAuthError, match="rejected the current session"):
+        _run_search_leclerc_with_curl_cffi(
+            monkeypatch, [_FakeCurlLeclercResponse(403, "<html>Forbidden</html>")]
+        )
+
+
+def test_leclerc_search_httpx_fallback_without_curl_cffi(monkeypatch):
+    """Without curl_cffi the httpx path still works (non-regression)."""
+    constructed: list = []
+
+    class _FakeCurlSession:
+        def __init__(self, **kwargs):
+            constructed.append(kwargs)
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        "app.services.scrapers.leclerc.CurlCffiAsyncSession", _FakeCurlSession
+    )
+    monkeypatch.setattr("app.services.scrapers.leclerc.CURL_CFFI_AVAILABLE", False)
+
+    requests = _run_search_leclerc_with_fake_client(
+        [{"name": "x", "value": "y", "domain": ".leclercdrive.fr"}]
+    )
+    assert len(requests) == 1
+    assert not constructed, "curl_cffi session should not be built on fallback"
+
+
+def test_leclerc_build_headers_impersonated_drops_user_agent():
+    """When curl_cffi impersonates, the UA comes from its own profile."""
+    from app.services.scrapers.leclerc import _build_headers
+
+    impersonated = _build_headers(
+        "https://fd7-courses.leclercdrive.fr/", impersonated=True
+    )
+    assert "User-Agent" not in impersonated
+    assert impersonated["Accept-Language"] == "fr,en;q=0.9"
+
+    plain = _build_headers("https://fd7-courses.leclercdrive.fr/", impersonated=False)
+    assert plain["User-Agent"].startswith("Mozilla/5.0")
 
 
 def test_auchan_parser_extracts_product_cards_from_search_html():

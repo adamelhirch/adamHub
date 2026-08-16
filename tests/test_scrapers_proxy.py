@@ -48,8 +48,8 @@ def _monkeypatch_transport(monkeypatch, module: str, handler) -> None:
     The real network is fully mocked, so the proxy argument is dropped from the
     client kwargs — with a proxy set, httpx wraps MockTransport in a
     ProxyTransport that would try a real TCP connect to the proxy host.
-    For carrefour the httpx fallback path is forced (curl_cffi is preferred
-    when installed) so the transport mock is actually exercised.
+    For carrefour/leclerc the httpx fallback path is forced (curl_cffi is
+    preferred when installed) so the transport mock is actually exercised.
     """
     import httpx as real_httpx
 
@@ -61,8 +61,10 @@ def _monkeypatch_transport(monkeypatch, module: str, handler) -> None:
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(f"app.services.scrapers.{module}.httpx.AsyncClient", _MockClient)
-    if module == "carrefour":
-        monkeypatch.setattr("app.services.scrapers.carrefour.CURL_CFFI_AVAILABLE", False)
+    if module in {"carrefour", "leclerc"}:
+        # curl_cffi is preferred when installed; the transport mock only sees
+        # traffic on the httpx fallback path.
+        monkeypatch.setattr(f"app.services.scrapers.{module}.CURL_CFFI_AVAILABLE", False)
 
 
 # ---------------------------------------------------------------------------
