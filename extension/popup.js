@@ -1,39 +1,26 @@
-// Hard-coded for now — TODO: make configurable once the hub has a stable URL.
-const HUB_URL = "http://127.0.0.1:8000";
-const FRONTEND_URLS = ["http://127.0.0.1:5173/", "http://localhost:5173/", "http://127.0.0.1:5174/", "http://localhost:5174/"];
-const TOKEN_LOCALSTORAGE_KEY = "adamhub_token";
+// Popup UI. Thin layer over lib/: auth resolution, settings loading, per-store
+// status rendering and the global "Synchroniser maintenant" button. All sync
+// decisions and the import flow live in lib/sync.js — the same path the
+// background worker uses.
 
-const STORES = {
-  carrefour: {
-    label: "Carrefour",
-    cookieDomains: [".carrefour.fr", "www.carrefour.fr"],
-    homepage: "https://www.carrefour.fr/",
-    sessionMarker: "FRO_CONNECTED",
-  },
-  intermarche: {
-    label: "Intermarché",
-    cookieDomains: [".intermarche.com", "www.intermarche.com"],
-    homepage: "https://www.intermarche.com/",
-    sessionMarker: null,
-  },
-  leclerc: {
-    label: "Leclerc",
-    cookieDomains: [".leclercdrive.fr", "www.leclercdrive.fr"],
-    homepage: "https://www.leclercdrive.fr/",
-    sessionMarker: null,
-  },
-  auchan: {
-    label: "Auchan",
-    cookieDomains: [".auchan.fr", "www.auchan.fr"],
-    homepage: "https://www.auchan.fr/",
-    sessionMarker: null,
-  },
-};
+import { createAuth } from "./lib/auth.js";
+import { createSync } from "./lib/sync.js";
+import { STORE_KEYS } from "./lib/stores.js";
+import { validateSettings, expandFrontendUrls } from "./lib/settings.js";
 
 const $ = (sel) => document.querySelector(sel);
 const statusEl = $("#status");
 const authPrompt = $("#auth-prompt");
 const accountBadge = $("#account-badge");
+const syncPanel = $("#sync-panel");
+const syncNowBtn = $("#sync-now");
+const openHubBtn = $("#open-hub");
+
+let auth;
+let sync;
+let apiUrl;
+let frontendUrls;
+let lastSync = {};
 
 function showStatus(kind, message) {
   statusEl.className = `status ${kind}`;
@@ -49,57 +36,49 @@ function showAuthPrompt(show) {
   authPrompt.classList.toggle("hidden", !show);
 }
 
-async function findHubTabs() {
-  // Look for a logged-in AdamHUB frontend tab to read the JWT from.
-  const tabs = await chrome.tabs.query({});
-  return tabs.filter((tab) => {
-    if (!tab.url) return false;
-    return FRONTEND_URLS.some((u) => tab.url.startsWith(u.replace(/\/$/, "")));
-  });
+function formatStamp(stamp) {
+  const date = new Date(stamp);
+  return `synchronisé le ${date.toLocaleDateString("fr-FR")} à ${date.toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
-async function readTokenFromTab(tabId) {
+async function loadSettings() {
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (key) => {
-        try {
-          return window.localStorage.getItem(key);
-        } catch {
-          return null;
-        }
-      },
-      args: [TOKEN_LOCALSTORAGE_KEY],
-    });
-    if (!results || results.length === 0) return null;
-    return results[0]?.result || null;
+    const dump = await chrome.storage.sync.get(null);
+    const raw = dump && dump.settings && typeof dump.settings === "object" ? dump.settings : dump;
+    return validateSettings(raw).settings;
   } catch (err) {
-    console.warn("[AdamHUB] readTokenFromTab failed:", err);
-    return null;
+    console.warn("[AdamHUB] loadSettings failed:", err);
+    return validateSettings(undefined).settings;
   }
 }
 
-async function getAuthToken() {
-  // First check our own storage (cached from last successful sync).
-  const cached = await chrome.storage.local.get(["token"]);
-  if (cached.token) {
-    return { token: cached.token, source: "cache" };
-  }
-  // Fall back to scanning open AdamHUB tabs.
-  const tabs = await findHubTabs();
-  for (const tab of tabs) {
-    const token = await readTokenFromTab(tab.id);
-    if (token) {
-      await chrome.storage.local.set({ token });
-      return { token, source: "tab" };
+async function findHubTabs() {
+  const tabs = await chrome.tabs.query({});
+  return tabs.filter(
+    (tab) => tab && tab.url && frontendUrls.some((u) => tab.url.startsWith(u.replace(/\/$/, ""))),
+  );
+}
+
+async function resolveToken() {
+  // Cached token first, then scan open AdamHUB tabs for a fresh JWT.
+  let token = await auth.getToken();
+  if (token) return token;
+  for (const tab of await findHubTabs()) {
+    const read = await auth.readTokenFromTab(tab.id);
+    if (read) {
+      await auth.setToken(read);
+      return read;
     }
   }
-  return { token: null, source: null };
+  return null;
 }
 
 async function fetchAccount(token) {
   try {
-    const response = await fetch(`${HUB_URL}/api/v1/auth/me`, {
+    const response = await fetch(`${apiUrl}/api/v1/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) return null;
@@ -109,193 +88,127 @@ async function fetchAccount(token) {
   }
 }
 
-async function readCookiesForStore(storeKey) {
-  const def = STORES[storeKey];
-  const cookies = [];
-  const seen = new Set();
-  for (const domain of def.cookieDomains) {
-    const list = await chrome.cookies.getAll({ domain });
-    for (const cookie of list) {
-      const fp = `${cookie.name}|${cookie.domain}|${cookie.path}`;
-      if (seen.has(fp)) continue;
-      seen.add(fp);
-      const out = {
-        name: cookie.name,
-        value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path,
-        secure: !!cookie.secure,
-        httpOnly: !!cookie.httpOnly,
-      };
-      if (cookie.sameSite) {
-        const map = { lax: "Lax", strict: "Strict", no_restriction: "None", none: "None" };
-        out.sameSite = map[cookie.sameSite] ?? cookie.sameSite;
-      }
-      if (cookie.expirationDate) {
-        out.expires = Math.round(cookie.expirationDate);
-      }
-      cookies.push(out);
-    }
+async function refreshAccountBadge() {
+  const token = await resolveToken();
+  if (!token) {
+    accountBadge.classList.add("hidden");
+    syncPanel.classList.add("hidden");
+    showAuthPrompt(true);
+    return false;
   }
-  return cookies;
+  const account = await fetchAccount(token);
+  if (!account) {
+    accountBadge.classList.add("hidden");
+    syncPanel.classList.add("hidden");
+    showAuthPrompt(true);
+    await auth.clearToken();
+    return false;
+  }
+  accountBadge.textContent = account.display_name;
+  accountBadge.classList.remove("hidden");
+  syncPanel.classList.remove("hidden");
+  showAuthPrompt(false);
+  return true;
 }
 
-async function postCookies(storeKey, cookies, token) {
-  const response = await fetch(`${HUB_URL}/api/v1/supermarket/connections/import`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      store: storeKey,
-      label: "",
-      cookies,
-      activate: true,
-    }),
-  });
-  if (response.status === 401) {
-    // Token expired or invalid — clear cache so we re-read from a tab.
-    await chrome.storage.local.remove("token");
-    throw new Error("Session expirée. Reconnecte-toi sur AdamHUB puis recommence.");
+function renderStoreMeta(key, error = null) {
+  const meta = document.getElementById(`meta-${key}`);
+  if (!meta) return;
+  meta.classList.remove("connected", "error");
+  if (error) {
+    meta.textContent = `échec : ${error}`;
+    meta.classList.add("error");
+    return;
   }
-  if (!response.ok) {
-    let detail = "";
-    try {
-      const data = await response.json();
-      detail = data.detail ?? JSON.stringify(data);
-    } catch {
-      detail = await response.text();
-    }
-    throw new Error(`HTTP ${response.status} — ${detail || "erreur inconnue"}`);
+  const stamp = lastSync[key];
+  if (stamp) {
+    meta.textContent = formatStamp(stamp);
+    meta.classList.add("connected");
+  } else {
+    meta.textContent = "non connecté";
   }
-  return response.json();
 }
 
 async function refreshConnectionStatus() {
   const stored = await chrome.storage.local.get(["lastSync"]);
-  const lastSync = stored.lastSync || {};
-  for (const key of Object.keys(STORES)) {
-    const meta = document.getElementById(`meta-${key}`);
-    if (!meta) continue;
-    const stamp = lastSync[key];
-    if (stamp) {
-      const date = new Date(stamp);
-      meta.textContent = `synchronisé le ${date.toLocaleDateString("fr-FR")} à ${date.toLocaleTimeString("fr-FR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}`;
-      meta.classList.add("connected");
-    } else {
-      meta.textContent = "non connecté";
-      meta.classList.remove("connected");
-    }
+  lastSync = stored.lastSync || {};
+  for (const key of STORE_KEYS) {
+    renderStoreMeta(key);
   }
 }
 
-async function refreshAccountBadge() {
-  try {
-    const { token } = await getAuthToken();
-    if (!token) {
-      accountBadge.classList.add("hidden");
-      showAuthPrompt(true);
-      return false;
-    }
-    const account = await fetchAccount(token);
-    if (!account) {
-      accountBadge.classList.add("hidden");
-      showAuthPrompt(true);
-      await chrome.storage.local.remove("token");
-      return false;
-    }
-    accountBadge.textContent = account.display_name;
-    accountBadge.classList.remove("hidden");
-    showAuthPrompt(false);
-    return true;
-  } catch (err) {
-    console.warn("[AdamHUB] refreshAccountBadge failed:", err);
-    accountBadge.classList.add("hidden");
-    showAuthPrompt(true);
-    return false;
-  }
-}
-
-async function connectStore(storeKey) {
+async function runSyncNow() {
   hideStatus();
-  const def = STORES[storeKey];
-  const button = document.querySelector(`button[data-store="${storeKey}"]`);
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Lecture…";
-  }
+  syncNowBtn.disabled = true;
+  syncNowBtn.textContent = "Synchronisation…";
   try {
-    const { token } = await getAuthToken();
+    const token = await resolveToken();
     if (!token) {
-      if (storeKey === "auchan") {
-        throw new Error(
-          "Auchan fonctionne sans compte : connecte-toi quand même à AdamHUB pour synchroniser les cookies de session, ou choisis directement ton magasin dans l'app.",
-        );
-      }
-      throw new Error(
-        "Connecte-toi à AdamHUB d'abord (clique « Ouvrir AdamHUB » au-dessus).",
-      );
+      showAuthPrompt(true);
+      showStatus("info", "Ouvre AdamHUB dans un onglet et connecte-toi pour démarrer.");
+      return;
     }
-    const cookies = await readCookiesForStore(storeKey);
-    if (cookies.length === 0) {
-      throw new Error(
-        `Aucun cookie ${def.label} trouvé. Connecte-toi sur ${def.homepage} dans cet onglet, puis recommence.`,
-      );
-    }
-    if (def.sessionMarker && !cookies.some((c) => c.name === def.sessionMarker)) {
-      throw new Error(
-        `Pas de session ${def.label} active (cookie ${def.sessionMarker} manquant). Connecte-toi puis recommence.`,
-      );
-    }
-    if (button) button.textContent = "Envoi au hub…";
-    const result = await postCookies(storeKey, cookies, token);
 
+    const results = await sync.syncAll(token);
+
+    // Re-read lastSync (updated by lib/sync) then render per-store status.
     const stored = await chrome.storage.local.get(["lastSync"]);
-    const lastSync = { ...(stored.lastSync || {}), [storeKey]: Date.now() };
-    await chrome.storage.local.set({ lastSync });
+    lastSync = stored.lastSync || {};
 
-    const count = result?.cookies_count ?? cookies.length;
-    showStatus(
-      "success",
-      `✓ ${def.label} synchronisé (${count} cookies, étiquette « ${result?.label || "?"} »).`,
-    );
-  } catch (error) {
-    showStatus("error", `✗ ${error.message ?? error}`);
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = "Connecter";
+    const failures = [];
+    for (const r of results) {
+      if (r.ok) {
+        renderStoreMeta(r.storeKey);
+      } else {
+        renderStoreMeta(r.storeKey, r.error);
+        failures.push(r);
+      }
     }
-    refreshConnectionStatus();
+
+    if (results.some((r) => r.unauthorized)) {
+      showStatus("error", "Session expirée. Reconnecte-toi sur AdamHUB puis recommence.");
+      await refreshAccountBadge();
+    } else if (failures.length === 0) {
+      showStatus("success", `✓ ${results.length} enseigne(s) synchronisée(s).`);
+    } else {
+      showStatus("error", `✗ ${failures.length}/${results.length} enseigne(s) en échec.`);
+    }
+  } catch (err) {
+    showStatus("error", `✗ ${err.message ?? err}`);
+  } finally {
+    syncNowBtn.disabled = false;
+    syncNowBtn.textContent = "Synchroniser maintenant";
   }
 }
 
 function bindEventListeners() {
-  // Always bind FIRST so the popup is interactive even if async init fails.
-  const openHubBtn = $("#open-hub");
-  if (openHubBtn) {
-    openHubBtn.addEventListener("click", async () => {
-      try {
-        await chrome.tabs.create({ url: FRONTEND_URLS[0] });
-      } catch (err) {
-        showStatus("error", `Impossible d'ouvrir AdamHUB : ${err.message ?? err}`);
-      }
-    });
-  }
-  for (const button of document.querySelectorAll('button[data-action="connect"]')) {
-    button.addEventListener("click", () => {
-      void connectStore(button.dataset.store);
-    });
-  }
-  console.log("[AdamHUB] event listeners bound");
+  openHubBtn.addEventListener("click", async () => {
+    try {
+      await chrome.tabs.create({ url: frontendUrls[0] ?? "http://127.0.0.1:5173/" });
+    } catch (err) {
+      showStatus("error", `Impossible d'ouvrir AdamHUB : ${err.message ?? err}`);
+    }
+  });
+  syncNowBtn.addEventListener("click", () => {
+    void runSyncNow();
+  });
 }
 
 async function init() {
   bindEventListeners();
+
+  const settings = await loadSettings();
+  apiUrl = settings.apiUrl;
+  frontendUrls = expandFrontendUrls(settings.frontendUrls);
+
+  auth = createAuth({ storage: chrome.storage.local, scripting: chrome.scripting });
+  sync = createSync({
+    storage: chrome.storage.local,
+    cookies: chrome.cookies,
+    fetchFn: fetch,
+    apiUrl,
+  });
+
   let ok = false;
   try {
     ok = await refreshAccountBadge();

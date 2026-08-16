@@ -1,14 +1,15 @@
 // In-memory mocks for the chrome.* APIs used by lib/. Kept here so tests never
-// touch the real browser: storage.local and scripting.executeScript are the only
-// surfaces lib/ depends on today.
+// touch the real browser: storage.local, scripting.executeScript and
+// cookies.getAll are the only surfaces lib/ depends on today.
 
 /**
  * Build an in-memory `chrome` mock.
  *
  * @param {object} [overrides]
  * @param {Function} [overrides.executeScript] Custom chrome.scripting.executeScript.
+ * @param {Function} [overrides.getAllCookies] Custom chrome.cookies.getAll(filter).
  * @param {object} [overrides.chrome] Extra chrome.* surfaces to attach.
- * @returns {{ chrome: object, storageLocal: object }}
+ * @returns {{ chrome: object, storageLocal: object, scripting: object, cookies: object }}
  */
 export function createMockChrome(overrides = {}) {
   const store = new Map();
@@ -56,11 +57,19 @@ export function createMockChrome(overrides = {}) {
     },
   };
 
+  const cookies = {
+    async getAll(filter) {
+      if (overrides.getAllCookies) return overrides.getAllCookies(filter);
+      return [];
+    },
+  };
+
   const chrome = {
     storage: { local: storageLocal },
     scripting,
+    cookies,
     ...(overrides.chrome ?? {}),
   };
 
-  return { chrome, storageLocal, scripting };
+  return { chrome, storageLocal, scripting, cookies };
 }
