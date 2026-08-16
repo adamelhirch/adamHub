@@ -222,20 +222,20 @@ def test_set_status_sets_and_clears_validated_at(test_engine):
 
 
 def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
-    cache_id = _seed_cache(test_engine)
+    cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR)
 
     # No carts yet.
     assert client.get("/api/v1/supermarket/carts", headers=auth_headers).json() == []
 
     # Adding an item creates the cart and snapshots the cache row.
     added = client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=auth_headers,
         json={"cache_id": cache_id},
     )
     assert added.status_code == 200, added.text
     cart = added.json()
-    assert cart["store"] == "intermarche"
+    assert cart["store"] == "carrefour"
     assert cart["status"] == "draft"
     assert cart["validated_at"] is None
     assert len(cart["items"]) == 1
@@ -243,7 +243,7 @@ def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
     item_id = cart["items"][0]["id"]
 
     # GET the cart by store.
-    read = client.get("/api/v1/supermarket/carts/intermarche", headers=auth_headers)
+    read = client.get("/api/v1/supermarket/carts/carrefour", headers=auth_headers)
     assert read.status_code == 200
     assert read.json()["id"] == cart["id"]
 
@@ -253,7 +253,7 @@ def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
 
     # Update quantity.
     patched = client.patch(
-        f"/api/v1/supermarket/carts/intermarche/items/{item_id}",
+        f"/api/v1/supermarket/carts/carrefour/items/{item_id}",
         headers=auth_headers,
         json={"quantity": 5},
     )
@@ -262,7 +262,7 @@ def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
 
     # Validate the cart: status flips and validated_at is stamped.
     validated = client.put(
-        "/api/v1/supermarket/carts/intermarche/status",
+        "/api/v1/supermarket/carts/carrefour/status",
         headers=auth_headers,
         json={"status": "validated"},
     )
@@ -272,7 +272,7 @@ def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
 
     # Back to draft clears validated_at.
     drafted = client.put(
-        "/api/v1/supermarket/carts/intermarche/status",
+        "/api/v1/supermarket/carts/carrefour/status",
         headers=auth_headers,
         json={"status": "draft"},
     )
@@ -282,7 +282,7 @@ def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
 
     # Remove the item.
     removed = client.delete(
-        f"/api/v1/supermarket/carts/intermarche/items/{item_id}",
+        f"/api/v1/supermarket/carts/carrefour/items/{item_id}",
         headers=auth_headers,
     )
     assert removed.status_code == 200
@@ -290,18 +290,18 @@ def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
 
     # Clear the cart (keeps the cart row).
     client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=auth_headers,
         json={"cache_id": cache_id},
     )
-    cleared = client.delete("/api/v1/supermarket/carts/intermarche", headers=auth_headers)
+    cleared = client.delete("/api/v1/supermarket/carts/carrefour", headers=auth_headers)
     assert cleared.status_code == 200
     assert cleared.json()["items"] == []
 
 
 def test_cart_add_rejects_unknown_cache(client, auth_headers):
     response = client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=auth_headers,
         json={"cache_id": 999999},
     )
@@ -309,9 +309,9 @@ def test_cart_add_rejects_unknown_cache(client, auth_headers):
 
 
 def test_cart_add_rejects_expired_cache(client, auth_headers, test_engine):
-    cache_id = _seed_cache(test_engine, expires_at=datetime.now(UTC) - timedelta(hours=1))
+    cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR, expires_at=datetime.now(UTC) - timedelta(hours=1))
     response = client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=auth_headers,
         json={"cache_id": cache_id},
     )
@@ -321,10 +321,10 @@ def test_cart_add_rejects_expired_cache(client, auth_headers, test_engine):
 def test_cart_cross_user_is_404_without_leak(client, test_engine):
     owner = register_user(client, "cart-owner@adamelhirch.com")
     intruder = register_user(client, "cart-intruder@adamelhirch.com")
-    cache_id = _seed_cache(test_engine)
+    cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR)
 
     added = client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=owner["headers"],
         json={"cache_id": cache_id},
     )
@@ -333,32 +333,32 @@ def test_cart_cross_user_is_404_without_leak(client, test_engine):
     # The intruder sees no carts and cannot touch the owner's item.
     assert client.get("/api/v1/supermarket/carts", headers=intruder["headers"]).json() == []
     assert client.patch(
-        f"/api/v1/supermarket/carts/intermarche/items/{item_id}",
+        f"/api/v1/supermarket/carts/carrefour/items/{item_id}",
         headers=intruder["headers"],
         json={"quantity": 9},
     ).status_code == 404
     assert client.delete(
-        f"/api/v1/supermarket/carts/intermarche/items/{item_id}",
+        f"/api/v1/supermarket/carts/carrefour/items/{item_id}",
         headers=intruder["headers"],
     ).status_code == 404
 
     # The owner's cart is untouched.
-    cart = client.get("/api/v1/supermarket/carts/intermarche", headers=owner["headers"]).json()
+    cart = client.get("/api/v1/supermarket/carts/carrefour", headers=owner["headers"]).json()
     assert cart["items"][0]["quantity"] == 1
 
 
 def test_cart_scoped_per_user_same_store(client, test_engine):
     user_a = register_user(client, "cart-a@adamelhirch.com")
     user_b = register_user(client, "cart-b@adamelhirch.com")
-    cache_id = _seed_cache(test_engine)
+    cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR)
 
     client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=user_a["headers"],
         json={"cache_id": cache_id},
     )
     client.post(
-        "/api/v1/supermarket/carts/intermarche/items",
+        "/api/v1/supermarket/carts/carrefour/items",
         headers=user_b["headers"],
         json={"cache_id": cache_id},
     )

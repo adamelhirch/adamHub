@@ -101,7 +101,13 @@ def _utcnow_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _load_fresh_cache(session: Session, cache_id: int) -> SupermarketSearchCache:
+def load_cache_row(session: Session, cache_id: int) -> SupermarketSearchCache:
+    """Load a fresh (non-expired) search cache row or raise a 400.
+
+    Public seam shared by ``add_item`` and the Intermarché cart mirror: the
+    cache row is the only trusted source of store metadata, and an unknown or
+    expired ``cache_id`` is always a 400 whatever the caller.
+    """
     cache_row = session.get(SupermarketSearchCache, cache_id)
     if cache_row is None:
         raise HTTPException(status_code=400, detail="Search cache entry not found")
@@ -125,7 +131,7 @@ def add_item(
     unknown or expired ``cache_id`` is a 400. Re-adding the same ``cache_id``
     merges into the existing line by bumping its quantity.
     """
-    cache_row = _load_fresh_cache(session, cache_id)
+    cache_row = load_cache_row(session, cache_id)
 
     existing = session.exec(
         select(SupermarketCartItem).where(
@@ -190,6 +196,46 @@ def clear_cart(session: Session, cart: SupermarketCart) -> None:
     )
     cart.updated_at = datetime.now(UTC)
     session.add(cart)
+    session.commit()
+
+
+def replace_items(session: Session, cart: SupermarketCart, items: list[dict]) -> None:
+    """Replace the cart's lines wholesale with the given snapshots.
+
+    Used by the Intermarché cart mirror: after a successful adapter call the
+    local cart must *mirror* the server's response, so every existing line is
+    dropped and re-seeded from the store state. ``items`` are store-verified
+    line snapshots with keys ``external_id``, ``name``, ``quantity``,
+    ``price_amount``, ``price_text`` and ``image_url``; ``cache_id`` stays
+    ``None`` because mirrored lines originate from the store's cart, not from a
+    search cache row. Cart status / validated_at are deliberately untouched.
+    """
+    session.exec(
+        delete(SupermarketCartItem)
+        .where(SupermarketCartItem.cart_id == cart.id)
+        .execution_options(synchronize_session=False)
+    )
+    # Drop the deleted rows from the identity map: the re-seeded lines may
+    # reuse the same rowids (SQLite frees them on delete), and flushing a new
+    # object over a still-cached one warns (and can misroute dirty tracking).
+    session.expunge_all()
+    now = datetime.now(UTC)
+    for row in items:
+        session.add(
+            SupermarketCartItem(
+                cart_id=cart.id,
+                external_id=row.get("external_id"),
+                name=row["name"],
+                quantity=row.get("quantity", 1),
+                price_amount=row.get("price_amount"),
+                price_text=row.get("price_text"),
+                image_url=row.get("image_url"),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    cart.updated_at = now
+    session.add(cart)  # re-attach the (expunged) cart so updated_at is persisted
     session.commit()
 
 

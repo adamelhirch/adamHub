@@ -513,6 +513,15 @@ class IntermarcheCartClient:
         self._raise_for_cart_error(response)
         self._last_sync = None
 
+    async def aclose(self) -> None:
+        """Release the underlying HTTP client.
+
+        ``build_intermarche_cart_client`` hands the caller ownership of the
+        ``httpx.AsyncClient`` it creates; HTTP callers must close it after each
+        mirror request (see the cart mirror service).
+        """
+        await self._client.aclose()
+
 
 def build_intermarche_cart_client(
     cookies: list[dict[str, Any]],
