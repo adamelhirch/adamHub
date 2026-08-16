@@ -1,6 +1,6 @@
 // Hard-coded for now — TODO: make configurable once the hub has a stable URL.
 const HUB_URL = "http://127.0.0.1:8000";
-const FRONTEND_URLS = ["http://127.0.0.1:5173/", "http://localhost:5173/"];
+const FRONTEND_URLS = ["http://127.0.0.1:5173/", "http://localhost:5173/", "http://127.0.0.1:5174/", "http://localhost:5174/"];
 const TOKEN_LOCALSTORAGE_KEY = "adamhub_token";
 
 const STORES = {
@@ -8,7 +8,7 @@ const STORES = {
     label: "Carrefour",
     cookieDomains: [".carrefour.fr", "www.carrefour.fr"],
     homepage: "https://www.carrefour.fr/",
-    sessionMarker: "FRONTONE_CONNECTED",
+    sessionMarker: "FRO_CONNECTED",
   },
   intermarche: {
     label: "Intermarché",
@@ -231,6 +231,11 @@ async function connectStore(storeKey) {
   try {
     const { token } = await getAuthToken();
     if (!token) {
+      if (storeKey === "auchan") {
+        throw new Error(
+          "Auchan fonctionne sans compte : connecte-toi quand même à AdamHUB pour synchroniser les cookies de session, ou choisis directement ton magasin dans l'app.",
+        );
+      }
       throw new Error(
         "Connecte-toi à AdamHUB d'abord (clique « Ouvrir AdamHUB » au-dessus).",
       );

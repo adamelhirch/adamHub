@@ -217,6 +217,13 @@ ul#store-list strong {
   color: #1f7a3a;
 }
 
+.note {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #b25000;
+}
+
 ul#store-list button {
   padding: 6px 12px;
   border: 0;
