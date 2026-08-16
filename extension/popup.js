@@ -6,7 +6,11 @@
 import { createAuth } from "./lib/auth.js";
 import { createSync } from "./lib/sync.js";
 import { STORE_KEYS } from "./lib/stores.js";
-import { validateSettings, matchesFrontend } from "./lib/settings.js";
+import {
+  validateSettings,
+  matchesFrontend,
+  SETTINGS_STORAGE_KEY,
+} from "./lib/settings.js";
 
 const $ = (sel) => document.querySelector(sel);
 const statusEl = $("#status");
@@ -46,9 +50,8 @@ function formatStamp(stamp) {
 
 async function loadSettings() {
   try {
-    const dump = await chrome.storage.sync.get(null);
-    const raw = dump && dump.settings && typeof dump.settings === "object" ? dump.settings : dump;
-    return validateSettings(raw).settings;
+    const stored = await chrome.storage.sync.get([SETTINGS_STORAGE_KEY]);
+    return validateSettings(stored[SETTINGS_STORAGE_KEY]).settings;
   } catch (err) {
     console.warn("[AdamHUB] loadSettings failed:", err);
     return validateSettings(undefined).settings;
