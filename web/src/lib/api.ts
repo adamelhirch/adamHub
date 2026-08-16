@@ -51,9 +51,21 @@ api.interceptors.response.use(
     if (error?.response?.status === 401) {
       const url: string = error?.config?.url ?? "";
       if (!url.includes("/auth/")) {
-        setStoredToken(null);
-        if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-          window.location.href = "/login";
+        // The /supermarket endpoints proxy third-party sessions: a 401 there
+        // usually means the *supermarket* session (cookies) expired, not the
+        // app token. Only treat it as an app-auth failure (and redirect to
+        // /login) when the response carries one of the backend's auth errors,
+        // so the cart UI can surface a cookie-resync message instead (b3
+        // Intermarché mirror).
+        const detail: unknown = error?.response?.data?.detail;
+        const isAppAuthFailure =
+          typeof detail === "string" &&
+          /token expired|invalid token|missing authorization bearer|malformed token|user no longer exists|not authorized|not authenticated|could not validate credentials/i.test(detail);
+        if (!url.includes("/supermarket/") || isAppAuthFailure) {
+          setStoredToken(null);
+          if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+            window.location.href = "/login";
+          }
         }
       }
     }
