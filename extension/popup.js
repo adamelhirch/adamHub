@@ -6,7 +6,7 @@
 import { createAuth } from "./lib/auth.js";
 import { createSync } from "./lib/sync.js";
 import { STORE_KEYS } from "./lib/stores.js";
-import { validateSettings, expandFrontendUrls } from "./lib/settings.js";
+import { validateSettings, matchesFrontend } from "./lib/settings.js";
 
 const $ = (sel) => document.querySelector(sel);
 const statusEl = $("#status");
@@ -19,7 +19,7 @@ const openHubBtn = $("#open-hub");
 let auth;
 let sync;
 let apiUrl;
-let frontendUrls;
+let frontendUrl;
 let lastSync = {};
 
 function showStatus(kind, message) {
@@ -57,9 +57,7 @@ async function loadSettings() {
 
 async function findHubTabs() {
   const tabs = await chrome.tabs.query({});
-  return tabs.filter(
-    (tab) => tab && tab.url && frontendUrls.some((u) => tab.url.startsWith(u.replace(/\/$/, ""))),
-  );
+  return tabs.filter((tab) => tab && matchesFrontend(tab.url, frontendUrl));
 }
 
 async function resolveToken() {
@@ -184,7 +182,7 @@ async function runSyncNow() {
 function bindEventListeners() {
   openHubBtn.addEventListener("click", async () => {
     try {
-      await chrome.tabs.create({ url: frontendUrls[0] ?? "http://127.0.0.1:5173/" });
+      await chrome.tabs.create({ url: frontendUrl });
     } catch (err) {
       showStatus("error", `Impossible d'ouvrir AdamHUB : ${err.message ?? err}`);
     }
@@ -199,7 +197,7 @@ async function init() {
 
   const settings = await loadSettings();
   apiUrl = settings.apiUrl;
-  frontendUrls = expandFrontendUrls(settings.frontendUrls);
+  frontendUrl = settings.frontendUrl;
 
   auth = createAuth({ storage: chrome.storage.local, scripting: chrome.scripting });
   sync = createSync({

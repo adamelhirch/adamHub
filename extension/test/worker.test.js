@@ -12,7 +12,7 @@ import { createWorkerChrome } from "./helpers/worker-chrome.js";
 
 const DEFAULT_SETTINGS = {
   apiUrl: "http://127.0.0.1:8000",
-  frontendUrls: [5173, 5174],
+  frontendUrl: "http://localhost:5173",
   syncIntervalHours: 6,
   cooldownMinutes: 30,
   stores: {
@@ -93,7 +93,7 @@ describe("handleInstalled", () => {
     const { id } = m.notifications.created[0];
     await worker.handleNotificationClicked(id);
 
-    expect(m.tabs.created).toEqual([{ url: "http://127.0.0.1:5173/" }]);
+    expect(m.tabs.created).toEqual([{ url: "http://localhost:5173" }]);
   });
 
   it("syncs immediately when a token is already cached", async () => {
@@ -277,7 +277,7 @@ describe("syncStore", () => {
     expect(m.notifications.created[0].options.message).toMatch(/reconnecte/i);
     // clicking that notification reopens the hub
     await worker.handleNotificationClicked(m.notifications.created[0].id);
-    expect(m.tabs.created).toEqual([{ url: "http://127.0.0.1:5173/" }]);
+    expect(m.tabs.created).toEqual([{ url: "http://localhost:5173" }]);
   });
 
   it("notifies on a non-401 HTTP error without clearing the token", async () => {

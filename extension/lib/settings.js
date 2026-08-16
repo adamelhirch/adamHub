@@ -18,9 +18,6 @@ const LOOPBACK_ALIASES = {
   localhost: "127.0.0.1",
 };
 
-/** chrome.storage.sync key the options page reads/writes the settings under. */
-export const SETTINGS_STORAGE_KEY = "settings";
-
 function defaultStoreToggles() {
   return Object.fromEntries(STORE_KEYS.map((key) => [key, { enabled: true }]));
 }
