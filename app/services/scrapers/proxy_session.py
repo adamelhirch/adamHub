@@ -45,6 +45,7 @@ class ProxySession:
 
 
 async def _aclose(client: Any) -> None:
-    close = getattr(client, "aclose", None)
+    """Close an httpx client (``aclose``) or curl_cffi session (``close``)."""
+    close = getattr(client, "aclose", None) or getattr(client, "close", None)
     if close is not None:
         await close()
