@@ -9,6 +9,8 @@ from sqlmodel import select
 from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.core.security import require_api_key
 from app.models import (
+    SupermarketCart,
+    SupermarketCartItem,
     SupermarketConnection,
     SupermarketSearchCache,
     SupermarketStore,
@@ -17,6 +19,11 @@ from app.models import (
 from app.schemas import (
     AuchanOfferingContext,
     AuchanStoreSelectionRequest,
+    SupermarketCartItemAdd,
+    SupermarketCartItemRead,
+    SupermarketCartItemUpdate,
+    SupermarketCartRead,
+    SupermarketCartStatusUpdate,
     SupermarketConnectionImport,
     SupermarketConnectionRead,
     SupermarketMappingCreate,
@@ -25,6 +32,15 @@ from app.schemas import (
     SupermarketSearchResult,
     SupermarketStoreRead,
     SupermarketStoreSelectionRead,
+)
+from app.services.cart import (
+    add_item as add_cart_item,
+    clear_cart,
+    list_carts,
+    remove_item as remove_cart_item,
+    set_status as set_cart_status,
+    update_quantity as update_cart_item_quantity,
+    upsert_cart,
 )
 from app.services.connections import (
     activate_connection as activate_supermarket_connection,
@@ -392,3 +408,98 @@ def get_pantry_item_mapping(item_id: int, session: SessionDep) -> SupermarketMap
 def delete_mapping(mapping_id: int, session: SessionDep) -> SupermarketMappingRead:
     mapping = deactivate_mapping(session, mapping_id)
     return SupermarketMappingRead.model_validate(mapping, from_attributes=True)
+
+
+# ── Carts (panier) ─────────────────────────────────────────────────────────────
+
+
+def _cart_to_read(session: SessionDep, cart: SupermarketCart) -> SupermarketCartRead:
+    items = session.exec(
+        select(SupermarketCartItem)
+        .where(SupermarketCartItem.cart_id == cart.id)
+        .order_by(SupermarketCartItem.id)
+    ).all()
+    return SupermarketCartRead(
+        id=cart.id,
+        store=cart.store,
+        status=cart.status,
+        validated_at=cart.validated_at,
+        external_cart_ref=cart.external_cart_ref,
+        created_at=cart.created_at,
+        updated_at=cart.updated_at,
+        items=[SupermarketCartItemRead.model_validate(item, from_attributes=True) for item in items],
+    )
+
+
+@router.get("/carts", response_model=list[SupermarketCartRead])
+def list_carts_endpoint(
+    session: SessionDep, user: CurrentOrOwnerUser
+) -> list[SupermarketCartRead]:
+    carts = list_carts(session, user_id=user.id)
+    return [_cart_to_read(session, cart) for cart in carts]
+
+
+@router.get("/carts/{store}", response_model=SupermarketCartRead)
+def get_cart_endpoint(
+    store: SupermarketStore, session: SessionDep, user: CurrentOrOwnerUser
+) -> SupermarketCartRead:
+    cart = upsert_cart(session, store, user_id=user.id)
+    return _cart_to_read(session, cart)
+
+
+@router.post("/carts/{store}/items", response_model=SupermarketCartRead)
+def add_cart_item_endpoint(
+    store: SupermarketStore,
+    payload: SupermarketCartItemAdd,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SupermarketCartRead:
+    cart = upsert_cart(session, store, user_id=user.id)
+    add_cart_item(session, cart, payload.cache_id, quantity=payload.quantity)
+    return _cart_to_read(session, cart)
+
+
+@router.patch("/carts/{store}/items/{item_id}", response_model=SupermarketCartRead)
+def update_cart_item_endpoint(
+    store: SupermarketStore,
+    item_id: int,
+    payload: SupermarketCartItemUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SupermarketCartRead:
+    cart = upsert_cart(session, store, user_id=user.id)
+    update_cart_item_quantity(session, cart, item_id, payload.quantity)
+    return _cart_to_read(session, cart)
+
+
+@router.delete("/carts/{store}/items/{item_id}", response_model=SupermarketCartRead)
+def remove_cart_item_endpoint(
+    store: SupermarketStore,
+    item_id: int,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SupermarketCartRead:
+    cart = upsert_cart(session, store, user_id=user.id)
+    remove_cart_item(session, cart, item_id)
+    return _cart_to_read(session, cart)
+
+
+@router.delete("/carts/{store}", response_model=SupermarketCartRead)
+def clear_cart_endpoint(
+    store: SupermarketStore, session: SessionDep, user: CurrentOrOwnerUser
+) -> SupermarketCartRead:
+    cart = upsert_cart(session, store, user_id=user.id)
+    clear_cart(session, cart)
+    return _cart_to_read(session, cart)
+
+
+@router.put("/carts/{store}/status", response_model=SupermarketCartRead)
+def set_cart_status_endpoint(
+    store: SupermarketStore,
+    payload: SupermarketCartStatusUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SupermarketCartRead:
+    cart = upsert_cart(session, store, user_id=user.id)
+    set_cart_status(session, cart, payload.status)
+    return _cart_to_read(session, cart)
