@@ -194,6 +194,54 @@ function isNotFoundError(error: unknown): boolean {
   return (error as { response?: { status?: number } })?.response?.status === 404;
 }
 
+// ─── Intermarché mirror cart errors ───────────────────────────────────────────
+//
+// The Intermarché cart endpoints are a mirror of the store's real site cart
+// (b2). When the mirror fails the local cart can no longer reflect the site, so
+// instead of surfacing the raw adapter error we explain the cause and invite
+// the user to resync the cookies in the extension. The three other stores keep
+// the plain local error messages (Run 1 behavior).
+
+const INTERMARCHE_SESSION_EXPIRED_MESSAGE =
+  "La session Intermarché a expiré : le panier ne peut plus être synchronisé avec le site. " +
+  'Resynchronise les cookies dans l\'extension AdamHUB Connect (déconnexion puis reconnexion du compte Intermarché) puis réessaie.';
+
+const INTERMARCHE_UNAVAILABLE_MESSAGE =
+  "Le site Intermarché n'a pas répondu (session expirée ou protection anti-bot). " +
+  "Resynchronise les cookies dans l'extension AdamHUB Connect puis réessaie.";
+
+const INTERMARCHE_NOT_FOUND_MESSAGE =
+  "Le panier Intermarché est introuvable sur le site (compte ou magasin incorrect). " +
+  "Vérifie et resynchronise la connexion dans l'extension AdamHUB Connect.";
+
+const INTERMARCHE_CONFLICT_MESSAGE =
+  'Le panier Intermarché est désynchronisé du site. ' +
+  'Clique sur « Resynchroniser » pour recharger le panier réel puis réessaie.';
+
+export function extractCartErrorMessage(
+  store: SupermarketStoreKey,
+  error: unknown,
+  fallback: string,
+): string {
+  if (store !== 'intermarche') {
+    return extractErrorMessage(error, fallback);
+  }
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 401 || status === 403) {
+    return INTERMARCHE_SESSION_EXPIRED_MESSAGE;
+  }
+  if (status === 503) {
+    return INTERMARCHE_UNAVAILABLE_MESSAGE;
+  }
+  if (status === 404) {
+    return INTERMARCHE_NOT_FOUND_MESSAGE;
+  }
+  if (status === 409) {
+    return INTERMARCHE_CONFLICT_MESSAGE;
+  }
+  return extractErrorMessage(error, fallback);
+}
+
 // Replace (or append) a cart in a list by identity (id) or, for a freshly
 // upserted cart that is not yet in the list, by store.
 function upsertCartIn(carts: SupermarketCart[], cart: SupermarketCart): SupermarketCart[] {
@@ -667,12 +715,14 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
       }));
       return cart;
     } catch (e: unknown) {
-      // A 404 means the store has no cart yet: represent it as `null` rather
-      // than an error so consumers render an empty cart.
-      if (isNotFoundError(e)) {
+      // A 404 means the store has no cart yet for the local-only stores:
+      // represent it as `null` rather than an error so consumers render an
+      // empty cart. For the Intermarché mirror a 404 is a real site-side
+      // failure (customer/cart unknown) and must surface as an error.
+      if (isNotFoundError(e) && store !== 'intermarche') {
         set((s) => ({ cartsByStore: { ...s.cartsByStore, [store]: null } }));
       } else {
-        set({ cartError: extractErrorMessage(e, 'Erreur lors du chargement du panier') });
+        set({ cartError: extractCartErrorMessage(store, e, 'Erreur lors du chargement du panier') });
       }
       return null;
     } finally {
@@ -689,7 +739,7 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
         cartsByStore: { ...s.cartsByStore, [store]: cart },
       }));
     } catch (e: unknown) {
-      set({ cartError: extractErrorMessage(e, "Erreur lors de l'ajout au panier") });
+      set({ cartError: extractCartErrorMessage(store, e, "Erreur lors de l'ajout au panier") });
     } finally {
       set({ cartLoading: false });
     }
@@ -704,7 +754,7 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
         cartsByStore: { ...s.cartsByStore, [store]: cart },
       }));
     } catch (e: unknown) {
-      set({ cartError: extractErrorMessage(e, 'Erreur lors de la mise à jour de la quantité') });
+      set({ cartError: extractCartErrorMessage(store, e, 'Erreur lors de la mise à jour de la quantité') });
     } finally {
       set({ cartLoading: false });
     }
@@ -719,7 +769,7 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
         cartsByStore: { ...s.cartsByStore, [store]: cart },
       }));
     } catch (e: unknown) {
-      set({ cartError: extractErrorMessage(e, "Erreur lors de la suppression de l'article") });
+      set({ cartError: extractCartErrorMessage(store, e, "Erreur lors de la suppression de l'article") });
     } finally {
       set({ cartLoading: false });
     }
@@ -734,7 +784,7 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
         cartsByStore: { ...s.cartsByStore, [store]: cart },
       }));
     } catch (e: unknown) {
-      set({ cartError: extractErrorMessage(e, 'Erreur lors du vidage du panier') });
+      set({ cartError: extractCartErrorMessage(store, e, 'Erreur lors du vidage du panier') });
     } finally {
       set({ cartLoading: false });
     }
@@ -749,7 +799,7 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
         cartsByStore: { ...s.cartsByStore, [store]: cart },
       }));
     } catch (e: unknown) {
-      set({ cartError: extractErrorMessage(e, 'Erreur lors de la mise à jour du statut') });
+      set({ cartError: extractCartErrorMessage(store, e, 'Erreur lors de la mise à jour du statut') });
     } finally {
       set({ cartLoading: false });
     }

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import {
   ShoppingBasket, ShoppingCart, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
-  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil, Lock,
+  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil, Lock, RefreshCw,
 } from 'lucide-react';
 import { useGroceryStore, STORE_LABELS, STORE_CAPABILITIES, ACCOUNT_REQUIRED_STORES } from '../store/groceryStore';
 import type {
@@ -1997,7 +1997,36 @@ export default function GroceriesPage() {
                   </div>
                   <StoreSelector selected={selectedStore} onChange={setSelectedStore} connections={connections} />
                 </div>
-                {currentCart && (
+                {selectedStore === 'intermarche' ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {!cartError && (
+                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                        cartLoading && cartItems.length === 0
+                          ? 'border-amber-200 bg-amber-50 text-amber-700'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      }`}>
+                        {cartLoading && cartItems.length === 0 ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3 h-3" />
+                        )}
+                        {cartLoading && cartItems.length === 0
+                          ? 'Synchronisation avec le site…'
+                          : 'Synchro avec le site Intermarché'}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void fetchCart(selectedStore)}
+                      disabled={cartLoading}
+                      className="inline-flex items-center gap-1 rounded-full border border-apple-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-apple-gray-600 transition-colors hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Recharger le panier depuis le site Intermarché"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Resynchroniser
+                    </button>
+                  </div>
+                ) : currentCart && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {currentCart.status === 'validated' ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
@@ -2017,7 +2046,21 @@ export default function GroceriesPage() {
                   </div>
                 )}
                 {cartError && (
-                  <p className="mt-2 text-xs text-red-500">❌ {cartError}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-red-500" />
+                    <p className="min-w-0 flex-1 text-xs text-red-600">{cartError}</p>
+                    {selectedStore === 'intermarche' && (
+                      <button
+                        type="button"
+                        onClick={() => void fetchCart(selectedStore)}
+                        disabled={cartLoading}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Resynchroniser
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
