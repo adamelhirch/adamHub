@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import {
   ShoppingBasket, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
-  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil,
+  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil, Lock,
 } from 'lucide-react';
-import { useGroceryStore, STORE_LABELS, STORE_CAPABILITIES } from '../store/groceryStore';
+import { useGroceryStore, STORE_LABELS, STORE_CAPABILITIES, ACCOUNT_REQUIRED_STORES } from '../store/groceryStore';
 import type {
   GroceryItem,
   PantryItem,
@@ -17,6 +17,25 @@ import type {
 function storeLabelFor(store: string | null | undefined): string {
   if (!store) return 'Magasin';
   return STORE_LABELS[store as SupermarketStoreKey] ?? store;
+}
+
+// Client-side geocoding via the French government open API (no key, CORS-enabled).
+async function geocodeFrance(zipcode: string, city: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const params = new URLSearchParams();
+    if (zipcode.trim()) params.set('postcode', zipcode.trim());
+    if (city.trim()) params.set('q', city.trim());
+    if (!params.has('q') && !params.has('postcode')) return null;
+    params.set('limit', '1');
+    const res = await fetch(`https://api-adresse.data.gouv.fr/search/?${params.toString()}`);
+    if (!res.ok) return null;
+    const data: { features?: Array<{ geometry?: { coordinates?: number[] } }> } = await res.json();
+    const coords = data.features?.[0]?.geometry?.coordinates;
+    if (!coords || coords.length < 2) return null;
+    return { lat: coords[1], lng: coords[0] };
+  } catch {
+    return null;
+  }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -607,6 +626,9 @@ function PantryRow({ item, onDelete, onConsume, onUpdate, onMap, onRestock }: {
 
 function PantryMappingPanel({
   item,
+  store,
+  searchGateBlocked,
+  searchGateMessage,
   mapping,
   query,
   setQuery,
@@ -624,6 +646,9 @@ function PantryMappingPanel({
   onUnlink,
 }: {
   item: PantryItem;
+  store: SupermarketStoreKey;
+  searchGateBlocked: boolean;
+  searchGateMessage: string;
   mapping: SupermarketMapping | null;
   query: string;
   setQuery: (value: string) => void;
@@ -683,7 +708,9 @@ function PantryMappingPanel({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  void onSearch();
+                  if (!searchGateBlocked) {
+                    void onSearch();
+                  }
                 }
               }}
               placeholder="Rechercher un produit"
@@ -692,7 +719,7 @@ function PantryMappingPanel({
           </div>
           <button
             onClick={() => void onSearch()}
-            disabled={searchLoading || !query.trim()}
+            disabled={searchLoading || !query.trim() || searchGateBlocked}
             className="px-4 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50"
           >
             {searchLoading ? 'Recherche…' : 'Rechercher'}
@@ -700,13 +727,15 @@ function PantryMappingPanel({
           {canRefresh && (
             <button
               onClick={() => void onRefresh()}
-              disabled={searchLoading || !query.trim()}
+              disabled={searchLoading || !query.trim() || searchGateBlocked}
               className="px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-50 disabled:opacity-50"
             >
               Actualiser
             </button>
           )}
         </div>
+
+        {store === 'auchan' && <AuchanStorePicker />}
 
         {supportsPromotions && (
           <label className="flex items-center gap-2 text-sm text-apple-gray-600">
@@ -718,6 +747,13 @@ function PantryMappingPanel({
             />
             Promotions uniquement
           </label>
+        )}
+
+        {searchGateBlocked && (
+          <p className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <Lock className="w-3 h-3 shrink-0" />
+            {searchGateMessage}
+          </p>
         )}
 
         {searchError && <p className="text-xs text-red-500">{searchError}</p>}
@@ -764,11 +800,23 @@ export default function GroceriesPage() {
     pantryMappings, fetchPantryMapping, savePantryMapping, deleteMapping, hasCachedProducts,
     selectedStore, setSelectedStore,
     connections, fetchConnections, activateConnection, deleteConnection,
+    auchanSelectedStore, fetchSelectedAuchanStore,
   } = useGroceryStore();
 
   const currentStoreLabel = STORE_LABELS[selectedStore];
   const selectedCapabilities = STORE_CAPABILITIES[selectedStore];
   const supportsPromotions = selectedCapabilities.supports_promotions;
+
+  // Search gate: block before the POST /search when the store has no usable
+  // session — account-less stores (non-Auchan without a connection) and Auchan
+  // without a selected store.
+  const selectedStoreHasConnection = connections.some((c) => c.store === selectedStore);
+  const searchGateBlocked = selectedStore === 'auchan'
+    ? !auchanSelectedStore
+    : !selectedStoreHasConnection;
+  const searchGateMessage = selectedStore === 'auchan'
+    ? 'Sélectionne un magasin Auchan avant de lancer une recherche.'
+    : `Compte requis : branche une connexion ${currentStoreLabel} via l'extension AdamHUB Connect pour rechercher les prix.`;
 
   const [activeTab, setActiveTab] = useState<Tab>('Liste de courses');
   const [search, setSearch] = useState('');
@@ -855,6 +903,7 @@ export default function GroceriesPage() {
     fetchPantry();
     fetchPantryOverview();
     fetchConnections();
+    fetchSelectedAuchanStore();
   }, []);
 
   useEffect(() => {
@@ -1151,7 +1200,7 @@ export default function GroceriesPage() {
                         <Store className="w-4 h-4 text-red-600" />
                         <span className="text-xs font-bold text-red-600 uppercase tracking-wider">Rechercher sur {currentStoreLabel}</span>
                       </div>
-                      <StoreSelector selected={selectedStore} onChange={setSelectedStore} />
+                      <StoreSelector selected={selectedStore} onChange={setSelectedStore} connections={connections} />
                     </div>
                     <ConnectionStrip
                       store={selectedStore}
@@ -1159,22 +1208,24 @@ export default function GroceriesPage() {
                       onActivate={activateConnection}
                       onDelete={deleteConnection}
                     />
+                    {selectedStore === 'auchan' && <AuchanStorePicker />}
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
                         <input
                           type="text"
+
                           placeholder="Ex: lait, poulet, yaourt…"
                           value={imQuery}
                           onChange={(e) => setImQuery(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly }); }}}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (imQuery.trim() && !searchGateBlocked) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly }); }}}
                           className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-apple-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-400/40"
                         />
                       </div>
                       <button
                         type="button"
-                        onClick={() => { if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly }); }}
-                        disabled={searchLoading || !imQuery.trim()}
+                        onClick={() => { if (imQuery.trim() && !searchGateBlocked) searchSupermarket(selectedStore, imQuery.trim(), { promotionsOnly }); }}
+                        disabled={searchLoading || !imQuery.trim() || searchGateBlocked}
                         className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -1183,8 +1234,8 @@ export default function GroceriesPage() {
                       {imQueryHasCache && (
                         <button
                           type="button"
-                          onClick={() => { if (imQuery.trim()) searchSupermarket(selectedStore, imQuery.trim(), { forceRefresh: true, promotionsOnly }); }}
-                          disabled={searchLoading || !imQuery.trim()}
+                          onClick={() => { if (imQuery.trim() && !searchGateBlocked) searchSupermarket(selectedStore, imQuery.trim(), { forceRefresh: true, promotionsOnly }); }}
+                          disabled={searchLoading || !imQuery.trim() || searchGateBlocked}
                           className="px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           Actualiser
@@ -1192,6 +1243,12 @@ export default function GroceriesPage() {
                       )}
                     </div>
 
+                    {searchGateBlocked && (
+                      <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        <Lock className="w-3 h-3 shrink-0" />
+                        {searchGateMessage}
+                      </p>
+                    )}
                     {supportsPromotions && (
                       <label className="mt-2 flex items-center gap-2 text-sm text-apple-gray-600">
                         <input
@@ -1389,6 +1446,9 @@ export default function GroceriesPage() {
               {mappingTarget && (
                 <PantryMappingPanel
                   item={mappingTarget}
+                  store={selectedStore}
+                  searchGateBlocked={searchGateBlocked}
+                  searchGateMessage={searchGateMessage}
                   mapping={pantryMappings[mappingTarget.id] ?? null}
                   query={mappingQuery}
                   setQuery={setMappingQuery}
@@ -1468,7 +1528,7 @@ export default function GroceriesPage() {
                         <Store className="w-4 h-4 text-red-600" />
                         <span className="text-xs font-bold uppercase tracking-wider text-red-600">Choisir un produit sur {currentStoreLabel}</span>
                       </div>
-                      <StoreSelector selected={selectedStore} onChange={setSelectedStore} />
+                      <StoreSelector selected={selectedStore} onChange={setSelectedStore} connections={connections} />
                     </div>
                     <ConnectionStrip
                       store={selectedStore}
@@ -1476,6 +1536,7 @@ export default function GroceriesPage() {
                       onActivate={activateConnection}
                       onDelete={deleteConnection}
                     />
+                    {selectedStore === 'auchan' && <AuchanStorePicker />}
                     <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
@@ -1487,7 +1548,7 @@ export default function GroceriesPage() {
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              if (pantrySearchQuery.trim()) {
+                              if (pantrySearchQuery.trim() && !searchGateBlocked) {
                                 void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { promotionsOnly });
                               }
                             }
@@ -1498,11 +1559,11 @@ export default function GroceriesPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (pantrySearchQuery.trim()) {
+                          if (pantrySearchQuery.trim() && !searchGateBlocked) {
                             void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { promotionsOnly });
                           }
                         }}
-                        disabled={searchLoading || !pantrySearchQuery.trim()}
+                        disabled={searchLoading || !pantrySearchQuery.trim() || searchGateBlocked}
                         className="flex items-center gap-2 px-4 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {searchLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
@@ -1512,17 +1573,24 @@ export default function GroceriesPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            if (pantrySearchQuery.trim()) {
+                            if (pantrySearchQuery.trim() && !searchGateBlocked) {
                               void searchSupermarket(selectedStore, pantrySearchQuery.trim(), { forceRefresh: true, promotionsOnly });
                             }
                           }}
-                          disabled={searchLoading || !pantrySearchQuery.trim()}
+                          disabled={searchLoading || !pantrySearchQuery.trim() || searchGateBlocked}
                           className="px-4 py-2.5 border border-red-200 text-red-600 text-sm font-semibold rounded-xl hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           Actualiser
                         </button>
                       )}
                     </div>
+
+                    {searchGateBlocked && (
+                      <p className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        <Lock className="w-3 h-3 shrink-0" />
+                        {searchGateMessage}
+                      </p>
+                    )}
 
                     {supportsPromotions && (
                       <label className="flex items-center gap-2 text-sm text-apple-gray-600">
@@ -1694,11 +1762,15 @@ const DIRECT_STORE_OPTIONS: { key: SupermarketStoreKey; label: string }[] = [
 function StoreSelector({
   selected,
   onChange,
+  connections,
 }: {
   selected: SupermarketStoreKey;
   onChange: (store: SupermarketStoreKey) => void;
+  connections: SupermarketConnection[];
 }) {
   const requiresStoreSelection = STORE_CAPABILITIES[selected].requires_store_selection;
+  const hasConnection = (store: SupermarketStoreKey) => connections.some((c) => c.store === store);
+  const accountRequired = (store: SupermarketStoreKey) => ACCOUNT_REQUIRED_STORES.includes(store) && !hasConnection(store);
   return (
     <div className="flex flex-wrap items-center gap-2">
       {DIRECT_STORE_OPTIONS.length > 1 && (
@@ -1708,13 +1780,19 @@ function StoreSelector({
               key={opt.key}
               type="button"
               onClick={() => onChange(opt.key)}
-              className={`px-2.5 py-1 text-[11px] font-semibold rounded-full transition-colors ${
+              className={`flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-full transition-colors ${
                 selected === opt.key
                   ? 'bg-red-600 text-white'
                   : 'text-apple-gray-500 hover:text-apple-gray-700'
               }`}
             >
               {opt.label}
+              {accountRequired(opt.key) && (
+                <Lock
+                  className={selected === opt.key ? 'w-2.5 h-2.5 text-white/80' : 'w-2.5 h-2.5 text-apple-gray-400'}
+                  aria-label={selected === opt.key ? 'Compte requis pour cette enseigne' : 'Compte requis'}
+                />
+              )}
             </button>
           ))}
         </div>
@@ -1784,6 +1862,185 @@ function ConnectionStrip({
         >
           ✕
         </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Auchan store picker (no-login store selection flow) ────────────────
+// Renders a compact zipcode/ville form once, lists the offering contexts from
+// GET /supermarket/auchan/offering-contexts, and POSTs the chosen store.
+// When a store is already selected it becomes a badge with a "change store"
+// action. Used wherever a search can run on Auchan.
+function AuchanStorePicker() {
+  const {
+    auchanContexts,
+    auchanSelectedStore,
+    auchanLoading,
+    auchanError,
+    fetchAuchanOfferingContexts,
+    selectAuchanStore,
+    clearAuchanStore,
+  } = useGroceryStore();
+
+  const [zipcode, setZipcode] = useState('');
+  const [city, setCity] = useState('');
+  const [manualLat, setManualLat] = useState('');
+  const [manualLng, setManualLng] = useState('');
+  const [showCoords, setShowCoords] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  if (auchanSelectedStore) {
+    return (
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-apple-gray-600">
+        <span className="font-semibold text-apple-gray-500">Magasin :</span>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-emerald-700 font-semibold">
+          <Store className="w-3 h-3" />
+          {auchanSelectedStore.store_label}
+        </span>
+        {auchanSelectedStore.location_label && (
+          <span className="text-apple-gray-500">{auchanSelectedStore.location_label}</span>
+        )}
+        <button
+          type="button"
+          onClick={() => clearAuchanStore()}
+          className="rounded-full bg-white border border-apple-gray-200 px-2.5 py-1 text-apple-gray-600 hover:border-red-300 hover:text-red-600"
+        >
+          Changer de magasin
+        </button>
+      </div>
+    );
+  }
+
+  const handleLookup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!zipcode.trim() || !city.trim()) {
+      setLocalError('Renseigne le code postal et la ville.');
+      return;
+    }
+    setLocalError(null);
+    const manualLatValue = parseFloat(manualLat);
+    const manualLngValue = parseFloat(manualLng);
+    let lat: number | null = null;
+    let lng: number | null = null;
+    if (manualLat.trim() && manualLng.trim()) {
+      lat = Number.isNaN(manualLatValue) ? null : manualLatValue;
+      lng = Number.isNaN(manualLngValue) ? null : manualLngValue;
+    } else {
+      const geocoded = await geocodeFrance(zipcode, city);
+      if (geocoded) {
+        lat = geocoded.lat;
+        lng = geocoded.lng;
+      }
+    }
+    if (lat === null || lng === null) {
+      setLocalError('Impossible de géolocaliser ce code postal / ville. Renseigne la latitude et la longitude manuellement.');
+      return;
+    }
+    await fetchAuchanOfferingContexts(zipcode.trim(), city.trim(), lat, lng);
+  };
+
+  const selectableContexts = auchanContexts.filter((ctx) => Boolean(ctx.seller_id) && Boolean(ctx.store_reference));
+
+  return (
+    <div className="mb-3">
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-apple-gray-500">
+        Choisir un magasin Auchan
+      </p>
+      <form onSubmit={(e) => void handleLookup(e)} className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            type="text"
+            value={zipcode}
+            onChange={(e) => setZipcode(e.target.value)}
+            placeholder="Code postal"
+            inputMode="numeric"
+            className="w-full rounded-xl border border-apple-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/40 sm:w-32"
+          />
+          <input
+            type="text"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            placeholder="Ville"
+            className="w-full flex-1 rounded-xl border border-apple-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/40"
+          />
+          <button
+            type="submit"
+            disabled={auchanLoading || !zipcode.trim() || !city.trim()}
+            className="flex items-center justify-center gap-2 rounded-xl bg-apple-blue px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {auchanLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Store className="w-3.5 h-3.5" />}
+            Choisir un magasin
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowCoords((value) => !value)}
+          className="self-start text-[11px] text-apple-gray-400 hover:text-apple-gray-600"
+        >
+          {showCoords ? 'Masquer' : 'Afficher'} latitude / longitude (optionnel)
+        </button>
+        {showCoords && (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="number"
+              value={manualLat}
+              onChange={(e) => setManualLat(e.target.value)}
+              placeholder="Latitude"
+              step="any"
+              className="w-full rounded-xl border border-apple-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/40 sm:w-1/2"
+            />
+            <input
+              type="number"
+              value={manualLng}
+              onChange={(e) => setManualLng(e.target.value)}
+              placeholder="Longitude"
+              step="any"
+              className="w-full rounded-xl border border-apple-gray-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-apple-blue/40 sm:w-1/2"
+            />
+          </div>
+        )}
+      </form>
+
+      {localError && <p className="mt-2 text-xs text-red-500">❌ {localError}</p>}
+      {auchanError && <p className="mt-2 text-xs text-red-500">❌ {auchanError}</p>}
+
+      {!auchanLoading && selectableContexts.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-2 text-xs text-apple-gray-400">{selectableContexts.length} magasin(s) — clique pour sélectionner</p>
+          <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1">
+            {selectableContexts.map((ctx) => (
+              <button
+                key={ctx.seller_id}
+                type="button"
+                onClick={() => void selectAuchanStore({
+                  seller_id: ctx.seller_id,
+                  store_reference: ctx.store_reference ?? '',
+                  channel: ctx.channel ?? 'PICK_UP',
+                  store_label: ctx.name ?? ctx.seller_id,
+                  location_label: [ctx.name, ctx.address].filter(Boolean).join(' — ') || null,
+                  zipcode: zipcode.trim() || null,
+                  city: city.trim() || null,
+                  country: 'France',
+                  latitude: manualLat.trim() ? parseFloat(manualLat) : null,
+                  longitude: manualLng.trim() ? parseFloat(manualLng) : null,
+                })}
+                disabled={auchanLoading}
+                className="flex-shrink-0 w-52 rounded-xl border border-apple-gray-200 bg-white p-3 text-left transition-colors hover:border-emerald-300 disabled:opacity-50"
+              >
+                <p className="text-[11px] font-semibold text-black">{ctx.name ?? ctx.seller_id}</p>
+                {ctx.address && <p className="mt-0.5 text-[10px] text-apple-gray-500">{ctx.address}</p>}
+                {ctx.distance && <p className="mt-0.5 text-[10px] font-semibold text-emerald-600">{ctx.distance}</p>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!auchanLoading && !auchanError && auchanContexts.length > 0 && selectableContexts.length === 0 && (
+        <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          Aucun magasin sélectionnable pour cette adresse.
+        </p>
       )}
     </div>
   );
