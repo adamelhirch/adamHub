@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import {
-  ShoppingBasket, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
+  ShoppingBasket, ShoppingCart, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
   ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil, Lock,
 } from 'lucide-react';
 import { useGroceryStore, STORE_LABELS, STORE_CAPABILITIES, ACCOUNT_REQUIRED_STORES } from '../store/groceryStore';
 import type {
+  CartStatus,
   GroceryItem,
   PantryItem,
+  SupermarketCartItem,
   SupermarketConnection,
   SupermarketMapping,
   SupermarketProduct,
@@ -104,8 +106,13 @@ const PRIORITY_LABEL: Record<number, { label: string; color: string }> = {
   3: { label: 'Normale', color: 'text-blue-600 bg-blue-50' },
 };
 
-const TAB_LIST = ['Liste de courses', 'Garde-manger'] as const;
+const TAB_LIST = ['Liste de courses', 'Garde-manger', 'Panier'] as const;
 type Tab = (typeof TAB_LIST)[number];
+
+function formatCartPrice(amount: number | null): string {
+  if (amount === null) return '—';
+  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount);
+}
 
 // ─── Helper: group items ──────────────────────────────────────────────────────
 function groupByCategory<T extends { category: string | null }>(items: T[]): [string, T[]][] {
@@ -775,9 +782,10 @@ function PantryMappingPanel({
                     {[product.category, product.packaging, product.price_text].filter(Boolean).join(' · ') || 'Aucun détail'}
                   </p>
                 </div>
+                <AddToCartButton store={store} product={product} className="px-3 py-2 text-xs shrink-0" />
                 <button
                   onClick={() => void onLink(product)}
-                  className="px-3 py-2 rounded-xl bg-apple-blue text-white text-sm font-semibold hover:bg-blue-600"
+                  className="px-3 py-2 rounded-xl bg-apple-blue text-white text-sm font-semibold hover:bg-blue-600 shrink-0"
                 >
                   Lier
                 </button>
@@ -786,6 +794,160 @@ function PantryMappingPanel({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── AddToCartButton ─────────────────────────────────────────────────────────
+// Quick-add of a search result to the cart of `store` (quantity 1), with a
+// transient "Ajouté" confirmation state. Errors surface through the store's
+// cartError, displayed in the Panier tab.
+function AddToCartButton({ store, product, className }: {
+  store: SupermarketStoreKey;
+  product: SupermarketProduct;
+  className?: string;
+}) {
+  const addCartItem = useGroceryStore((s) => s.addCartItem);
+  const [added, setAdded] = useState<'idle' | 'added' | 'error'>('idle');
+
+  const handleClick = async () => {
+    // The store swallows API errors into cartError (surfaced in the Panier
+    // tab) rather than rethrowing, so read it back to reflect the outcome.
+    await addCartItem(store, { cache_id: product.cache_id, quantity: 1 });
+    setAdded(useGroceryStore.getState().cartError ? 'error' : 'added');
+    window.setTimeout(() => setAdded('idle'), 1600);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      className={`inline-flex items-center justify-center gap-1 rounded-xl text-sm font-semibold transition-colors disabled:opacity-60 ${
+        added === 'added'
+          ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+          : added === 'error'
+            ? 'bg-amber-500 text-white hover:bg-amber-600'
+            : 'bg-red-600 text-white hover:bg-red-700'
+      } ${className ?? ''}`}
+      title={
+        added === 'added'
+          ? 'Ajouté au panier'
+          : added === 'error'
+            ? `Échec de l'ajout au panier ${STORE_LABELS[store]}`
+            : `Ajouter au panier ${STORE_LABELS[store]}`
+      }
+    >
+      {added === 'added' ? (
+        <Check className="w-3.5 h-3.5" />
+      ) : added === 'error' ? (
+        <AlertTriangle className="w-3.5 h-3.5" />
+      ) : (
+        <Plus className="w-3.5 h-3.5" />
+      )}
+      {added === 'added' ? 'Ajouté' : added === 'error' ? 'Erreur' : '+ Panier'}
+    </button>
+  );
+}
+
+// ─── CartItemRow ─────────────────────────────────────────────────────────────
+function CartItemRow({ item, onUpdateQuantity, onRemove }: {
+  item: SupermarketCartItem;
+  onUpdateQuantity: (itemId: number, quantity: number) => void;
+  onRemove: (itemId: number) => void;
+}) {
+  const [editingQty, setEditingQty] = useState(false);
+  const [qtyValue, setQtyValue] = useState(String(item.quantity));
+
+  useEffect(() => {
+    setQtyValue(String(item.quantity));
+  }, [item.quantity]);
+
+  const commitQty = () => {
+    const value = Math.max(1, Math.round(parseFloat(qtyValue) || 1));
+    setQtyValue(String(value));
+    if (value !== item.quantity) {
+      onUpdateQuantity(item.id, value);
+    }
+    setEditingQty(false);
+  };
+
+  const unitPrice = item.price_text ?? formatCartPrice(item.price_amount);
+  const subtotal = item.price_amount === null ? null : item.price_amount * item.quantity;
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      {item.image_url ? (
+        <img
+          src={item.image_url}
+          alt={item.name}
+          className="h-12 w-12 shrink-0 rounded-xl border border-apple-gray-100 bg-white object-contain p-1"
+        />
+      ) : (
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-apple-gray-100">
+          <ShoppingCart className="h-5 w-5 text-apple-gray-300" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold leading-5 text-black">{item.name}</p>
+        <p className="mt-0.5 truncate text-[11px] text-apple-gray-500">
+          {unitPrice}
+          {item.packaging ? ` · ${item.packaging}` : ''}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 rounded-full bg-apple-gray-100 px-2 py-1">
+        <button
+          onClick={() => onUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
+          disabled={item.quantity <= 1}
+          className="rounded p-1 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-apple-gray-400"
+          title="Retirer 1"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        {editingQty ? (
+          <input
+            type="number"
+            min="1"
+            step="1"
+            value={qtyValue}
+            onChange={(e) => setQtyValue(e.target.value)}
+            onBlur={commitQty}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitQty();
+              if (e.key === 'Escape') {
+                setQtyValue(String(item.quantity));
+                setEditingQty(false);
+              }
+            }}
+            autoFocus
+            className="w-12 rounded border border-apple-blue px-1.5 py-0.5 text-center text-sm focus:outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => { setEditingQty(true); setQtyValue(String(item.quantity)); }}
+            className="rounded px-1.5 py-0.5 text-sm font-bold text-black transition-colors hover:bg-white"
+            title="Modifier la quantité"
+          >
+            {item.quantity}
+          </button>
+        )}
+        <button
+          onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
+          className="rounded p-1 text-apple-gray-400 transition-all hover:bg-emerald-50 hover:text-emerald-600"
+          title="Ajouter 1"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <span className="w-20 shrink-0 text-right text-sm font-bold text-black">
+        {formatCartPrice(subtotal)}
+      </span>
+      <button
+        onClick={() => onRemove(item.id)}
+        className="shrink-0 rounded-lg p-1.5 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500"
+        title="Retirer du panier"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
@@ -801,6 +963,8 @@ export default function GroceriesPage() {
     selectedStore, setSelectedStore,
     connections, fetchConnections, activateConnection, deleteConnection,
     auchanSelectedStore, fetchSelectedAuchanStore,
+    cartsByStore, cartLoading, cartError, fetchCarts, fetchCart,
+    updateCartItemQuantity, removeCartItem, clearCart, setCartStatus,
   } = useGroceryStore();
 
   const currentStoreLabel = STORE_LABELS[selectedStore];
@@ -904,7 +1068,20 @@ export default function GroceriesPage() {
     fetchPantryOverview();
     fetchConnections();
     fetchSelectedAuchanStore();
+    fetchCarts();
   }, []);
+
+  // Keep the current store's cart loaded (tab badge + Panier tab).
+  useEffect(() => {
+    void fetchCart(selectedStore);
+  }, [selectedStore, fetchCart]);
+
+  // Refresh the cart each time the Panier tab is opened.
+  useEffect(() => {
+    if (activeTab === 'Panier') {
+      void fetchCart(selectedStore);
+    }
+  }, [activeTab, selectedStore, fetchCart]);
 
   useEffect(() => {
     const value = imQuery.trim();
@@ -1100,6 +1277,34 @@ export default function GroceriesPage() {
     });
   };
 
+  // ── Cart (panier) logic ─────────────────────────────────────────────────
+  const currentCart = cartsByStore[selectedStore];
+  const cartItems = useMemo(() => currentCart?.items ?? [], [currentCart]);
+  const cartItemCount = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  const filteredCartItems = useMemo(() => {
+    const q = search.toLowerCase();
+    if (!q) return cartItems;
+    return cartItems.filter((i) => i.name.toLowerCase().includes(q));
+  }, [cartItems, search]);
+
+  const pricedCartItemCount = filteredCartItems.filter((i) => i.price_amount !== null).length;
+  const cartTotal = filteredCartItems.reduce(
+    (sum, item) => sum + (item.price_amount ?? 0) * item.quantity,
+    0,
+  );
+
+  const handleClearCart = () => {
+    if (cartItems.length === 0) return;
+    if (window.confirm(`Vider le panier ${currentStoreLabel} ?`)) {
+      void clearCart(selectedStore);
+    }
+  };
+
+  const handleSetCartStatus = (status: CartStatus) => {
+    void setCartStatus(selectedStore, status);
+  };
+
   const toggleGroup = (group: string) => {
     setCollapsedGroups((prev) => {
       const next = new Set(prev);
@@ -1118,7 +1323,7 @@ export default function GroceriesPage() {
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-apple-gray-500">Courses</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight text-black sm:text-3xl">Groceries</h1>
-          <p className="mt-1 text-sm text-apple-gray-500">Liste de courses et garde-manger.</p>
+          <p className="mt-1 text-sm text-apple-gray-500">Liste de courses, garde-manger et panier.</p>
         </div>
         <div className="relative w-full sm:w-auto">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-apple-gray-400" />
@@ -1126,7 +1331,13 @@ export default function GroceriesPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={activeTab === 'Liste de courses' ? 'Rechercher un article…' : 'Rechercher dans le garde-manger…'}
+            placeholder={
+              activeTab === 'Liste de courses'
+                ? 'Rechercher un article…'
+                : activeTab === 'Garde-manger'
+                  ? 'Rechercher dans le garde-manger…'
+                  : 'Rechercher dans le panier…'
+            }
             className="w-full rounded-xl border border-apple-gray-200 bg-white py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-apple-blue/50 sm:w-64"
           />
           {search && (
@@ -1150,11 +1361,22 @@ export default function GroceriesPage() {
                   : 'border-transparent text-apple-gray-500 hover:text-black'
               }`}
             >
-              {tab === 'Liste de courses' ? <ShoppingBasket className="w-4 h-4" /> : <Package className="w-4 h-4" />}
+              {tab === 'Liste de courses' ? (
+                <ShoppingBasket className="w-4 h-4" />
+              ) : tab === 'Garde-manger' ? (
+                <Package className="w-4 h-4" />
+              ) : (
+                <ShoppingCart className="w-4 h-4" />
+              )}
               {tab}
               {tab === 'Liste de courses' && uncheckedItems.length > 0 && (
                 <span className="bg-apple-blue text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
                   {uncheckedItems.length}
+                </span>
+              )}
+              {tab === 'Panier' && cartItemCount > 0 && (
+                <span className="bg-apple-blue text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-[18px] text-center">
+                  {cartItemCount}
                 </span>
               )}
             </button>
@@ -1281,7 +1503,7 @@ export default function GroceriesPage() {
                           {searchResults.map((p) => (
                             <div
                               key={p.cache_id}
-                              className={`relative flex-shrink-0 w-36 rounded-xl border-2 text-left transition-all hover:shadow-md ${
+                              className={`relative flex flex-col flex-shrink-0 w-36 rounded-xl border-2 text-left transition-all hover:shadow-md ${
                                 selectedProduct?.cache_id === p.cache_id
                                   ? 'border-red-500 shadow-md bg-red-50'
                                   : 'border-apple-gray-200 bg-white hover:border-red-300'
@@ -1290,7 +1512,7 @@ export default function GroceriesPage() {
                               <button
                                 type="button"
                                 onClick={() => handleSelectProduct(p)}
-                                className="block w-full text-left rounded-xl"
+                                className="block w-full text-left rounded-t-xl"
                               >
                                 {p.image_url ? (
                                   <img src={p.image_url} alt={p.name} className="w-full h-24 object-contain rounded-t-xl bg-white p-2" />
@@ -1299,13 +1521,20 @@ export default function GroceriesPage() {
                                     <ShoppingBasket className="w-8 h-8 text-apple-gray-300" />
                                   </div>
                                 )}
-                                <div className="p-2">
+                                <div className="p-2 pb-1.5">
                                   <p className="text-[11px] font-semibold text-black leading-tight line-clamp-2">{p.name}</p>
                                   {p.category && <p className="text-[10px] text-apple-gray-500 mt-0.5 truncate">{p.category}</p>}
                                   {p.packaging && <p className="text-[10px] text-apple-gray-400 mt-0.5 truncate">{p.packaging}</p>}
                                   {p.price_text && <p className="text-[11px] font-bold text-red-600 mt-1">{p.price_text}</p>}
                                 </div>
                               </button>
+                              <div className="px-2 pb-2">
+                                <AddToCartButton
+                                  store={selectedStore}
+                                  product={p}
+                                  className="w-full px-2 py-1.5 text-[11px]"
+                                />
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1617,30 +1846,41 @@ export default function GroceriesPage() {
                         <p className="text-xs text-apple-gray-400">{searchResults.length} résultat(s) — clique pour créer le produit pantry depuis le magasin</p>
                         <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
                           {searchResults.map((product) => (
-                            <button
+                            <div
                               key={product.cache_id}
-                              type="button"
-                              onClick={() => handleSelectPantryProduct(product)}
-                              className={`flex-shrink-0 w-40 rounded-xl border-2 text-left transition-all hover:shadow-md ${
+                              className={`flex flex-col flex-shrink-0 w-40 rounded-xl border-2 text-left transition-all hover:shadow-md ${
                                 selectedPantryProduct?.cache_id === product.cache_id
                                   ? 'border-red-500 shadow-md bg-red-50'
                                   : 'border-apple-gray-200 bg-white hover:border-red-300'
                               }`}
                             >
-                              {product.image_url ? (
-                                <img src={product.image_url} alt={product.name} className="w-full h-24 object-contain rounded-t-xl bg-white p-2" />
-                              ) : (
-                                <div className="w-full h-24 rounded-t-xl bg-apple-gray-100 flex items-center justify-center">
-                                  <Package className="w-8 h-8 text-apple-gray-300" />
+                              <button
+                                type="button"
+                                onClick={() => handleSelectPantryProduct(product)}
+                                className="block w-full text-left rounded-t-xl"
+                              >
+                                {product.image_url ? (
+                                  <img src={product.image_url} alt={product.name} className="w-full h-24 object-contain rounded-t-xl bg-white p-2" />
+                                ) : (
+                                  <div className="w-full h-24 rounded-t-xl bg-apple-gray-100 flex items-center justify-center">
+                                    <Package className="w-8 h-8 text-apple-gray-300" />
+                                  </div>
+                                )}
+                                <div className="p-2 pb-1.5">
+                                  <p className="text-[11px] font-semibold text-black leading-tight line-clamp-2">{product.name}</p>
+                                  {product.category && <p className="text-[10px] text-apple-gray-500 mt-0.5 truncate">{product.category}</p>}
+                                  {product.packaging && <p className="text-[10px] text-apple-gray-400 mt-0.5 truncate">{product.packaging}</p>}
+                                  {product.price_text && <p className="text-[11px] font-bold text-red-600 mt-1">{product.price_text}</p>}
                                 </div>
-                              )}
-                              <div className="p-2">
-                                <p className="text-[11px] font-semibold text-black leading-tight line-clamp-2">{product.name}</p>
-                                {product.category && <p className="text-[10px] text-apple-gray-500 mt-0.5 truncate">{product.category}</p>}
-                                {product.packaging && <p className="text-[10px] text-apple-gray-400 mt-0.5 truncate">{product.packaging}</p>}
-                                {product.price_text && <p className="text-[11px] font-bold text-red-600 mt-1">{product.price_text}</p>}
+                              </button>
+                              <div className="px-2 pb-2">
+                                <AddToCartButton
+                                  store={selectedStore}
+                                  product={product}
+                                  className="w-full px-2 py-1.5 text-[11px]"
+                                />
                               </div>
-                            </button>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -1741,6 +1981,121 @@ export default function GroceriesPage() {
                     </div>
                   ))}
                 </div>
+              )}
+            </>
+          )}
+
+          {/* ── CART (PANIER) ───────────────────────────────────────────── */}
+          {activeTab === 'Panier' && (
+            <>
+              {/* Store selector + status badge */}
+              <div className="rounded-[28px] border border-white/60 bg-white/80 p-4 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShoppingCart className="w-4 h-4 text-red-600" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-red-600">Panier {currentStoreLabel}</span>
+                  </div>
+                  <StoreSelector selected={selectedStore} onChange={setSelectedStore} connections={connections} />
+                </div>
+                {currentCart && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {currentCart.status === 'validated' ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                        <Check className="w-3 h-3" />
+                        Validé
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
+                        Brouillon
+                      </span>
+                    )}
+                    {currentCart.validated_at && (
+                      <span className="text-[11px] text-apple-gray-500">
+                        Validé le {format(parseISO(currentCart.validated_at), 'dd/MM/yyyy • HH:mm')}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {cartError && (
+                  <p className="mt-2 text-xs text-red-500">❌ {cartError}</p>
+                )}
+              </div>
+
+              {/* Cart items */}
+              {cartLoading && cartItems.length === 0 ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-8 h-8 border-2 border-apple-blue/30 border-t-apple-blue rounded-full animate-spin" />
+                </div>
+              ) : filteredCartItems.length === 0 ? (
+                <div className="rounded-[28px] border border-white/60 bg-white/80 py-16 text-center shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+                  <ShoppingCart className="w-12 h-12 text-apple-gray-300 mx-auto mb-3" />
+                  <p className="text-apple-gray-500 text-sm">
+                    {cartItems.length === 0
+                      ? `Panier ${currentStoreLabel} vide`
+                      : 'Aucun article ne correspond à la recherche'}
+                  </p>
+                  {cartItems.length === 0 && (
+                    <p className="mt-1 text-xs text-apple-gray-400">
+                      Ajoute des produits depuis la recherche avec « + Panier ».
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-hidden rounded-[28px] border border-white/60 bg-white/80 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+                    <div className="divide-y divide-apple-gray-50">
+                      {filteredCartItems.map((item) => (
+                        <CartItemRow
+                          key={item.id}
+                          item={item}
+                          onUpdateQuantity={(itemId, quantity) => void updateCartItemQuantity(selectedStore, itemId, quantity)}
+                          onRemove={(itemId) => void removeCartItem(selectedStore, itemId)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Total */}
+                  <div className="flex items-center justify-between rounded-[24px] border border-white/60 bg-white/80 px-5 py-4 shadow-[0_12px_40px_rgba(15,23,42,0.08)] backdrop-blur-xl">
+                    <span className="text-sm font-semibold text-apple-gray-500">
+                      Total ({filteredCartItems.length} article{filteredCartItems.length > 1 ? 's' : ''})
+                    </span>
+                    <span className="text-lg font-bold text-black">
+                      {pricedCartItemCount > 0 ? formatCartPrice(cartTotal) : '—'}
+                    </span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    {currentCart?.status === 'validated' ? (
+                      <button
+                        onClick={() => handleSetCartStatus('draft')}
+                        disabled={cartLoading}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-apple-blue/30 bg-apple-blue/10 px-5 py-2.5 text-sm font-semibold text-apple-blue transition-colors hover:bg-apple-blue/20 disabled:opacity-50"
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Repasser en brouillon
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleSetCartStatus('validated')}
+                        disabled={cartLoading || cartItems.length === 0}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Check className="w-4 h-4" />
+                        Valider
+                      </button>
+                    )}
+                    <button
+                      onClick={handleClearCart}
+                      disabled={cartLoading || cartItems.length === 0}
+                      className="flex items-center justify-center gap-2 rounded-2xl border border-red-200 px-5 py-2.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Vider
+                    </button>
+                  </div>
+                </>
               )}
             </>
           )}
