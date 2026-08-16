@@ -1,14 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_SETTINGS,
+  SETTINGS_STORAGE_KEY,
   validateSettings,
-  expandFrontendUrls,
+  frontendOrigins,
+  matchesFrontend,
 } from "../lib/settings.js";
 
 describe("DEFAULT_SETTINGS", () => {
   it("matches the current hard-coded extension values", () => {
     expect(DEFAULT_SETTINGS.apiUrl).toBe("http://127.0.0.1:8000");
-    expect(DEFAULT_SETTINGS.frontendUrls).toEqual([5173, 5174]);
+    expect(DEFAULT_SETTINGS.frontendUrl).toBe("http://localhost:5173");
     expect(DEFAULT_SETTINGS.syncIntervalHours).toBe(6);
     expect(DEFAULT_SETTINGS.cooldownMinutes).toBe(30);
   });
@@ -34,7 +36,7 @@ describe("validateSettings", () => {
   it("keeps valid overrides and fills in the rest", () => {
     const r = validateSettings({
       apiUrl: "http://hub.example.com:9000",
-      frontendUrls: [5173, 5175],
+      frontendUrl: "http://localhost:5174",
       syncIntervalHours: 12,
       cooldownMinutes: 15,
       stores: { carrefour: { enabled: false } },
@@ -42,7 +44,7 @@ describe("validateSettings", () => {
     expect(r.valid).toBe(true);
     expect(r.errors).toEqual([]);
     expect(r.settings.apiUrl).toBe("http://hub.example.com:9000");
-    expect(r.settings.frontendUrls).toEqual([5173, 5175]);
+    expect(r.settings.frontendUrl).toBe("http://localhost:5174");
     expect(r.settings.syncIntervalHours).toBe(12);
     expect(r.settings.cooldownMinutes).toBe(15);
     expect(r.settings.stores.carrefour.enabled).toBe(false);
@@ -56,23 +58,28 @@ describe("validateSettings", () => {
     expect(r.settings.apiUrl).toBe(DEFAULT_SETTINGS.apiUrl);
   });
 
-  it("filters non-port entries and dedupes the frontendUrls list", () => {
-    const r = validateSettings({ frontendUrls: [5173, 5173, 70000, "abc", 5174] });
-    expect(r.valid).toBe(true);
-    expect(r.settings.frontendUrls).toEqual([5173, 5174]);
+  it("accepts http and https frontend URLs", () => {
+    expect(validateSettings({ frontendUrl: "http://localhost:5173" }).valid).toBe(true);
+    expect(
+      validateSettings({ frontendUrl: "https://app.adamhub.example/" }).settings.frontendUrl,
+    ).toBe("https://app.adamhub.example/");
   });
 
-  it("falls back to default ports when none survive validation", () => {
-    const r = validateSettings({ frontendUrls: ["abc", 0, 99999] });
-    expect(r.valid).toBe(false);
-    expect(r.errors).toContain("frontendUrls invalide");
-    expect(r.settings.frontendUrls).toEqual(DEFAULT_SETTINGS.frontendUrls);
+  it("rejects a malformed or non-http(s) frontend URL and falls back to the default", () => {
+    for (const bad of ["ftp://localhost:5173", "localhost:5173", "pas-une-url", "http://", ""]) {
+      const r = validateSettings({ frontendUrl: bad });
+      expect(r.valid, `frontendUrl "${bad}"`).toBe(false);
+      expect(r.errors).toContain("frontendUrl invalide");
+      expect(r.settings.frontendUrl).toBe(DEFAULT_SETTINGS.frontendUrl);
+    }
   });
 
-  it("falls back when frontendUrls is not an array", () => {
-    const r = validateSettings({ frontendUrls: "5173" });
-    expect(r.valid).toBe(false);
-    expect(r.settings.frontendUrls).toEqual(DEFAULT_SETTINGS.frontendUrls);
+  it("falls back when frontendUrl is not a string", () => {
+    for (const bad of [5173, null, ["http://localhost:5173"]]) {
+      const r = validateSettings({ frontendUrl: bad });
+      expect(r.valid).toBe(false);
+      expect(r.settings.frontendUrl).toBe(DEFAULT_SETTINGS.frontendUrl);
+    }
   });
 
   it("rejects non-positive sync intervals and negative cooldowns", () => {
@@ -98,21 +105,67 @@ describe("validateSettings", () => {
     const r = validateSettings(undefined);
     expect(r.settings).not.toBe(DEFAULT_SETTINGS);
     expect(r.settings.stores).not.toBe(DEFAULT_SETTINGS.stores);
-    expect(r.settings.frontendUrls).not.toBe(DEFAULT_SETTINGS.frontendUrls);
   });
 });
 
-describe("expandFrontendUrls", () => {
-  it("derives 127.0.0.1 and localhost URLs from each port", () => {
-    expect(expandFrontendUrls([5173, 5174])).toEqual([
-      "http://127.0.0.1:5173/",
-      "http://localhost:5173/",
-      "http://127.0.0.1:5174/",
-      "http://localhost:5174/",
+describe("frontendOrigins", () => {
+  it("expands localhost to its loopback alias and vice-versa", () => {
+    expect(frontendOrigins("http://localhost:5173")).toEqual([
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+    ]);
+    expect(frontendOrigins("http://127.0.0.1:5173")).toEqual([
+      "http://127.0.0.1:5173",
+      "http://localhost:5173",
     ]);
   });
 
-  it("returns an empty list for an empty port list", () => {
-    expect(expandFrontendUrls([])).toEqual([]);
+  it("keeps a single origin for non-loopback hosts", () => {
+    expect(frontendOrigins("https://app.adamhub.example")).toEqual([
+      "https://app.adamhub.example",
+    ]);
+  });
+
+  it("normalizes a trailing slash and default port", () => {
+    expect(frontendOrigins("http://localhost:5173/")).toEqual([
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+    ]);
+  });
+
+  it("returns an empty list for a malformed URL", () => {
+    expect(frontendOrigins("pas-une-url")).toEqual([]);
+    expect(frontendOrigins("")).toEqual([]);
+  });
+});
+
+describe("matchesFrontend", () => {
+  it("matches the configured origin exactly and with a path", () => {
+    expect(matchesFrontend("http://localhost:5173", "http://localhost:5173")).toBe(true);
+    expect(matchesFrontend("http://localhost:5173/", "http://localhost:5173")).toBe(true);
+    expect(matchesFrontend("http://localhost:5173/foo/bar", "http://localhost:5173")).toBe(true);
+  });
+
+  it("matches the loopback alias host", () => {
+    expect(matchesFrontend("http://127.0.0.1:5173/", "http://localhost:5173")).toBe(true);
+    expect(matchesFrontend("http://localhost:5174", "http://127.0.0.1:5174")).toBe(true);
+  });
+
+  it("does not match a different port, scheme or host", () => {
+    expect(matchesFrontend("http://localhost:5174", "http://localhost:5173")).toBe(false);
+    expect(matchesFrontend("https://localhost:5173", "http://localhost:5173")).toBe(false);
+    expect(matchesFrontend("http://example.com:5173", "http://localhost:5173")).toBe(false);
+  });
+
+  it("ignores non-http and malformed tab URLs", () => {
+    expect(matchesFrontend("chrome://extensions", "http://localhost:5173")).toBe(false);
+    expect(matchesFrontend("", "http://localhost:5173")).toBe(false);
+    expect(matchesFrontend(null, "http://localhost:5173")).toBe(false);
+  });
+});
+
+describe("SETTINGS_STORAGE_KEY", () => {
+  it("stores settings under a stable chrome.storage.sync key", () => {
+    expect(SETTINGS_STORAGE_KEY).toBe("settings");
   });
 });
