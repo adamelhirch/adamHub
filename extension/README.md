@@ -19,13 +19,13 @@ puis le pin).
 
 L'extension est en v0.2 : les URLs sont **codées en dur** dans `popup.js` —
 hub sur `http://127.0.0.1:8000` (`HUB_URL`), frontend sur
-`http://127.0.0.1:5173` / `http://localhost:5173` (`FRONTEND_URLS`). Il n'y a
+`http://127.0.0.1:5173` / `http://localhost:5173` (et `5174`, `FRONTEND_URLS`). Il n'y a
 **pas de page d'options** : rien n'est configurable depuis l'extension pour
 l'instant.
 
 L'authentification se fait via le hub :
 
-1. Connecte-toi sur l'app AdamHUB dans un onglet (`http://127.0.0.1:5173`).
+1. Connecte-toi sur l'app AdamHUB dans un onglet (`http://127.0.0.1:5174` — ou `5173`).
 2. L'extension lit le **JWT** `adamhub_token` dans le `localStorage` de cet
    onglet (`chrome.scripting.executeScript`) puis le **met en cache** dans
    `chrome.storage.local` (clé `token`).
@@ -50,6 +50,15 @@ L'authentification se fait via le hub :
 Tu peux refaire **Connecter** quand tu veux pour remplacer une session
 expirée.
 
+## Auchan — fonctionne sans compte
+
+Contrairement aux autres enseignes, **Auchan n'exige pas de compte** : une
+session de navigation anonyme suffit (le prix est rendu dans le HTML dès qu'un
+magasin est sélectionné). Les cookies de session sont quand même utiles au
+scraper (via l'import ci-dessus), mais tu peux aussi utiliser Auchan sans
+passer par l'extension : dans l'app, choisis ton magasin (code postal →
+liste des magasins) puis lance la recherche — aucun login requis.
+
 ## Plusieurs comptes
 
 Pas de configuration par utilisateur : chaque personne installe l'extension de
@@ -63,8 +72,9 @@ connexion est créée par magasin avec une étiquette vide (`label: ""`).
 - `storage` — pour **mémoriser le token JWT et l'horodatage `lastSync`**
   localement
 - `scripting` + `tabs` — pour lire le token depuis l'onglet AdamHUB ouvert
-- `host_permissions` limitées à `127.0.0.1:5173` / `localhost:5173` et
-  `127.0.0.1:8000` / `localhost:8000` (hub local), plus `*.carrefour.fr`,
+- `host_permissions` limitées à `127.0.0.1:5173` / `localhost:5173`,
+  `127.0.0.1:5174` / `localhost:5174` et `127.0.0.1:8000` / `localhost:8000`
+  (hub local), plus `*.carrefour.fr`,
   `*.intermarche.com`, `*.leclercdrive.fr`, `*.auchan.fr`. L'extension ne
   touche **aucun** autre site.
 
