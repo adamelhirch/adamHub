@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import api from '../lib/api';
+import api, { cartApi } from '../lib/api';
+import type {
+  CartStatus,
+  SupermarketCart,
+  SupermarketCartItemAddPayload,
+} from '../lib/api';
+
+export type { CartStatus, SupermarketCart, SupermarketCartItem } from '../lib/api';
 
 // ─── Fix float as number ──────────────────────────────────────────────────────
 type float = number;
@@ -183,6 +190,22 @@ function extractErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function isNotFoundError(error: unknown): boolean {
+  return (error as { response?: { status?: number } })?.response?.status === 404;
+}
+
+// Replace (or append) a cart in a list by identity (id) or, for a freshly
+// upserted cart that is not yet in the list, by store.
+function upsertCartIn(carts: SupermarketCart[], cart: SupermarketCart): SupermarketCart[] {
+  const index = carts.findIndex((c) => c.id === cart.id || c.store === cart.store);
+  if (index === -1) {
+    return [...carts, cart];
+  }
+  const next = [...carts];
+  next[index] = cart;
+  return next;
+}
+
 // ─── Store Interface ──────────────────────────────────────────────────────────
 
 interface GroceryStore {
@@ -272,6 +295,20 @@ interface GroceryStore {
   selectAuchanStore: (payload: AuchanStoreSelectionPayload) => Promise<void>;
   fetchSelectedAuchanStore: () => Promise<void>;
   clearAuchanStore: () => void;
+
+  // Cart (panier) — one draft/validated cart per store
+  carts: SupermarketCart[];
+  cartsByStore: Record<SupermarketStoreKey, SupermarketCart | null>;
+  cartLoading: boolean;
+  cartError: string | null;
+
+  fetchCarts: () => Promise<void>;
+  fetchCart: (store: SupermarketStoreKey) => Promise<SupermarketCart | null>;
+  addCartItem: (store: SupermarketStoreKey, data: SupermarketCartItemAddPayload) => Promise<void>;
+  updateCartItemQuantity: (store: SupermarketStoreKey, itemId: number, quantity: number) => Promise<void>;
+  removeCartItem: (store: SupermarketStoreKey, itemId: number) => Promise<void>;
+  clearCart: (store: SupermarketStoreKey) => Promise<void>;
+  setCartStatus: (store: SupermarketStoreKey, status: CartStatus) => Promise<void>;
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -594,5 +631,127 @@ export const useGroceryStore = create<GroceryStore>((set, get) => ({
       searchResults: [],
       searchError: null,
     });
+  },
+
+  // ── Cart (panier) ─────────────────────────────────────────────────────────────
+  carts: [],
+  cartsByStore: { intermarche: null, carrefour: null, leclerc: null, auchan: null },
+  cartLoading: false,
+  cartError: null,
+
+  fetchCarts: async () => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const carts = await cartApi.list();
+      set((s) => {
+        const cartsByStore = { ...s.cartsByStore };
+        for (const cart of carts) {
+          cartsByStore[cart.store as SupermarketStoreKey] = cart;
+        }
+        return { carts, cartsByStore };
+      });
+    } catch (e: unknown) {
+      set({ cartError: extractErrorMessage(e, 'Erreur lors du chargement des paniers') });
+    } finally {
+      set({ cartLoading: false });
+    }
+  },
+
+  fetchCart: async (store) => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const cart = await cartApi.get(store);
+      set((s) => ({
+        carts: upsertCartIn(s.carts, cart),
+        cartsByStore: { ...s.cartsByStore, [store]: cart },
+      }));
+      return cart;
+    } catch (e: unknown) {
+      // A 404 means the store has no cart yet: represent it as `null` rather
+      // than an error so consumers render an empty cart.
+      if (isNotFoundError(e)) {
+        set((s) => ({ cartsByStore: { ...s.cartsByStore, [store]: null } }));
+      } else {
+        set({ cartError: extractErrorMessage(e, 'Erreur lors du chargement du panier') });
+      }
+      return null;
+    } finally {
+      set({ cartLoading: false });
+    }
+  },
+
+  addCartItem: async (store, data) => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const cart = await cartApi.addItem(store, data);
+      set((s) => ({
+        carts: upsertCartIn(s.carts, cart),
+        cartsByStore: { ...s.cartsByStore, [store]: cart },
+      }));
+    } catch (e: unknown) {
+      set({ cartError: extractErrorMessage(e, "Erreur lors de l'ajout au panier") });
+    } finally {
+      set({ cartLoading: false });
+    }
+  },
+
+  updateCartItemQuantity: async (store, itemId, quantity) => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const cart = await cartApi.updateItemQuantity(store, itemId, quantity);
+      set((s) => ({
+        carts: upsertCartIn(s.carts, cart),
+        cartsByStore: { ...s.cartsByStore, [store]: cart },
+      }));
+    } catch (e: unknown) {
+      set({ cartError: extractErrorMessage(e, 'Erreur lors de la mise à jour de la quantité') });
+    } finally {
+      set({ cartLoading: false });
+    }
+  },
+
+  removeCartItem: async (store, itemId) => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const cart = await cartApi.removeItem(store, itemId);
+      set((s) => ({
+        carts: upsertCartIn(s.carts, cart),
+        cartsByStore: { ...s.cartsByStore, [store]: cart },
+      }));
+    } catch (e: unknown) {
+      set({ cartError: extractErrorMessage(e, "Erreur lors de la suppression de l'article") });
+    } finally {
+      set({ cartLoading: false });
+    }
+  },
+
+  clearCart: async (store) => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const cart = await cartApi.clear(store);
+      set((s) => ({
+        carts: upsertCartIn(s.carts, cart),
+        cartsByStore: { ...s.cartsByStore, [store]: cart },
+      }));
+    } catch (e: unknown) {
+      set({ cartError: extractErrorMessage(e, 'Erreur lors du vidage du panier') });
+    } finally {
+      set({ cartLoading: false });
+    }
+  },
+
+  setCartStatus: async (store, status) => {
+    set({ cartLoading: true, cartError: null });
+    try {
+      const cart = await cartApi.setStatus(store, status);
+      set((s) => ({
+        carts: upsertCartIn(s.carts, cart),
+        cartsByStore: { ...s.cartsByStore, [store]: cart },
+      }));
+    } catch (e: unknown) {
+      set({ cartError: extractErrorMessage(e, 'Erreur lors de la mise à jour du statut') });
+    } finally {
+      set({ cartLoading: false });
+    }
   },
 }));
