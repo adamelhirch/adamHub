@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models import SupermarketStore, SupermarketTargetType
+from app.models import CartStatus, SupermarketStore, SupermarketTargetType
 
 
 class SupermarketSearchRequest(BaseModel):
@@ -161,3 +161,41 @@ class SupermarketMappingRead(BaseModel):
     active: bool
     created_at: datetime
     updated_at: datetime
+
+
+class SupermarketCartItemRead(BaseModel):
+    id: int
+    cache_id: int | None
+    external_id: str | None
+    name: str
+    brand: str | None
+    packaging: str | None
+    price_amount: float | None
+    price_text: str | None
+    image_url: str | None
+    product_url: str | None
+    quantity: int
+
+
+class SupermarketCartRead(BaseModel):
+    id: int
+    store: SupermarketStore
+    status: CartStatus
+    validated_at: datetime | None
+    external_cart_ref: str | None
+    created_at: datetime
+    updated_at: datetime
+    items: list[SupermarketCartItemRead] = []
+
+
+class SupermarketCartItemAdd(BaseModel):
+    cache_id: int
+    quantity: int = Field(default=1, ge=1)
+
+
+class SupermarketCartItemUpdate(BaseModel):
+    quantity: int = Field(ge=1)
+
+
+class SupermarketCartStatusUpdate(BaseModel):
+    status: CartStatus

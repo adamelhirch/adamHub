@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, Column, String
+from sqlalchemy import JSON, Column, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -41,6 +41,11 @@ class SupermarketStore(str, Enum):
 class SupermarketTargetType(str, Enum):
     RECIPE_INGREDIENT = "recipe_ingredient"
     PANTRY_ITEM = "pantry_item"
+
+
+class CartStatus(str, Enum):
+    DRAFT = "draft"
+    VALIDATED = "validated"
 
 
 class TransactionKind(str, Enum):
@@ -549,6 +554,58 @@ class SupermarketConnection(SQLModel, table=True):
     cookies_encrypted: str  # Fernet-encrypted JSON list of cookie dicts
     is_active: bool = Field(default=False, index=True)
     last_used_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SupermarketCart(SQLModel, table=True):
+    """A user's shopping cart for one store.
+
+    One cart per (user, store): `store` is part of the unique key alongside
+    `user_id`, so a tenant can hold a draft (or validated) cart for each store
+    without collisions. Item lines live in ``SupermarketCartItem``.
+    """
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "store", name="uq_supermarketcart_user_store"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL", index=True
+    )
+    store: SupermarketStore
+    status: CartStatus = Field(default=CartStatus.DRAFT)
+    validated_at: datetime | None = None
+    # The store's own cart identifier, once cart automation exists; not set yet.
+    external_cart_ref: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SupermarketCartItem(SQLModel, table=True):
+    """A line item in a ``SupermarketCart``.
+
+    Store metadata is snapshotted from a ``SupermarketSearchCache`` row (via
+    ``cache_id``) at add time, never from client input. ``cache_id`` stays
+    nullable so a cart line can outlive the cache row that seeded it (the search
+    cache purges expired rows with ``ondelete=SET NULL``).
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    cart_id: int = Field(foreign_key="supermarketcart.id", ondelete="CASCADE", index=True)
+    cache_id: int | None = Field(
+        default=None, foreign_key="supermarketsearchcache.id", ondelete="SET NULL"
+    )
+    external_id: str | None = None
+    name: str
+    brand: str | None = None
+    packaging: str | None = None
+    price_amount: float | None = None
+    price_text: str | None = None
+    image_url: str | None = None
+    product_url: str | None = None
+    quantity: int = Field(default=1, ge=1)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
