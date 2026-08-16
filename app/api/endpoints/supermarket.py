@@ -42,6 +42,7 @@ from app.services.cart import (
     update_quantity as update_cart_item_quantity,
     upsert_cart,
 )
+from app.services import cart_mirror
 from app.services.connections import (
     activate_connection as activate_supermarket_connection,
     delete_connection as delete_supermarket_connection,
@@ -440,54 +441,81 @@ def list_carts_endpoint(
 
 
 @router.get("/carts/{store}", response_model=SupermarketCartRead)
-def get_cart_endpoint(
+async def get_cart_endpoint(
     store: SupermarketStore, session: SessionDep, user: CurrentOrOwnerUser
 ) -> SupermarketCartRead:
+    if store == SupermarketStore.INTERMARCHE:
+        # Mirror mode: re-read the real cart from the site (empty events) and
+        # rewrite the local cart from the response. A failure rejects without
+        # touching the local cart.
+        cart = await cart_mirror.read_cart(session, user.id)
+        return _cart_to_read(session, cart)
     cart = upsert_cart(session, store, user_id=user.id)
     return _cart_to_read(session, cart)
 
 
 @router.post("/carts/{store}/items", response_model=SupermarketCartRead)
-def add_cart_item_endpoint(
+async def add_cart_item_endpoint(
     store: SupermarketStore,
     payload: SupermarketCartItemAdd,
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketCartRead:
+    if store == SupermarketStore.INTERMARCHE:
+        # Mirror mode: add on the site (adapter add_item) then rewrite local.
+        cart = await cart_mirror.add_item(
+            session, user.id, payload.cache_id, quantity=payload.quantity
+        )
+        return _cart_to_read(session, cart)
     cart = upsert_cart(session, store, user_id=user.id)
     add_cart_item(session, cart, payload.cache_id, quantity=payload.quantity)
     return _cart_to_read(session, cart)
 
 
 @router.patch("/carts/{store}/items/{item_id}", response_model=SupermarketCartRead)
-def update_cart_item_endpoint(
+async def update_cart_item_endpoint(
     store: SupermarketStore,
     item_id: int,
     payload: SupermarketCartItemUpdate,
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketCartRead:
+    if store == SupermarketStore.INTERMARCHE:
+        # Mirror mode: set the quantity on the site (adapter update_item_quantity)
+        # then rewrite local.
+        cart = await cart_mirror.update_item_quantity(
+            session, user.id, item_id, quantity=payload.quantity
+        )
+        return _cart_to_read(session, cart)
     cart = upsert_cart(session, store, user_id=user.id)
     update_cart_item_quantity(session, cart, item_id, payload.quantity)
     return _cart_to_read(session, cart)
 
 
 @router.delete("/carts/{store}/items/{item_id}", response_model=SupermarketCartRead)
-def remove_cart_item_endpoint(
+async def remove_cart_item_endpoint(
     store: SupermarketStore,
     item_id: int,
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketCartRead:
+    if store == SupermarketStore.INTERMARCHE:
+        # Mirror mode: remove the line on the site then rewrite local.
+        cart = await cart_mirror.remove_item(session, user.id, item_id)
+        return _cart_to_read(session, cart)
     cart = upsert_cart(session, store, user_id=user.id)
     remove_cart_item(session, cart, item_id)
     return _cart_to_read(session, cart)
 
 
 @router.delete("/carts/{store}", response_model=SupermarketCartRead)
-def clear_cart_endpoint(
+async def clear_cart_endpoint(
     store: SupermarketStore, session: SessionDep, user: CurrentOrOwnerUser
 ) -> SupermarketCartRead:
+    if store == SupermarketStore.INTERMARCHE:
+        # Mirror mode: clear the site cart (adapter clear_cart) then empty local.
+        cart = await cart_mirror.clear_cart(session, user.id)
+        return _cart_to_read(session, cart)
     cart = upsert_cart(session, store, user_id=user.id)
     clear_cart(session, cart)
     return _cart_to_read(session, cart)
