@@ -1,0 +1,223 @@
+{
+  "id": "515ffd9e-538e-447a-983e-69ca17363fac",
+  "synchronizeDateTime": "2026-08-15T03:02:28.411233116+02:00",
+  "isPresentAlcoholProduct": false,
+  "amount": 11.37,
+  "animations": [],
+  "valuations": {
+    "collectors": [],
+    "discountAmount": 0.0,
+    "loyaltyAmount": 0.0,
+    "discountStatus": "SUCCESS"
+  },
+  "itemsNumber": 2,
+  "metaData": {
+    "invalid": {
+      "advantages": [],
+      "unavailables": [],
+      "stocks": [],
+      "partialStocks": [],
+      "exceededQuantities": [],
+      "discounts": []
+    },
+    "unsynchronized": {
+      "clientItems": [],
+      "serverItems": []
+    }
+  },
+  "carts": [
+    {
+      "items": [
+        {
+          "id": "37731",
+          "modificationDate": "2026-08-15T03:02:27.144485347+02:00",
+          "quantity": 1,
+          "price": 5.07,
+          "amount": 5.07,
+          "acceptSubstitution": true,
+          "item": {
+            "itemId": "37731",
+            "idProduit": "2449185000000",
+            "identifier": 37731,
+            "produitEan13": "2449185000000",
+            "typeProduit": {
+              "code": "PPV",
+              "value": "PPV"
+            },
+            "pviIncrement": 1,
+            "prix": 5.07,
+            "prixBarre": 0.0,
+            "privateData": "{\"nfProductId\":37731}",
+            "prixKg": 32.69,
+            "poidsMinimum": 155,
+            "substituable": true,
+            "dispoCataloguePdv": true,
+            "stock": 19,
+            "avantages": [],
+            "images": [
+              "https://driveimg1.intermarche.com/fr/Content/images/boitmal/produit/zoom/AD52786BE12402207CAAF5BE13DE2FCE.jpg"
+            ],
+            "idSousFamille": 16632,
+            "catalog": "PDV",
+            "precommande": false,
+            "libelle": "Parmigiano reggiano AOP sous film au lait cru de vache 28,4% de mg",
+            "compatibleConsigne": true,
+            "marque": "Tout frais, Tout prêt !",
+            "capacite": 155,
+            "conditionnement": "La portion de 155 Gr environ",
+            "favori": false,
+            "qteMaxPanier": 99,
+            "produitsLot": [],
+            "poidsNet": 155,
+            "poidsUnite": 0,
+            "volume": 0,
+            "isTrad": false,
+            "isPresentAlcoholProduct": false,
+            "eligibleMealVoucher": false,
+            "unitPrice": 32.69,
+            "onlineExclusive": false,
+            "idFamille": 16595,
+            "vignetteCollector": 0,
+            "idUnivers": 2212,
+            "idRayon": 16591,
+            "latestBestPrice": 32.69,
+            "unitePrixVente": {
+              "value": "€/Kg"
+            },
+            "pictogrammes": [
+              {
+                "idPicto": 20336,
+                "idCategorie": 10,
+                "libelleCategorie": "Type de stockage",
+                "image": "https://driveimg1.intermarche.com/fr/Ressources/images/publication/27976.png",
+                "infoBulle": "A conserver au frais "
+              }
+            ],
+            "nbPiece": 0,
+            "familyCodeNomenclature": "1004",
+            "collectorPartenaire": false,
+            "volumeSurcharge": false
+          }
+        },
+        {
+          "id": "30490",
+          "modificationDate": "2026-08-15T03:02:28.377503961+02:00",
+          "quantity": 1,
+          "price": 6.3,
+          "amount": 6.3,
+          "acceptSubstitution": true,
+          "item": {
+            "itemId": "30490",
+            "idProduit": "0210849000000",
+            "identifier": 30490,
+            "produitEan13": "0210849000000",
+            "typeProduit": {
+              "code": "PPV",
+              "value": "PPV"
+            },
+            "pviIncrement": 1,
+            "prix": 6.3,
+            "prixBarre": 0.0,
+            "privateData": "{\"nfProductId\":30490}",
+            "prixKg": 31.5,
+            "poidsMinimum": 200,
+            "substituable": true,
+            "dispoCataloguePdv": true,
+            "stock": 30,
+            "avantages": [],
+            "images": [
+              "https://driveimg1.intermarche.com/fr/Content/images/boitmal/produit/zoom/C964539D4844E084AB09773250A2729B.jpg"
+            ],
+            "idSousFamille": 17704,
+            "catalog": "PDV",
+            "precommande": false,
+            "libelle": "Beaufort AOP au lait cru",
+            "compatibleConsigne": true,
+            "marque": "Le Choix du Fromager",
+            "capacite": 200,
+            "conditionnement": "la portion de 200 g environ",
+            "favori": false,
+            "qteMaxPanier": 99,
+            "produitsLot": [],
+            "poidsNet": 200,
+            "poidsUnite": 0,
+            "volume": 0,
+            "isTrad": false,
+            "isPresentAlcoholProduct": false,
+            "eligibleMealVoucher": false,
+            "unitPrice": 31.5,
+            "onlineExclusive": false,
+            "idFamille": 17703,
+            "vignetteCollector": 0,
+            "idUnivers": 2212,
+            "idRayon": 16591,
+            "customBanner": {
+              "textColor": "#FFFFFF",
+              "type": "BOUTIQUE",
+              "title": "Contre la vie chère",
+              "backgroundColor": "#CF0075",
+              "redirectionId": "3056"
+            },
+            "latestBestPrice": 31.5,
+            "unitePrixVente": {
+              "value": "€/Kg"
+            },
+            "pictogrammes": [
+              {
+                "idPicto": 20336,
+                "idCategorie": 10,
+                "libelleCategorie": "Type de stockage",
+                "image": "https://driveimg1.intermarche.com/fr/Ressources/images/publication/27976.png",
+                "infoBulle": "A conserver au frais "
+              }
+            ],
+            "nbPiece": 0,
+            "familyCodeNomenclature": "1004",
+            "collectorPartenaire": false,
+            "volumeSurcharge": false
+          }
+        }
+      ],
+      "catalog": "PDV",
+      "amount": 11.37,
+      "seller": {
+        "id": "ITM",
+        "name": "Intermarché"
+      },
+      "itemsNumber": 2,
+      "lots": [],
+      "animations": [],
+      "valuations": {
+        "collectors": [],
+        "discountAmount": 0.0,
+        "loyaltyAmount": 0,
+        "discountStatus": "SUCCESS"
+      },
+      "weight": 0.355,
+      "volume": 0.0,
+      "bacsNumber": 1,
+      "metaData": {
+        "invalid": {
+          "advantages": [],
+          "unavailables": [],
+          "stocks": [],
+          "partialStocks": [],
+          "exceededQuantities": [],
+          "discounts": []
+        },
+        "unsynchronized": {}
+      },
+      "acceptSubstitution": true,
+      "discounts": {
+        "amount": 0.0,
+        "values": [],
+        "status": "SUCCESS"
+      }
+    }
+  ],
+  "discounts": {
+    "amount": 0.0,
+    "values": [],
+    "status": "SUCCESS"
+  }
+}
