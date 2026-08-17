@@ -132,6 +132,34 @@ Au niveau HTTP, chaque étape envoie le protocole attendu (vérifié par
   (401/403/DataDome), pas de bug identifié côté adapter — la ré-validation
   live nécessitera un export de cookies frais quand disponible.
 
+## Addendum — validation live (2026-08-17, cookies frais)
+
+Un export de cookies frais fourni par l'utilisateur a permis de relancer
+`--cookies` et de découvrir **deux bugs réels**, corrigés dans #173 :
+
+1. **DataDome bloque `httpx` nu** : `build_intermarche_cart_client`
+   utilisait un `httpx.AsyncClient` classique. DataDome fingerprinte le
+   handshake TLS/HTTP2, pas seulement les cookies — même blocage que
+   Leclerc/Carrefour (#160, #164), même correctif : impersonation
+   `curl_cffi` `chrome`, repli sur `httpx` si `curl_cffi` est indisponible.
+2. **`synchronizeDateTime: null` rejeté (400 `METHOD_ARGUMENT_NOT_VALID`)** :
+   une fois le handshake accepté, le tout premier sync d'une session
+   (panier vide, aucun `last_sync` local) échouait toujours — chemin jamais
+   exercé par le HAR de capture initial (panier déjà existant). Fix : le
+   premier sync réplique un panier vide horodaté avec `customerDateTime`.
+
+Après ces deux correctifs, le smoke **live** (`--cookies
+data/cookies_intermarche.json --actions read,add,qty,rm,add,clear
+--clear`) passe **6/6 étapes contre le vrai intermarche.com** :
+lecture, ajout Parmigiano reggiano AOP (`37731`), quantité → 3,
+suppression, ré-ajout, vidage — site et local concordent à chaque étape.
+La connexion DB Intermarché (`SupermarketConnection` id=2, user Adam) a
+été mise à jour avec ces cookies frais pour que l'application (endpoints
+`/supermarket/carts/intermarche*`) fonctionne également en conditions
+réelles, pas seulement le script de smoke.
+
+**b4 est maintenant validé en live**, pas seulement en offline.
+
 ## Artefacts
 - `scripts/smoke_cart_mirror.py` — smoke reproductible, modes `--replay`
   (offline, utilisé ici) et `--cookies` (live, pour ré-validation future).
