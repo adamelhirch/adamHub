@@ -43,6 +43,23 @@ from app.services.scrapers.intermarche import (
     is_intermarche_bot_challenge,
 )
 
+try:  # pragma: no cover - exercised via CURL_CFFI_AVAILABLE flag in tests
+    from curl_cffi.requests import AsyncSession as CurlCffiAsyncSession
+    from curl_cffi.requests.cookies import Cookies as CurlCffiCookies
+
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CurlCffiAsyncSession = None  # type: ignore[assignment]
+    CurlCffiCookies = None  # type: ignore[assignment]
+    CURL_CFFI_AVAILABLE = False
+
+# curl_cffi impersonation target. Same fix as the Leclerc/Carrefour scrapers:
+# DataDome fingerprints the TLS/HTTP2 handshake, not just the cookies, so a
+# plain httpx.AsyncClient gets a 401/403 even with a session freshly exported
+# from a real browser. curl_cffi's `chrome` profile reproduces a real Chrome
+# handshake and clears the challenge.
+CURL_IMPERSONATE = "chrome"
+
 INTERMARCHE_CART_BASE_URL = "https://www.intermarche.com/api/service/panier/v1"
 
 # Chrome UA matching the browser the cart API is served to (same profile as the
@@ -300,14 +317,22 @@ def build_cart_request_body(
     last_sync: IntermarcheCartState | None,
     customer_date_time: str | None = None,
 ) -> dict[str, Any]:
-    """Compose the sync request body (customerDateTime + events + replay)."""
+    """Compose the sync request body (customerDateTime + events + replay).
+
+    ``lastSynchronizedCart.synchronizeDateTime`` is validated as non-null by
+    the live API even on the very first sync of a session (confirmed against
+    the real endpoint — a captured HAR with an existing cart never exercises
+    this empty-cart path), so the first sync replays an empty cart stamped
+    with the current time rather than ``None``.
+    """
+    date_time = customer_date_time or _now_iso()
     return {
-        "customerDateTime": customer_date_time or _now_iso(),
+        "customerDateTime": date_time,
         "events": events,
         "lastSynchronizedCart": (
             last_sync.to_last_synchronized_cart()
             if last_sync is not None
-            else {"carts": [], "synchronizeDateTime": None}
+            else {"carts": [], "synchronizeDateTime": date_time}
         ),
     }
 
@@ -373,13 +398,13 @@ class IntermarcheCartClient:
 
     The client holds the last synchronised state so each mutation replays the
     correct ``lastSynchronizedCart``. ``client`` is an injected
-    ``httpx.AsyncClient`` (built on the session cookies); the caller owns its
-    lifecycle.
+    ``httpx.AsyncClient`` or Chrome-impersonating ``curl_cffi`` session (built
+    on the session cookies); the caller owns its lifecycle.
     """
 
     def __init__(
         self,
-        client: httpx.AsyncClient,
+        client: Any,
         *,
         customer_uuid: str,
         store_id: str,
@@ -517,10 +542,25 @@ class IntermarcheCartClient:
         """Release the underlying HTTP client.
 
         ``build_intermarche_cart_client`` hands the caller ownership of the
-        ``httpx.AsyncClient`` it creates; HTTP callers must close it after each
-        mirror request (see the cart mirror service).
+        client it creates (an ``httpx.AsyncClient`` or, when ``curl_cffi`` is
+        available, a Chrome-impersonating ``curl_cffi`` session); HTTP callers
+        must close it after each mirror request (see the cart mirror service).
+        curl_cffi sessions expose ``close`` rather than ``aclose``.
         """
-        await self._client.aclose()
+        close = getattr(self._client, "aclose", None) or getattr(self._client, "close", None)
+        if close is not None:
+            await close()
+
+
+def _build_curl_cookie_jar(cookies: list[dict[str, Any]]) -> "CurlCffiCookies":
+    jar = CurlCffiCookies()
+    for cookie in cookies:
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not name or value is None:
+            continue
+        jar.set(name, value, domain=cookie.get("domain"), path=cookie.get("path", "/"))
+    return jar
 
 
 def build_intermarche_cart_client(
@@ -537,6 +577,11 @@ def build_intermarche_cart_client(
     ``novaParams``); without a selected store the cart cannot be scoped and this
     raises. ``customer_uuid`` must be supplied by the caller (it is not stored
     in the cookies).
+
+    Uses a Chrome-impersonating ``curl_cffi`` session when available (the pool
+    proxies are themselves flagged by DataDome, so the direct connection with
+    the impersonated handshake is used instead — same trade-off as the
+    Leclerc/Carrefour scrapers), falling back to plain ``httpx`` otherwise.
     """
     store_id = extract_pdv_ref_from_cookies(cookies)
     if not store_id:
@@ -545,13 +590,21 @@ def build_intermarche_cart_client(
             "novaParams). Select a store in the browser before importing the "
             "connection."
         )
-    client = httpx.AsyncClient(
-        follow_redirects=True,
-        cookies=build_intermarche_cookie_jar(cookies),
-        proxy=proxy_url,
-        timeout=httpx.Timeout(30.0),
-        trust_env=not proxy_url,
-    )
+    client: Any
+    if CURL_CFFI_AVAILABLE:
+        client = CurlCffiAsyncSession(
+            impersonate=CURL_IMPERSONATE,
+            cookies=_build_curl_cookie_jar(cookies),
+            timeout=30.0,
+        )
+    else:
+        client = httpx.AsyncClient(
+            follow_redirects=True,
+            cookies=build_intermarche_cookie_jar(cookies),
+            proxy=proxy_url,
+            timeout=httpx.Timeout(30.0),
+            trust_env=not proxy_url,
+        )
     return IntermarcheCartClient(
         client,
         customer_uuid=customer_uuid,
