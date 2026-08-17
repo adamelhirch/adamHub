@@ -36,6 +36,7 @@ from app.services.cart import (
     replace_items,
     upsert_cart,
 )
+from app.services.connections import decrypt_cookies, touch_connection
 from app.services.scrapers.intermarche_cart import (
     IntermarcheCartAuthError,
     IntermarcheCartClient,
@@ -46,7 +47,7 @@ from app.services.scrapers.intermarche_cart import (
     build_intermarche_cart_client,
     extract_customer_uuid_from_cookies,
 )
-from app.services.store_catalog import load_active_cookies
+from app.services.store_catalog import load_active_connection
 
 T = TypeVar("T")
 
@@ -111,13 +112,27 @@ async def _run_with_client(
     with a clear message when either is missing), then delegates to the adapter.
     Every adapter error becomes a typed HTTP error, and the client (and its HTTP
     connection) is always released.
+
+    The customer uuid is not reliably present in cookies (see
+    ``extract_customer_uuid_from_cookies``), so a routine cookie-only re-sync
+    from the extension would otherwise silently drop it: this falls back to
+    the value persisted on the connection row, and self-heals that row when
+    the cookies *do* carry a (possibly new) uuid so it survives future syncs.
     """
-    cookies = load_active_cookies(session, SupermarketStore.INTERMARCHE, user_id=user_id) or []
+    connection = load_active_connection(session, SupermarketStore.INTERMARCHE, user_id=user_id)
+    if connection is None:
+        raise HTTPException(status_code=400, detail=_NO_CONNECTION_DETAIL)
+    cookies = decrypt_cookies(connection)
     if not cookies:
         raise HTTPException(status_code=400, detail=_NO_CONNECTION_DETAIL)
-    customer_uuid = extract_customer_uuid_from_cookies(cookies)
+    touch_connection(session, connection)
+    customer_uuid = extract_customer_uuid_from_cookies(cookies) or connection.customer_uuid
     if not customer_uuid:
         raise HTTPException(status_code=400, detail=_NO_CUSTOMER_UUID_DETAIL)
+    if customer_uuid != connection.customer_uuid:
+        connection.customer_uuid = customer_uuid
+        session.add(connection)
+        session.commit()
     try:
         client = build_intermarche_cart_client(cookies, customer_uuid=customer_uuid)
     except IntermarcheCartError as exc:
@@ -163,9 +178,17 @@ async def read_cart(session: Session, user_id: int) -> SupermarketCart:
 
 
 async def add_item(session: Session, user_id: int, cache_id: int, quantity: int) -> SupermarketCart:
-    """POST mirror: send a +quantity event for the cache row's site id, then mirror."""
+    """POST mirror: send a +quantity event for the cache row's site id, then mirror.
+
+    The cart API validates ``itemId`` as the catalog's own (short, numeric) id
+    — an EAN barcode is rejected. ``external_id`` prefers the EAN (used for
+    search/cross-store matching), so the raw catalog id captured separately
+    at search time (``payload_json.site_item_id``) is used here when present,
+    falling back to ``external_id`` for cache rows fetched before this field
+    existed.
+    """
     cache_row = load_cache_row(session, cache_id)  # 400 when unknown/expired
-    item_id = cache_row.external_id
+    item_id = (cache_row.payload_json or {}).get("site_item_id") or cache_row.external_id
     if not item_id:
         raise HTTPException(
             status_code=400,

@@ -178,6 +178,7 @@ def import_connection_endpoint(
         activate=payload.activate,
         connection_id=payload.connection_id,
         user_id=user.id,
+        customer_uuid=payload.customer_uuid,
     )
     return _connection_to_read(connection)
 

@@ -553,6 +553,13 @@ class SupermarketConnection(SQLModel, table=True):
     label: str
     cookies_encrypted: str  # Fernet-encrypted JSON list of cookie dicts
     is_active: bool = Field(default=False, index=True)
+    # Intermarché's connected-customer id. Not reliably present in cookies (it
+    # arrives via the /loading?userId=... OAuth redirect, cf.
+    # extract_customer_uuid_from_cookies), so it is stored separately once
+    # recovered — otherwise every routine cookie re-sync from the extension
+    # (which never captures it) silently drops cart-mirror mutations back to a
+    # "no customer uuid" error.
+    customer_uuid: str | None = None
     last_used_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

@@ -69,6 +69,7 @@ def upsert_connection(
     activate: bool = True,
     connection_id: int | None = None,
     user_id: int | None = None,
+    customer_uuid: str | None = None,
 ) -> SupermarketConnection:
     """Create or update a connection, optionally making it active for its store.
 
@@ -81,6 +82,11 @@ def upsert_connection(
     is empty and `credentials` is given, a `{"type": "credentials", ...}` dict.
     Credentials are a best-effort fallback — the extension cookie path remains
     the reliable one.
+
+    `customer_uuid` (Intermarché) is stored separately from the cookies blob:
+    when omitted, a previously stored value is left untouched rather than
+    cleared, so a routine cookie-only re-sync from the extension doesn't wipe
+    it (it is never present in the cookies themselves).
     """
     now = datetime.now(UTC)
     if cookies:
@@ -116,6 +122,8 @@ def upsert_connection(
         existing.updated_at = now
         if user_id is not None:
             existing.user_id = user_id
+        if customer_uuid is not None:
+            existing.customer_uuid = customer_uuid
         if activate:
             _deactivate_others(session, store, exclude_id=existing.id, now=now, user_id=user_id)
             existing.is_active = True
@@ -133,6 +141,7 @@ def upsert_connection(
         cookies_encrypted=payload,
         is_active=activate,
         user_id=user_id,
+        customer_uuid=customer_uuid,
         created_at=now,
         updated_at=now,
     )

@@ -121,6 +121,28 @@ def test_parse_intermarche_products_skips_editorial_tiles_without_product_id():
     assert results[0]["id"] == "3250390011866"
 
 
+def test_parse_intermarche_products_captures_site_item_id_distinct_from_ean():
+    """`id` (external_id) prefers the EAN for search/cross-store matching, but
+    the cart API's QUANTITY events require the catalog's own numeric id — a
+    raw EAN is rejected live (`JSON_FIELD_TYPE_NOT_VALID`). The raw catalog id
+    must survive separately as `site_item_id` for the cart mirror to use.
+    """
+    payload = {"products": [
+        {
+            "id": "37731",
+            "ean": "3250390011866",
+            "url": "/produit/parmigiano/3250390011866",
+            "informations": {"title": "Parmigiano reggiano", "brand": "Parmigiano"},
+            "prices": {"productPrice": {"concatenated": "5,07€"}},
+        },
+    ], "meta": {}}
+
+    results = parse_intermarche_products(payload, max_results=10)
+
+    assert results[0]["id"] == "3250390011866"
+    assert results[0]["site_item_id"] == "37731"
+
+
 def test_parse_intermarche_products_uses_category_lookup_preferring_deepest_family():
     payload = {"products": [
         {

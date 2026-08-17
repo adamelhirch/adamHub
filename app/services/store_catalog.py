@@ -30,6 +30,7 @@ from sqlmodel import Session, delete, select
 from app.models import (
     PantryItem,
     RecipeIngredient,
+    SupermarketConnection,
     SupermarketMapping,
     SupermarketSearchCache,
     SupermarketStore,
@@ -312,6 +313,24 @@ def get_selected_store(
     return session.exec(statement).first()
 
 
+def load_active_connection(
+    session: Session,
+    store: SupermarketStore,
+    user_id: int | None = None,
+) -> SupermarketConnection | None:
+    """Resolve the active connection row for this store; None if none configured.
+
+    When `user_id` is given, prefer that user's active connection; if missing,
+    fall back to a shared (user_id IS NULL) connection.
+    """
+    connection = None
+    if user_id is not None:
+        connection = get_active_connection(session, store, user_id=user_id)
+    if connection is None:
+        connection = get_active_connection(session, store, user_id=None)
+    return connection
+
+
 def load_active_cookies(
     session: Session,
     store: SupermarketStore,
@@ -319,15 +338,10 @@ def load_active_cookies(
 ) -> list[dict[str, Any]] | None:
     """Pull the active connection's cookies for this store; None if no row in DB.
 
-    When `user_id` is given, prefer that user's active connection; if missing,
-    fall back to a shared (user_id IS NULL) connection. Callers can still fall
-    back to legacy filesystem cookies when this returns None.
+    Callers can still fall back to legacy filesystem cookies when this returns
+    None.
     """
-    connection = None
-    if user_id is not None:
-        connection = get_active_connection(session, store, user_id=user_id)
-    if connection is None:
-        connection = get_active_connection(session, store, user_id=None)
+    connection = load_active_connection(session, store, user_id=user_id)
     if connection is None:
         return None
     cookies = decrypt_cookies(connection)
