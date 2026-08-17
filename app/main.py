@@ -11,6 +11,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.scheduler import setup_scheduler, shutdown_scheduler
+from app.mcp.server import build_mcp_app, mcp_server
 
 settings = get_settings()
 
@@ -22,7 +23,12 @@ WEB_ASSETS_DIR = WEB_DIST_DIR / "assets"
 async def lifespan(_: FastAPI):
     init_db()
     setup_scheduler()
-    yield
+    # The streamable-HTTP session manager needs an active task group for the
+    # whole process lifetime (mcp_server.session_manager is only populated
+    # once build_mcp_app() -> streamable_http_app() has run, which app.mount
+    # below does at import time, before this lifespan ever executes).
+    async with mcp_server.session_manager.run():
+        yield
     shutdown_scheduler()
 
 
@@ -55,6 +61,11 @@ def health() -> dict:
 
 app.include_router(api_router)
 app.include_router(public_calendar_feeds_router)
+# Mounted (not include_router-ed): the MCP SDK owns this sub-app's routing —
+# tool listing/execution is auth-scoped per caller inside app/mcp/server.py,
+# not per-route like the rest of the API. Must be registered before the SPA
+# catch-all below so /mcp isn't swallowed by it.
+app.mount("/mcp", build_mcp_app())
 
 
 def _frontend_available() -> bool:
