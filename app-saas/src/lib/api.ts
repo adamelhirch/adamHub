@@ -22,6 +22,23 @@ export interface AuthUser {
   created_at: string;
 }
 
+export interface ApiKeyRead {
+  api_key: string | null;
+  created_at: string | null;
+}
+
+export function getApiKey(): Promise<ApiKeyRead> {
+  return request<ApiKeyRead>("/auth/api-key");
+}
+
+export function generateApiKey(): Promise<ApiKeyRead> {
+  return request<ApiKeyRead>("/auth/api-key", { method: "POST" });
+}
+
+export function revokeApiKey(): Promise<void> {
+  return request<void>("/auth/api-key", { method: "DELETE" });
+}
+
 export interface AuthResponse {
   token: string;
   user: AuthUser;
