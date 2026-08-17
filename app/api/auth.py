@@ -10,7 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.auth import create_token, hash_password, verify_password
+from app.core.auth import create_token, hash_api_key, hash_password, verify_password
+from app.core.crypto import decrypt_text, encrypt_text
 from app.core.security import require_api_key
 from app.models import User
 from app.services.email import hash_email_verification_token, send_verification_email
@@ -186,3 +187,39 @@ def login(payload: LoginPayload, session: SessionDep) -> AuthResponse:
 @router.get("/me", response_model=UserRead)
 def me(current: CurrentUser) -> UserRead:
     return _to_user_read(current)
+
+
+class ApiKeyRead(BaseModel):
+    api_key: str | None
+    created_at: datetime | None
+
+
+@router.get("/api-key", response_model=ApiKeyRead)
+def get_api_key(current: CurrentUser) -> ApiKeyRead:
+    """Kept always-visible (not show-once): decrypted on demand for Settings."""
+    if not current.api_key_encrypted:
+        return ApiKeyRead(api_key=None, created_at=None)
+    return ApiKeyRead(api_key=decrypt_text(current.api_key_encrypted), created_at=current.api_key_created_at)
+
+
+@router.post("/api-key", response_model=ApiKeyRead)
+def create_or_regenerate_api_key(current: CurrentUser, session: SessionDep) -> ApiKeyRead:
+    """Generate a fresh key, invalidating any previous one for this user."""
+    raw_key = f"ahub_{secrets.token_urlsafe(32)}"
+    current.api_key_encrypted = encrypt_text(raw_key)
+    current.api_key_hash = hash_api_key(raw_key)
+    current.api_key_created_at = datetime.now(UTC)
+    current.updated_at = datetime.now(UTC)
+    session.add(current)
+    session.commit()
+    return ApiKeyRead(api_key=raw_key, created_at=current.api_key_created_at)
+
+
+@router.delete("/api-key", status_code=204)
+def revoke_api_key(current: CurrentUser, session: SessionDep) -> None:
+    current.api_key_encrypted = None
+    current.api_key_hash = None
+    current.api_key_created_at = None
+    current.updated_at = datetime.now(UTC)
+    session.add(current)
+    session.commit()

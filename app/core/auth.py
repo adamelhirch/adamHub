@@ -119,6 +119,24 @@ def resolve_optional_user(request: Request, session: Session) -> User | None:
     return user
 
 
+def hash_api_key(raw_key: str) -> str:
+    """sha256 hex digest used as the DB lookup key for a per-user API key.
+
+    The raw key is never stored — only this hash (for O(1) auth lookup) and,
+    separately, a Fernet-encrypted copy (app/core/crypto.py) for on-demand
+    display in Settings.
+    """
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def resolve_user_by_api_key(session: Session, raw_key: str) -> User | None:
+    """Resolve a per-user API key (Settings-generated, not the shared X-API-Key) to its owner."""
+    user = session.exec(select(User).where(User.api_key_hash == hash_api_key(raw_key))).first()
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
 def resolve_owner_user(session: Session) -> User:
     """Resolve the legacy owner user configured via ADAMHUB_OWNER_EMAIL.
 
@@ -159,19 +177,23 @@ def resolve_current_or_owner_user(request: Request, session: Session) -> User:
 
     Resolution order:
     1. A valid JWT Bearer token -> that user.
-    2. A valid shared X-API-Key (legacy web frontend) -> the ADAMHUB_OWNER_EMAIL user.
-    3. Neither -> 401, exactly like require_api_key.
+    2. A valid per-user API key (Settings-generated) -> that user.
+    3. A valid shared X-API-Key (legacy web frontend) -> the ADAMHUB_OWNER_EMAIL user.
+    4. None of the above -> 401, exactly like require_api_key.
     """
     user = resolve_optional_user(request, session)
     if user is not None:
         return user
 
-    settings = get_settings()
     x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
-    if x_api_key and any(
-        secrets.compare_digest(x_api_key, key) for key in settings.api_keys_list
-    ):
-        return resolve_owner_user(session)
+    if x_api_key:
+        user = resolve_user_by_api_key(session, x_api_key)
+        if user is not None:
+            return user
+
+        settings = get_settings()
+        if any(secrets.compare_digest(x_api_key, key) for key in settings.api_keys_list):
+            return resolve_owner_user(session)
 
     raise HTTPException(
         status_code=401,

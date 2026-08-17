@@ -536,6 +536,12 @@ class User(SQLModel, table=True):
     email_verified: bool = Field(default=False, index=True)
     email_verification_token_hash: str | None = None
     email_verification_sent_at: datetime | None = None
+    # Per-user MCP/API key: Fernet-encrypted for on-demand display in Settings
+    # (kept always-visible, not show-once) plus a sha256 hash for O(1) auth
+    # lookup without decrypting every user's key on each request.
+    api_key_encrypted: str | None = None
+    api_key_hash: str | None = Field(default=None, index=True, unique=True)
+    api_key_created_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

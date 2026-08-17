@@ -1,5 +1,6 @@
 import os
 from collections.abc import Generator
+from contextlib import asynccontextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,6 +16,7 @@ from app.core import db as db_module
 from app.core.auth import create_token, hash_password
 from app.core.config import get_settings
 from app.main import app
+from app.mcp.server import mcp_server
 from app.models import User
 
 # Ensure SQLModel metadata is populated.
@@ -24,11 +26,23 @@ OWNER_EMAIL = "owner@adamelhirch.com"
 OWNER_PASSWORD = "owner-password-123"
 
 
+@asynccontextmanager
+async def _noop_session_manager_run():
+    yield
+
+
 @pytest.fixture(autouse=True)
 def disable_app_lifespan_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.main.init_db", lambda: None)
     monkeypatch.setattr("app.main.setup_scheduler", lambda: None)
     monkeypatch.setattr("app.main.shutdown_scheduler", lambda: None)
+    # mcp_server is a module-level singleton (correct for production: the
+    # StreamableHTTPSessionManager's .run() may only ever be entered once per
+    # process). The `client` fixture re-enters app's lifespan once per test
+    # though, so a second test would hit "can only be called once per
+    # instance" — tests that need the MCP layer call its handlers directly
+    # (tests/test_mcp_server.py) rather than through the live session manager.
+    monkeypatch.setattr(mcp_server.session_manager, "run", _noop_session_manager_run)
 
 
 @pytest.fixture()
