@@ -144,6 +144,10 @@ export interface SupermarketProduct {
   image_url: string | null;
   store: string;
   external_id: string | null;
+  // Intermarché only: the id the cart mirror actually matches cart lines on
+  // (cart items' external_id is the site's catalog id, not the EAN that
+  // this product's own external_id carries). null for the other stores.
+  site_item_id: string | null;
   product_url: string | null;
   fetched_at: string;
   expires_at: string;
