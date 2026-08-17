@@ -1,3 +1,14 @@
+---
+name: adamhub-assistant
+description: >-
+  Master skill for piloting AdamHUB as one coherent personal-life system —
+  tasks, finances, patrimony, groceries/supermarket search and cart, pantry,
+  recipes, meal planning, calendar, fitness, habits, goals, subscriptions,
+  notes, video-to-recipe intake, and Linear — via the unified skill API
+  (GET /api/v1/skill/manifest, POST /api/v1/skill/execute). Use whenever an
+  AI assistant needs to read or write AdamHUB data on the user's behalf.
+---
+
 # AdamHUB Assistant Master Skill
 
 Use this as the primary skill when an AI assistant must manage AdamHUB as one coherent personal-life system.
