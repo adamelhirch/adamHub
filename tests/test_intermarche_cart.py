@@ -150,7 +150,12 @@ def test_build_cart_request_body_empty_cart_state():
         customer_date_time="2026-08-15T03:00:47+02:00",
     )
     assert body["events"] == []
-    assert body["lastSynchronizedCart"] == {"carts": [], "synchronizeDateTime": None}
+    # The live API rejects a null synchronizeDateTime even on the first sync
+    # of a session (METHOD_ARGUMENT_NOT_VALID) — it must echo customerDateTime.
+    assert body["lastSynchronizedCart"] == {
+        "carts": [],
+        "synchronizeDateTime": "2026-08-15T03:00:47+02:00",
+    }
 
 
 def test_build_last_synchronized_cart_trims_full_response():
