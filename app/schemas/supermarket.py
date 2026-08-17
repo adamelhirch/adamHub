@@ -20,6 +20,10 @@ class SupermarketSearchResult(BaseModel):
     store: SupermarketStore
     query: str
     external_id: str | None
+    # Intermarché only: the catalog's own id, used by the cart mirror (see
+    # cart_mirror.add_item) — distinct from external_id, which prefers the
+    # EAN for search/cross-store matching. None for the other stores.
+    site_item_id: str | None = None
     name: str
     brand: str | None
     category: str | None = None

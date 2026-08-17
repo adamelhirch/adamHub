@@ -799,29 +799,85 @@ function PantryMappingPanel({
 }
 
 // ─── AddToCartButton ─────────────────────────────────────────────────────────
-// Quick-add of a search result to the cart of `store` (quantity 1), with a
-// transient "Ajouté" confirmation state. Errors surface through the store's
-// cartError, displayed in the Panier tab.
+// Quick-add of a search result to the cart of `store`, with a transient
+// "Ajouté" confirmation state. Once the product is already a line in that
+// store's cart, this renders a -/qty/+ stepper instead — synced live with the
+// Panier tab (same cartsByStore state) — so a repeat visit to search shows
+// the quantity already in the cart rather than a plain "+ Panier" button.
+// Errors surface through the store's cartError, displayed in the Panier tab.
 function AddToCartButton({ store, product, className }: {
   store: SupermarketStoreKey;
   product: SupermarketProduct;
   className?: string;
 }) {
   const addCartItem = useGroceryStore((s) => s.addCartItem);
+  const updateCartItemQuantity = useGroceryStore((s) => s.updateCartItemQuantity);
+  const removeCartItem = useGroceryStore((s) => s.removeCartItem);
+  const cart = useGroceryStore((s) => s.cartsByStore[store]);
   const [added, setAdded] = useState<'idle' | 'added' | 'error'>('idle');
+  const [busy, setBusy] = useState(false);
 
-  const handleClick = async () => {
+  // Cart lines' external_id is the site's own catalog id for Intermarché
+  // (mirrored from the real cart), not the EAN a search result's external_id
+  // carries — site_item_id is the correct match key there. The other stores
+  // never set site_item_id, so external_id (identical on both sides) is used.
+  const matchKey = product.site_item_id ?? product.external_id;
+  const cartItem = matchKey ? cart?.items.find((item) => item.external_id === matchKey) ?? null : null;
+
+  const handleAdd = async () => {
     // The store swallows API errors into cartError (surfaced in the Panier
     // tab) rather than rethrowing, so read it back to reflect the outcome.
+    setBusy(true);
     await addCartItem(store, { cache_id: product.cache_id, quantity: 1 });
     setAdded(useGroceryStore.getState().cartError ? 'error' : 'added');
+    setBusy(false);
     window.setTimeout(() => setAdded('idle'), 1600);
   };
+
+  const handleStep = async (nextQuantity: number) => {
+    if (!cartItem) return;
+    setBusy(true);
+    if (nextQuantity <= 0) {
+      await removeCartItem(store, cartItem.id);
+    } else {
+      await updateCartItemQuantity(store, cartItem.id, nextQuantity);
+    }
+    setBusy(false);
+  };
+
+  if (cartItem) {
+    return (
+      <div
+        className={`inline-flex items-center justify-center gap-1 rounded-xl bg-red-50 ${className ?? ''}`}
+      >
+        <button
+          type="button"
+          onClick={() => void handleStep(cartItem.quantity - 1)}
+          disabled={busy}
+          className="rounded p-1 text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50"
+          title={cartItem.quantity <= 1 ? 'Retirer du panier' : 'Retirer 1'}
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <span className="min-w-[1.25rem] text-center text-sm font-bold text-red-700">{cartItem.quantity}</span>
+        <button
+          type="button"
+          onClick={() => void handleStep(cartItem.quantity + 1)}
+          disabled={busy}
+          className="rounded p-1 text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50"
+          title="Ajouter 1"
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <button
       type="button"
-      onClick={() => void handleClick()}
+      onClick={() => void handleAdd()}
+      disabled={busy}
       className={`inline-flex items-center justify-center gap-1 rounded-xl text-sm font-semibold transition-colors disabled:opacity-60 ${
         added === 'added'
           ? 'bg-emerald-500 text-white hover:bg-emerald-600'

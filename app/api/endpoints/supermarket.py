@@ -87,11 +87,13 @@ def _connection_is_operable(existing, user) -> bool:
 
 
 def _to_result(row: SupermarketSearchCache) -> SupermarketSearchResult:
+    payload = row.payload_json if isinstance(row.payload_json, dict) else {}
     return SupermarketSearchResult(
         cache_id=row.id,
         store=row.store,
         query=row.query,
         external_id=row.external_id,
+        site_item_id=payload.get("site_item_id"),
         name=row.name,
         brand=row.brand,
         category=row.category,
