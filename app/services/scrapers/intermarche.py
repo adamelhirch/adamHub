@@ -273,6 +273,12 @@ def parse_intermarche_products(
         external_id = str(product.get("ean") or product.get("id") or "").strip() or None
         if external_id is None:
             continue
+        # The cart API's QUANTITY events validate `itemId` as the catalog's
+        # own (short, numeric) product id — an EAN barcode is rejected
+        # (`JSON_FIELD_TYPE_NOT_VALID`, confirmed live). `external_id` above
+        # prefers the EAN (used for search/cross-store matching), so the raw
+        # catalog id is captured separately for the cart mirror to use.
+        site_item_id = str(product.get("id") or "").strip() or None
 
         informations = product.get("informations") if isinstance(product.get("informations"), dict) else {}
         name = (informations.get("title") or "").strip() or "Produit inconnu"
@@ -289,6 +295,7 @@ def parse_intermarche_products(
         results.append(
             {
                 "id": external_id,
+                "site_item_id": site_item_id,
                 "name": name,
                 "brand": brand,
                 "category": _product_category(product, category_lookup),

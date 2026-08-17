@@ -125,6 +125,11 @@ class SupermarketConnectionImport(BaseModel):
     credentials: SupermarketCredentials | None = None
     activate: bool = True
     connection_id: int | None = None
+    # Intermarché only: the connected-customer id. Not reliably present in
+    # cookies (arrives via the /loading?userId=... OAuth redirect) — when
+    # omitted, a previously stored value on the connection is preserved
+    # rather than cleared, so a routine cookie-only re-sync doesn't drop it.
+    customer_uuid: str | None = None
 
 
 class SupermarketMappingCreate(BaseModel):

@@ -460,6 +460,33 @@ def test_mirror_add_calls_adapter_and_rewrites_local(client, auth_headers, owner
     assert local[0]["name"] == "Beaufort AOP au lait cru"
 
 
+def test_mirror_add_uses_site_item_id_not_ean(client, auth_headers, test_engine, monkeypatch):
+    """The cart API validates `itemId` as the catalog's own numeric id, not the
+    EAN barcode `external_id` prefers for search/cross-store matching (a raw
+    EAN is rejected live with `JSON_FIELD_TYPE_NOT_VALID`). The site's real id
+    is captured separately at search time in `payload_json.site_item_id` and
+    must be what `add_item` sends to the adapter, not `external_id`.
+    """
+    _import_connection(client, auth_headers)
+    fake = FakeCartClient(state=_state_with("37731", quantity=1))
+    _patch_client(monkeypatch, fake)
+    with Session(test_engine) as session:
+        _seed_cache_row(
+            session,
+            external_id="3250390011866",  # EAN — not a valid cart itemId
+            payload_json={"site_item_id": "37731"},
+        )
+
+    response = client.post(
+        "/api/v1/supermarket/carts/intermarche/items",
+        headers=auth_headers,
+        json={"cache_id": _cache_id_of(test_engine, "3250390011866"), "quantity": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    assert fake.calls == [("add_item", ("37731",), {"quantity": 1})]
+
+
 def test_mirror_add_unknown_cache_rejects_before_any_site_call(client, auth_headers, test_engine, monkeypatch):
     fake = FakeCartClient(state=_state())
     built = _patch_client(monkeypatch, fake)
