@@ -193,6 +193,15 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     assert patched_session.status_code == 200
     assert _db_user_id(test_engine, FitnessSession, fitness_session_id) == user["id"]
 
+    measurement_id = _create_fitness_measurement_for(client, jwt_headers)
+    patched_measurement = client.patch(
+        f"/api/v1/fitness/measurements/{measurement_id}",
+        headers=jwt_headers,
+        json={"body_weight_kg": 81.0, "user_id": other["id"]},
+    )
+    assert patched_measurement.status_code == 200
+    assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
+
 
 # ── Cross-user access is 404 everywhere (no existence leak) ──────────────────
 
