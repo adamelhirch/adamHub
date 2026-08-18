@@ -194,6 +194,34 @@ class ApiKeyRead(BaseModel):
     created_at: datetime | None
 
 
+class NtfyTopicRead(BaseModel):
+    ntfy_topic: str | None = None
+
+
+class NtfyTopicUpdate(BaseModel):
+    ntfy_topic: str | None = Field(default=None, max_length=255)
+
+
+@router.get("/notifications", response_model=NtfyTopicRead)
+def get_ntfy_topic(current: CurrentUser) -> NtfyTopicRead:
+    """Read the caller's per-user ntfy push topic (None = global topic default)."""
+    return NtfyTopicRead(ntfy_topic=current.ntfy_topic)
+
+
+@router.put("/notifications", response_model=NtfyTopicRead)
+def set_ntfy_topic(
+    payload: NtfyTopicUpdate, current: CurrentUser, session: SessionDep
+) -> NtfyTopicRead:
+    """Set (or clear with null/blank) the caller's per-user ntfy push topic."""
+    normalized = (payload.ntfy_topic or "").strip() or None
+    current.ntfy_topic = normalized
+    current.updated_at = datetime.now(UTC)
+    session.add(current)
+    session.commit()
+    session.refresh(current)
+    return NtfyTopicRead(ntfy_topic=current.ntfy_topic)
+
+
 @router.get("/api-key", response_model=ApiKeyRead)
 def get_api_key(current: CurrentUser) -> ApiKeyRead:
     """Kept always-visible (not show-once): decrypted on demand for Settings."""

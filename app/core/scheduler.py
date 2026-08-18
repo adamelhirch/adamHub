@@ -5,8 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlmodel import Session, select
 
+from app.core.config import get_settings
 from app.core.db import engine
-from app.models import CalendarCategory, CalendarEvent, CalendarItem, PantryItem
+from app.models import CalendarCategory, CalendarEvent, CalendarItem, PantryItem, User
 from app.services.calendar_hub import list_due_reminders, sync_generated_calendar_items
 from app.services.notifications import build_hub_link, send_push_notification
 from app.services.store_catalog import run_intermarche_scraper
@@ -108,6 +109,18 @@ async def send_due_calendar_reminders(within_minutes: int = 20) -> None:
             due_label = "now" if due_in <= 0 else f"in {due_in} min"
             start_local = start_at.strftime("%Y-%m-%d %H:%M UTC")
 
+            # Route the reminder to the calendar item owner's personal ntfy
+            # topic when set; otherwise fall back to the shared
+            # ADAMHUB_NTFY_TOPIC (legacy single-topic behaviour).
+            topic: str | None = None
+            db_item = session.get(CalendarItem, item.id)
+            if db_item is not None and db_item.user_id is not None:
+                owner = session.get(User, db_item.user_id)
+                if owner is not None:
+                    topic = owner.ntfy_topic
+            if not topic:
+                topic = get_settings().ntfy_topic
+
             click = build_hub_link(
                 "/calendar",
                 day=start_at.date().isoformat(),
@@ -119,11 +132,11 @@ async def send_due_calendar_reminders(within_minutes: int = 20) -> None:
                 priority=3,
                 tags=_calendar_tags(item.category),
                 click=click,
+                topic=topic,
             )
             if not sent:
                 continue
 
-            db_item = session.get(CalendarItem, item.id)
             if db_item is None:
                 continue
             db_item.last_notified_at = datetime.now(UTC)
