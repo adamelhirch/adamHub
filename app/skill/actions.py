@@ -1723,9 +1723,15 @@ def _handle_subscription_projection(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_overview(payload, session, *, user, now, user_id):
     accounts = session.exec(
-        select(Account).where(Account.is_active.is_(True)).order_by(Account.name.asc())
+        select(Account)
+        .where(Account.user_id == user_id, Account.is_active.is_(True))
+        .order_by(Account.name.asc())
     ).all()
-    goals = session.exec(select(SavingsGoal).order_by(SavingsGoal.target_date.asc())).all()
+    goals = session.exec(
+        select(SavingsGoal)
+        .where(SavingsGoal.user_id == user_id)
+        .order_by(SavingsGoal.target_date.asc())
+    ).all()
     accounts_by_id = {account.id: account for account in accounts if account.id is not None}
     return {
         "overview": {
@@ -1741,7 +1747,7 @@ def _handle_patrimony_overview(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_list_accounts(payload, session, *, user, now, user_id):
     active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = select(Account).order_by(Account.name.asc())
+    statement = select(Account).where(Account.user_id == user_id).order_by(Account.name.asc())
     if active_only:
         statement = statement.where(Account.is_active.is_(True))
     rows = session.exec(statement).all()
@@ -1750,14 +1756,14 @@ def _handle_patrimony_list_accounts(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_add_account(payload, session, *, user, now, user_id):
     data = AccountCreate.model_validate(payload)
-    row = create(session, Account(**data.model_dump()))
+    row = create(session, Account(**data.model_dump(), user_id=user_id))
     return {"account": _build_account_read_payload(row)}
 
 
 def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
     account_id = _int_id(payload, "account_id")
     row = session.get(Account, account_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("account_id not found")
     patch = AccountUpdate.model_validate(
         {k: v for k, v in payload.items() if k != "account_id"}
@@ -1773,19 +1779,26 @@ def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
 def _handle_patrimony_delete_account(payload, session, *, user, now, user_id):
     account_id = _int_id(payload, "account_id")
     row = session.get(Account, account_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("account_id not found")
     delete(session, row)
     return {"ok": True, "deleted_id": account_id}
 
 
+def _scoped_accounts_by_id(session, user_id: int) -> dict[int, Account]:
+    rows = session.exec(
+        select(Account).where(Account.user_id == user_id)
+    ).all()
+    return {account.id: account for account in rows if account.id is not None}
+
+
 def _handle_patrimony_list_goals(payload, session, *, user, now, user_id):
-    goals = session.exec(select(SavingsGoal).order_by(SavingsGoal.target_date.asc())).all()
-    accounts_by_id = {
-        account.id: account
-        for account in session.exec(select(Account)).all()
-        if account.id is not None
-    }
+    goals = session.exec(
+        select(SavingsGoal)
+        .where(SavingsGoal.user_id == user_id)
+        .order_by(SavingsGoal.target_date.asc())
+    ).all()
+    accounts_by_id = _scoped_accounts_by_id(session, user_id)
     return {
         "goals": [
             _build_savings_goal_read_payload(goal, accounts_by_id) for goal in goals
@@ -1795,19 +1808,15 @@ def _handle_patrimony_list_goals(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_add_goal(payload, session, *, user, now, user_id):
     data = SavingsGoalCreate.model_validate(payload)
-    row = create(session, SavingsGoal(**data.model_dump()))
-    accounts_by_id = {
-        account.id: account
-        for account in session.exec(select(Account)).all()
-        if account.id is not None
-    }
+    row = create(session, SavingsGoal(**data.model_dump(), user_id=user_id))
+    accounts_by_id = _scoped_accounts_by_id(session, user_id)
     return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
 
 
 def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
     row = session.get(SavingsGoal, goal_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("goal_id not found")
     patch = SavingsGoalUpdate.model_validate(
         {k: v for k, v in payload.items() if k != "goal_id"}
@@ -1817,18 +1826,14 @@ def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
         raise ValueError("No patrimony goal fields to update")
     apply_updates(row, updates, touch=True)
     row = save(session, row)
-    accounts_by_id = {
-        account.id: account
-        for account in session.exec(select(Account)).all()
-        if account.id is not None
-    }
+    accounts_by_id = _scoped_accounts_by_id(session, user_id)
     return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
 
 
 def _handle_patrimony_delete_goal(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
     row = session.get(SavingsGoal, goal_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("goal_id not found")
     delete(session, row)
     return {"ok": True, "deleted_id": goal_id}

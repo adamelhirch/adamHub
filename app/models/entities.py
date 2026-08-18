@@ -600,6 +600,7 @@ class SupermarketCartItem(SQLModel, table=True):
 
 class Account(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     account_type: AccountType = AccountType.SAVINGS
     balance: float = 0.0
@@ -613,6 +614,7 @@ class Account(SQLModel, table=True):
 
 class SavingsGoal(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     title: str
     target_amount: float
     current_amount: float = 0.0
