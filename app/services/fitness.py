@@ -109,10 +109,18 @@ def build_fitness_measurement_read(row: FitnessMeasurement) -> FitnessMeasuremen
     )
 
 
-def build_fitness_overview(session: Session) -> FitnessOverviewRead:
+def build_fitness_overview(session: Session, *, user_id: int) -> FitnessOverviewRead:
     now = datetime.now(timezone.utc)
-    sessions = session.exec(select(FitnessSession).order_by(FitnessSession.planned_at.desc())).all()
-    measurements = session.exec(select(FitnessMeasurement).order_by(FitnessMeasurement.recorded_at.desc())).all()
+    sessions = session.exec(
+        select(FitnessSession)
+        .where(FitnessSession.user_id == user_id)
+        .order_by(FitnessSession.planned_at.desc())
+    ).all()
+    measurements = session.exec(
+        select(FitnessMeasurement)
+        .where(FitnessMeasurement.user_id == user_id)
+        .order_by(FitnessMeasurement.recorded_at.desc())
+    ).all()
 
     planned_sessions = [row for row in sessions if row.status != FitnessSessionStatus.SKIPPED]
     upcoming_sessions = [

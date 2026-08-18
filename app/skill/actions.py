@@ -447,15 +447,25 @@ def _handle_finance_month_summary(payload, session, *, user, now, user_id):
 
 
 def _handle_fitness_overview(payload, session, *, user, now, user_id):
-    return {"overview": build_fitness_overview(session).model_dump(mode="json")}
+    return {"overview": build_fitness_overview(session, user_id=user_id).model_dump(mode="json")}
 
 
 def _handle_fitness_list_sessions(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
     rows = session.exec(
-        select(FitnessSession).order_by(FitnessSession.planned_at.desc()).limit(limit)
+        select(FitnessSession)
+        .where(FitnessSession.user_id == user_id)
+        .order_by(FitnessSession.planned_at.desc())
+        .limit(limit)
     ).all()
     return {"sessions": [build_fitness_session_read(row).model_dump(mode="json") for row in rows]}
+
+
+def _get_owned_fitness_session(session, user_id: int, session_id: int) -> FitnessSession:
+    row = session.get(FitnessSession, session_id)
+    if not row or row.user_id != user_id:
+        raise ValueError("session_id not found")
+    return row
 
 
 def _handle_fitness_create_session(payload, session, *, user, now, user_id):
@@ -474,6 +484,7 @@ def _handle_fitness_create_session(payload, session, *, user, now, user_id):
         duration_minutes=data.duration_minutes,
         exercises=coerce_fitness_exercises(data.exercises),
         note=data.note.strip() if data.note else None,
+        user_id=user_id,
     )
     session.add(row)
     session.commit()
@@ -483,9 +494,7 @@ def _handle_fitness_create_session(payload, session, *, user, now, user_id):
 
 def _handle_fitness_update_session(payload, session, *, user, now, user_id):
     session_id = _int_id(payload, "session_id")
-    row = session.get(FitnessSession, session_id)
-    if not row:
-        raise ValueError("session_id not found")
+    row = _get_owned_fitness_session(session, user_id, session_id)
 
     patch = FitnessSessionUpdate.model_validate(
         {k: v for k, v in payload.items() if k != "session_id"}
@@ -534,9 +543,7 @@ def _handle_fitness_update_session(payload, session, *, user, now, user_id):
 
 def _handle_fitness_complete_session(payload, session, *, user, now, user_id):
     session_id = _int_id(payload, "session_id")
-    row = session.get(FitnessSession, session_id)
-    if not row:
-        raise ValueError("session_id not found")
+    row = _get_owned_fitness_session(session, user_id, session_id)
 
     completion = FitnessSessionComplete.model_validate(
         {k: v for k, v in payload.items() if k != "session_id"}
@@ -559,9 +566,7 @@ def _handle_fitness_complete_session(payload, session, *, user, now, user_id):
 
 def _handle_fitness_delete_session(payload, session, *, user, now, user_id):
     session_id = _int_id(payload, "session_id")
-    row = session.get(FitnessSession, session_id)
-    if not row:
-        raise ValueError("session_id not found")
+    row = _get_owned_fitness_session(session, user_id, session_id)
     delete(session, row)
     return {"ok": True, "deleted_id": session_id}
 
@@ -570,6 +575,7 @@ def _handle_fitness_list_measurements(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
     rows = session.exec(
         select(FitnessMeasurement)
+        .where(FitnessMeasurement.user_id == user_id)
         .order_by(FitnessMeasurement.recorded_at.desc())
         .limit(limit)
     ).all()
@@ -590,16 +596,22 @@ def _handle_fitness_add_measurement(payload, session, *, user, now, user_id):
         sleep_hours=data.sleep_hours,
         steps=data.steps,
         note=data.note.strip() if data.note else None,
+        user_id=user_id,
     )
     row = create(session, row)
     return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
 
 
+def _get_owned_fitness_measurement(session, user_id: int, measurement_id: int) -> FitnessMeasurement:
+    row = session.get(FitnessMeasurement, measurement_id)
+    if not row or row.user_id != user_id:
+        raise ValueError("measurement_id not found")
+    return row
+
+
 def _handle_fitness_update_measurement(payload, session, *, user, now, user_id):
     measurement_id = _int_id(payload, "measurement_id")
-    row = session.get(FitnessMeasurement, measurement_id)
-    if not row:
-        raise ValueError("measurement_id not found")
+    row = _get_owned_fitness_measurement(session, user_id, measurement_id)
 
     patch = FitnessMeasurementUpdate.model_validate(
         {k: v for k, v in payload.items() if k != "measurement_id"}
@@ -620,9 +632,7 @@ def _handle_fitness_update_measurement(payload, session, *, user, now, user_id):
 
 def _handle_fitness_delete_measurement(payload, session, *, user, now, user_id):
     measurement_id = _int_id(payload, "measurement_id")
-    row = session.get(FitnessMeasurement, measurement_id)
-    if not row:
-        raise ValueError("measurement_id not found")
+    row = _get_owned_fitness_measurement(session, user_id, measurement_id)
     delete(session, row)
     return {"ok": True, "deleted_id": measurement_id}
 

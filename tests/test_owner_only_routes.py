@@ -2,23 +2,28 @@ from tests.conftest import register_user
 
 
 # ── Off-MVP domains are Owner-only (#59) ─────────────────────────────────────
-# The unscoped domains (fitness, calendar, …) must reject any JWT that does
-# not belong to ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the
-# Owner's own JWT keep working. Finances (t1), tasks (t6), events (t7),
-# subscriptions (t8) and habits (t10) were tenant-scoped and moved to
-# CurrentOrOwnerUser, so they are no longer part of this gate.
+# The unscoped domains (calendar, calendar_feeds, …) must reject any JWT that
+# does not belong to ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and
+# the Owner's own JWT keep working. Finances (t1), tasks (t6), events (t7),
+# subscriptions (t8), fitness (t9) and habits (t10) were tenant-scoped and
+# moved to CurrentOrOwnerUser, so they are no longer part of this gate.
 
 def test_owner_only_route_rejects_non_owner_jwt(client, jwt_headers):
     saas = register_user(client, "saas-user@adamelhirch.com")
 
-    assert client.get("/api/v1/fitness/sessions", headers=jwt_headers).status_code == 401
+    assert client.get("/api/v1/calendar/items", headers=jwt_headers).status_code == 401
 
     # Write routes are gated the same way.
     assert (
         client.post(
-            "/api/v1/fitness/sessions",
+            "/api/v1/calendar/items",
             headers=saas["headers"],
-            json={"title": "Sortie", "session_type": "cardio", "planned_at": "2026-09-01T09:00:00Z", "duration_minutes": 45},
+            json={
+                "title": "Réunion",
+                "start_at": "2026-09-01T09:00:00Z",
+                "end_at": "2026-09-01T10:00:00Z",
+                "category": "task",
+            },
         ).status_code
         == 401
     )
@@ -29,6 +34,13 @@ def test_finances_router_accepts_any_authenticated_user(client, jwt_headers):
     # reaches it (and simply sees their own empty data).
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).status_code == 200
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).json() == []
+
+
+def test_fitness_router_accepts_any_authenticated_user(client, jwt_headers):
+    # Tenant-scoped fitness (t9) no longer gates on ownership either: a plain
+    # JWT user reaches /fitness/sessions and sees their own empty data.
+    assert client.get("/api/v1/fitness/sessions", headers=jwt_headers).status_code == 200
+    assert client.get("/api/v1/fitness/sessions", headers=jwt_headers).json() == []
 
 
 def test_tasks_router_accepts_any_authenticated_user(client, jwt_headers):

@@ -313,6 +313,7 @@ class HabitLog(SQLModel, table=True):
 
 class FitnessSession(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     title: str
     session_type: FitnessSessionType = FitnessSessionType.MIXED
     planned_at: datetime = Field(default_factory=utcnow, index=True)
@@ -330,6 +331,7 @@ class FitnessSession(SQLModel, table=True):
 
 class FitnessMeasurement(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     recorded_at: datetime = Field(default_factory=utcnow, index=True)
     body_weight_kg: float | None = None
     body_fat_pct: float | None = None
