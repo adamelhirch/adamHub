@@ -38,3 +38,37 @@ def test_owner_only_gate_does_not_block_mvp_or_auth_routes(client, jwt_headers):
     # The same SaaS user still reaches its MVP routes and /auth/me.
     assert client.get("/api/v1/groceries", headers=saas["headers"]).status_code == 200
     assert client.get("/api/v1/auth/me", headers=saas["headers"]).status_code == 200
+
+
+def test_video_route_accepts_non_owner_jwt(client, jwt_headers, monkeypatch):
+    # Video extraction is stateless (no user_id table — app/services/video_intake.py
+    # just fetches public pages and returns transcript + metadata), so the /video
+    # router flipped from owner_only_user to CurrentOrOwnerUser (ADR-0001
+    # anticipates exactly this move). A non-Owner JWT must now reach the endpoint
+    # with 200 instead of being rejected with 401.
+    from app.api import video as video_api
+    from app.schemas import VideoSourceRead
+
+    def fake_extract(url: str):
+        return VideoSourceRead(
+            url=url,
+            canonical_url=url,
+            platform="youtube",
+            title="Sample",
+            description="Desc",
+            transcript="Line 1",
+            transcript_source="caption",
+            transcript_segments=[],
+            warnings=[],
+        )
+
+    monkeypatch.setattr(video_api, "extract_video_source", fake_extract)
+
+    response = client.post(
+        "/api/v1/video/extract",
+        headers=jwt_headers,
+        json={"url": "https://www.youtube.com/watch?v=abc123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["platform"] == "youtube"
