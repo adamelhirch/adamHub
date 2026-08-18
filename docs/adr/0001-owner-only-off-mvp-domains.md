@@ -66,6 +66,19 @@ reaches `/goals` and sees only its own goals; cross-tenant goals (and their
 milestones) are 404. This ADR still governs the other off-MVP domains
 (tasks, events, habits, notes, subscriptions, …).
 
+## Superseded for subscriptions (2026-08-18)
+
+`subscriptions` is now tenant-scoped (`user_id` on `subscription`, additive
+migration `r5a7b9c1e3d2f`, backfill via
+`scripts/backfill_owner_tenant.py`) and its router uses `CurrentOrOwnerUser`
+per route instead of the router-level `owner_only_user` gate. Creates
+auto-assign the acting user, lists/upcoming/projection filter by it, and
+get/update resolve the subscription with an ownership check that 404s on
+another user's rows (no existence leak). The `subscription.*` skill actions
+are scoped the same way. A non-Owner JWT now reaches `/subscriptions` and
+sees only its own subscriptions; cross-tenant subscriptions are 404. This
+ADR still governs the other off-MVP domains (tasks, events, habits, notes, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own
