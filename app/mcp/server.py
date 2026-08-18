@@ -7,12 +7,14 @@ that made ``adamhub-assistant/SKILL.md`` go stale).
 
 Auth resolves a bearer token to a ``User`` the same way
 ``resolve_current_or_owner_user`` does for the HTTP API (JWT, then a per-user
-API key, then the shared Owner key). A non-Owner caller only ever sees or can
-call the tenant-scoped MVP domains (recipes, meal plans, groceries, pantry,
-supermarket/cart) — see ``docs/adr/0001-owner-only-off-mvp-domains.md``.
-Everything else is rejected even if invoked directly by name, not merely
-hidden from the tool listing (a client is never trusted to only call what it
-was shown).
+API key, then the shared Owner key). A non-Owner caller can list and call the
+tenant-scoped domain prefixes: the 5 MVP domains plus the domains opened to
+SaaS users during the multi-tenant pivot (tasks, finances, calendar, habits,
+goals, events, fitness, subscriptions, patrimony, notes, video). Only
+``dashboard.overview`` remains owner-only — see
+``docs/adr/0001-owner-only-off-mvp-domains.md``. Everything else is rejected
+even if invoked directly by name, not merely hidden from the tool listing (a
+client is never trusted to only call what it was shown).
 """
 
 from __future__ import annotations
@@ -35,10 +37,16 @@ from app.core.db import engine
 from app.models import User
 from app.skill.actions import ACTION_CATALOG, execute_action
 
-# The 5 tenant-scoped domains (ADR-0001) — the only actions a non-Owner
-# (per-user API key) caller may list or execute. Everything else is Owner-only,
-# exactly matching the router-level gates in app/api/router.py's includes.
-MVP_ACTION_PREFIXES = {"grocery", "recipe", "pantry", "meal_plan", "supermarket"}
+# The 16 tenant-scoped domain prefixes — the actions a non-Owner (per-user
+# API key) caller may list or execute: the 5 MVP domains plus the 11 domains
+# opened to SaaS users during the multi-tenant pivot. Only `dashboard`
+# (dashboard.overview) stays owner-only, matching the remaining router-level
+# gates in app/api/router.py's includes.
+MVP_ACTION_PREFIXES = {
+    "grocery", "recipe", "pantry", "meal_plan", "supermarket",
+    "task", "finance", "calendar", "habit", "goal", "event",
+    "fitness", "subscription", "patrimony", "note", "video",
+}
 
 _ACTION_BY_NAME = {entry["action"]: entry for entry in ACTION_CATALOG}
 
@@ -184,8 +192,10 @@ mcp_server = Server(
     version="1.0.0",
     instructions=(
         "AdamHUB's task/finance/grocery/recipe/etc. life-management surface. "
-        "Non-Owner API keys only reach groceries, pantry, recipes, meal plans, "
-        "and supermarket/cart actions."
+        "Non-Owner API keys reach all tenant-scoped domains: groceries, "
+        "pantry, recipes, meal plans, supermarket/cart, tasks, finances, "
+        "calendar, habits, goals, events, fitness, subscriptions, patrimony, "
+        "notes, and video. Only dashboard.overview stays owner-only."
     ),
     on_list_tools=_on_list_tools,
     on_call_tool=_on_call_tool,
