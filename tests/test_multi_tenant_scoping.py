@@ -5,12 +5,15 @@ from sqlmodel import Session, select
 from app.models import (
     Account,
     Budget,
+    CalendarEvent,
     FinanceTransaction,
     FitnessMeasurement,
     FitnessSession,
     Goal,
     GoalMilestone,
     GroceryItem,
+    Habit,
+    HabitLog,
     MealPlan,
     Note,
     PantryItem,
@@ -77,6 +80,23 @@ def _create_fitness_measurement_for(
     return response.json()["id"]
 
 
+def _create_habit_for(client, headers, name="Boire de l'eau") -> int:
+    response = client.post("/api/v1/habits", headers=headers, json={"name": name})
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _log_habit_for(client, headers, habit_id: int, value: int = 1) -> int:
+    response = client.post(
+        f"/api/v1/habits/{habit_id}/logs",
+        headers=headers,
+        json={"value": value, "note": "matin"},
+
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
 # ── Create auto-scopes to the authenticated user; client can't override ──────
 
 def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_headers, owner_headers):
@@ -97,6 +117,10 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     fitness_session_id = _create_fitness_session_for(client, jwt_headers, title="Séance auto")
     measurement_id = _create_fitness_measurement_for(client, jwt_headers)
 
+    habit_id = _create_habit_for(client, jwt_headers, name="Étirer le dos")
+    habit_log_id = _log_habit_for(client, jwt_headers, habit_id)
+
+
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
     assert _db_user_id(test_engine, Recipe, recipe_id) == user["id"]
@@ -105,6 +129,10 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
     assert _db_user_id(test_engine, FitnessSession, fitness_session_id) == user["id"]
     assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
+
+    assert _db_user_id(test_engine, Habit, habit_id) == user["id"]
+    assert _db_user_id(test_engine, HabitLog, habit_log_id) == user["id"]
+
 
 
 def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
@@ -161,6 +189,14 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
 
+    habit_id = client.post(
+        "/api/v1/habits",
+        headers=jwt_headers,
+        json={"name": "Courir", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, Habit, habit_id) == user["id"]
+
+
 
 def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_headers):
     user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
@@ -202,6 +238,16 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     assert patched_measurement.status_code == 200
     assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
 
+    habit_id = _create_habit_for(client, jwt_headers, name="Lire")
+    patched_habit = client.patch(
+        f"/api/v1/habits/{habit_id}",
+        headers=jwt_headers,
+        json={"description": "20 pages", "user_id": other["id"]},
+    )
+    assert patched_habit.status_code == 200
+    assert _db_user_id(test_engine, Habit, habit_id) == user["id"]
+
+
 
 # ── Cross-user access is 404 everywhere (no existence leak) ──────────────────
 
@@ -225,6 +271,10 @@ def _seed_resources_as_user_a(client, headers):
     assert milestone.status_code == 200, milestone.text
     fitness_session_id = _create_fitness_session_for(client, headers, title="Séance secrète")
     measurement_id = _create_fitness_measurement_for(client, headers)
+
+    habit_id = _create_habit_for(client, headers, name="Méditation secrète")
+    habit_log_id = _log_habit_for(client, headers, habit_id)
+
     return {
         "grocery": grocery_id,
         "pantry": pantry_id,
@@ -236,6 +286,10 @@ def _seed_resources_as_user_a(client, headers):
         "milestone": milestone.json()["id"],
         "fitness_session": fitness_session_id,
         "measurement": measurement_id,
+
+        "habit": habit_id,
+        "habit_log": habit_log_id,
+
     }
 
 
@@ -252,6 +306,8 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get(f"/api/v1/notes/{ids['journal']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"]).status_code == 404
+    assert client.patch(f"/api/v1/habits/{ids['habit']}", headers=user_b["headers"], json={"active": False}).status_code == 404
+    assert client.get(f"/api/v1/habits/{ids['habit']}/logs", headers=user_b["headers"]).status_code == 404
 
     # Lists only expose the caller's own rows (journal included).
     assert client.get("/api/v1/groceries", headers=user_b["headers"]).json() == []
@@ -263,6 +319,9 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get("/api/v1/goals", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/fitness/sessions", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/fitness/measurements", headers=user_b["headers"]).json() == []
+
+    assert client.get("/api/v1/habits", headers=user_b["headers"]).json() == []
+
 
 
 def test_user_cannot_modify_another_users_resources(client, jwt_headers):
@@ -285,6 +344,9 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(
         f"/api/v1/fitness/measurements/{ids['measurement']}", headers=user_b["headers"], json={"body_weight_kg": 1}
     ).status_code == 404
+
+    assert client.patch(f"/api/v1/habits/{ids['habit']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
+
     assert (
         client.patch(
             f"/api/v1/goals/{ids['goal']}/milestones/{ids['milestone']}",
@@ -316,6 +378,9 @@ def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_header
     assert client.delete(f"/api/v1/fitness/sessions/{ids['fitness_session']}", headers=user_b["headers"]).status_code == 404
     assert client.delete(f"/api/v1/fitness/measurements/{ids['measurement']}", headers=user_b["headers"]).status_code == 404
 
+    assert client.post(f"/api/v1/habits/{ids['habit']}/logs", headers=user_b["headers"], json={"value": 1}).status_code == 404
+
+
 
 # ── Legacy API-key path resolves to the owner user ───────────────────────────
 
@@ -335,6 +400,9 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     fitness_session_id = _create_fitness_session_for(client, auth_headers, title="Séance legacy")
     measurement_id = _create_fitness_measurement_for(client, auth_headers)
 
+    habit_id = _create_habit_for(client, auth_headers, name="Habitude legacy")
+
+
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
     assert [i["id"] for i in client.get("/api/v1/meal-plans", headers=owner_headers).json()] == [meal_plan_id]
@@ -342,6 +410,9 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     assert [g["id"] for g in client.get("/api/v1/goals", headers=owner_headers).json()] == [goal_id]
     assert [s["id"] for s in client.get("/api/v1/fitness/sessions", headers=owner_headers).json()] == [fitness_session_id]
     assert [m["id"] for m in client.get("/api/v1/fitness/measurements", headers=owner_headers).json()] == [measurement_id]
+
+    assert [h["id"] for h in client.get("/api/v1/habits", headers=owner_headers).json()] == [habit_id]
+
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
@@ -351,6 +422,9 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     assert client.get("/api/v1/goals", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/fitness/sessions", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/fitness/measurements", headers=stranger["headers"]).json() == []
+
+    assert client.get("/api/v1/habits", headers=stranger["headers"]).json() == []
+
 
 
 def test_legacy_api_key_requires_owner_email_config(client, test_engine, auth_headers, monkeypatch):
@@ -617,6 +691,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(hiking_goal)
         session.flush()
         session.add(GoalMilestone(goal_id=hiking_goal.id, title="Camp de base"))
+        legacy_habit = Habit(name="Méditation", user_id=None)
+        session.add(legacy_habit)
+        session.flush()
+        session.add(HabitLog(habit_id=legacy_habit.id, user_id=None))
         session.commit()
 
     with Session(test_engine) as session:
@@ -629,10 +707,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "habit": 1,
+            "habitlog": 1,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
             "fitnesssession": 0,
+
+            "calendarevent": 0,
+
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
@@ -645,10 +728,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "habit": 0,
+            "habitlog": 0,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
             "fitnesssession": 0,
+
+            "calendarevent": 0,
+
         }
         assert count_null_rows(session) == {
             "groceryitem": 2,
@@ -659,10 +747,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "habit": 1,
+            "habitlog": 1,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
             "fitnesssession": 0,
+
+            "calendarevent": 0,
+
         }
 
     with Session(test_engine) as session:
@@ -677,10 +770,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "habit": 1,
+            "habitlog": 1,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
             "fitnesssession": 0,
+
+            "calendarevent": 0,
+
         }
         assert count_null_rows(session) == {
             "groceryitem": 0,
@@ -691,10 +789,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "habit": 0,
+            "habitlog": 0,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
             "fitnesssession": 0,
+
+            "calendarevent": 0,
+
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
@@ -709,16 +812,23 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "habit": 0,
+            "habitlog": 0,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
             "fitnesssession": 0,
+
+            "calendarevent": 0,
+
         }
 
     # The claimed rows now belong to the owner and show up for the owner.
     with Session(test_engine) as session:
         assert session.exec(select(GroceryItem)).all()[0].user_id == owner_id
         assert session.exec(select(Goal)).all()[0].user_id == owner_id
+        assert session.exec(select(Habit)).all()[0].user_id == owner_id
+        assert session.exec(select(HabitLog)).all()[0].user_id == owner_id
 
 
 def test_backfill_rejects_unknown_owner(client, test_engine):
@@ -1185,3 +1295,259 @@ def test_fitness_backfill_claims_legacy_rows_to_owner(client, test_engine, owner
     stranger = register_user(client, "fitness-backfill-stranger@adamelhirch.com")
     assert client.get("/api/v1/fitness/sessions", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/fitness/measurements", headers=stranger["headers"]).json() == []
+# ── Habits ownership (Habit + HabitLog, t10) ─────────────────────────────────
+
+def test_habit_cross_tenant_is_404(client):
+    user_a = register_user(client, "habit-a@adamelhirch.com")
+    user_b = register_user(client, "habit-b@adamelhirch.com")
+    habit_id = _create_habit_for(client, user_a["headers"], name="Lire 30 minutes")
+    _log_habit_for(client, user_a["headers"], habit_id)
+
+    # Lists only expose the caller's own rows.
+    assert client.get("/api/v1/habits", headers=user_b["headers"]).json() == []
+
+    # Reads/writes/logs on another user's habit are 404 (no existence leak).
+    assert client.patch(
+        f"/api/v1/habits/{habit_id}", headers=user_b["headers"], json={"active": False}
+    ).status_code == 404
+    assert client.post(
+        f"/api/v1/habits/{habit_id}/logs", headers=user_b["headers"], json={"value": 1}
+    ).status_code == 404
+    assert client.get(f"/api/v1/habits/{habit_id}/logs", headers=user_b["headers"]).status_code == 404
+
+    # The owner still sees and operates everything they created.
+    assert [h["id"] for h in client.get("/api/v1/habits", headers=user_a["headers"]).json()] == [habit_id]
+    assert client.patch(
+        f"/api/v1/habits/{habit_id}", headers=user_a["headers"], json={"description": "20 min"}
+    ).status_code == 200
+    assert len(client.get(f"/api/v1/habits/{habit_id}/logs", headers=user_a["headers"]).json()) == 1
+
+
+def test_habit_skill_actions_are_user_scoped(client, test_engine):
+    # The handler seam is exercised directly — the same seam MCP dispatches through.
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-habit-a@adamelhirch.com")
+    intruder = register_user(client, "skill-habit-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action("habit.create", {"name": "Boire de l'eau"}, session, user=owner_user)
+        habit_id = created["habit"]["id"]
+
+        # The intruder's list never sees owner A's habit.
+        assert execute_action("habit.list", {}, session, user=intruder_user)["habits"] == []
+
+        # Direct access to the other user's habit fails without leaking existence.
+        for action, payload in [
+            ("habit.update", {"habit_id": habit_id, "description": "Hacked"}),
+            ("habit.set_active", {"habit_id": habit_id, "active": False}),
+            ("habit.log", {"habit_id": habit_id, "value": 1}),
+            ("habit.list_logs", {"habit_id": habit_id}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: update, set_active, logging.
+        assert [h["id"] for h in execute_action("habit.list", {}, session, user=owner_user)["habits"]] == [habit_id]
+        execute_action("habit.update", {"habit_id": habit_id, "description": "2 litres"}, session, user=owner_user)
+        execute_action("habit.set_active", {"habit_id": habit_id, "active": True}, session, user=owner_user)
+        log = execute_action("habit.log", {"habit_id": habit_id, "value": 2}, session, user=owner_user)
+        assert log["log"]["habit_id"] == habit_id
+        logs = execute_action("habit.list_logs", {"habit_id": habit_id}, session, user=owner_user)
+        assert [entry["value"] for entry in logs["logs"]] == [2]
+
+
+def test_habit_backfill_claims_legacy_rows_to_owner(client, test_engine, owner_id, auth_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        habit = Habit(name="Méditation matinale", user_id=None)
+        session.add(habit)
+        session.flush()
+        session.add(HabitLog(habit_id=habit.id, user_id=None))
+        session.commit()
+        legacy_habit_id = habit.id
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/habits", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        result = backfill(session, owner_id, commit=True)
+    assert result["commit"] is True
+    assert result["updated"]["habit"] == 1
+    assert result["updated"]["habitlog"] == 1
+
+    # After backfill the owner (legacy API-key path) sees and operates the rows;
+    # a non-owner JWT user still cannot see or touch them.
+    assert [h["id"] for h in client.get("/api/v1/habits", headers=auth_headers).json()] == [legacy_habit_id]
+    stranger = register_user(client, "habit-stranger@adamelhirch.com")
+    assert client.get("/api/v1/habits", headers=stranger["headers"]).json() == []
+    assert client.patch(
+        f"/api/v1/habits/{legacy_habit_id}", headers=stranger["headers"], json={"description": "x"}
+    ).status_code == 404
+    assert client.get(f"/api/v1/habits/{legacy_habit_id}/logs", headers=stranger["headers"]).status_code == 404
+
+
+# ── Events ownership (CalendarEvent — distinct from CalendarItem) ────────────
+
+def _create_event_for(client, headers, when=None) -> int:
+    from datetime import UTC, datetime, timedelta
+
+    # +3 days keeps the event inside the default 7-day "upcoming" window.
+    start = when or datetime.now(UTC) + timedelta(days=3)
+    end = start + timedelta(minutes=30)
+    response = client.post(
+        "/api/v1/events",
+        headers=headers,
+        json={
+            "title": "Rendez-vous",
+            "start_at": start.isoformat().replace("+00:00", "Z"),
+            "end_at": end.isoformat().replace("+00:00", "Z"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def test_events_create_auto_scopes_to_user_and_cannot_override(client, test_engine, jwt_headers):
+    user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
+    other = register_user(client, "event-override@adamelhirch.com")["user"]
+
+    # user_id is not part of EventCreate and is silently ignored.
+    event_id = client.post(
+        "/api/v1/events",
+        headers=jwt_headers,
+        json={
+            "title": "Appel",
+            "start_at": "2031-06-01T10:00:00Z",
+            "end_at": "2031-06-01T10:30:00Z",
+            "user_id": other["id"],
+        },
+    ).json()["id"]
+    assert _db_user_id(test_engine, CalendarEvent, event_id) == user["id"]
+
+    patched = client.patch(
+        f"/api/v1/events/{event_id}",
+        headers=jwt_headers,
+        json={"title": "Renommé", "user_id": other["id"]},
+    )
+    assert patched.status_code == 200
+    assert _db_user_id(test_engine, CalendarEvent, event_id) == user["id"]
+
+
+def test_events_cross_tenant_is_404(client):
+    user_a = register_user(client, "event-a@adamelhirch.com")
+    user_b = register_user(client, "event-b@adamelhirch.com")
+    event_id = _create_event_for(client, user_a["headers"])
+
+    # Reads/writes on another user's event are 404 (no existence leak).
+    assert client.get(f"/api/v1/events/{event_id}", headers=user_b["headers"]).status_code == 404
+    assert client.patch(
+        f"/api/v1/events/{event_id}", headers=user_b["headers"], json={"title": "Hacked"}
+    ).status_code == 404
+    assert client.delete(f"/api/v1/events/{event_id}", headers=user_b["headers"]).status_code == 404
+
+    # Lists and upcoming only expose the caller's own rows.
+    assert client.get("/api/v1/events", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/events/upcoming", headers=user_b["headers"]).json() == []
+
+    # The owner still sees and operates the event.
+    assert client.get(f"/api/v1/events/{event_id}", headers=user_a["headers"]).status_code == 200
+    assert [e["id"] for e in client.get("/api/v1/events", headers=user_a["headers"]).json()] == [event_id]
+    assert [e["id"] for e in client.get("/api/v1/events/upcoming", headers=user_a["headers"]).json()] == [event_id]
+
+
+def test_legacy_api_key_events_scoped_to_owner_user(client, auth_headers, owner_headers):
+    event_id = _create_event_for(client, auth_headers)
+
+    # The owner (via JWT) sees everything the legacy key created.
+    assert [e["id"] for e in client.get("/api/v1/events", headers=owner_headers).json()] == [event_id]
+    assert [e["id"] for e in client.get("/api/v1/events/upcoming", headers=owner_headers).json()] == [event_id]
+
+    # A freshly-registered JWT user sees none of it.
+    stranger = register_user(client, "event-legacy-stranger@adamelhirch.com")
+    assert client.get("/api/v1/events", headers=stranger["headers"]).json() == []
+    assert client.get(f"/api/v1/events/{event_id}", headers=stranger["headers"]).status_code == 404
+
+
+def test_skill_event_actions_scoped_to_acting_user(client, test_engine):
+    from sqlmodel import Session
+
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-event-a@adamelhirch.com")
+    intruder = register_user(client, "skill-event-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action(
+            "event.create",
+            {"title": "Appel A", "start_at": "2031-07-01T09:00:00Z", "end_at": "2031-07-01T09:30:00Z"},
+            session,
+            user=owner_user,
+        )
+        event_id = created["event"]["id"]
+
+        # The intruder's list/upcoming never see owner A's event.
+        assert execute_action("event.list", {}, session, user=intruder_user)["events"] == []
+        assert execute_action("event.upcoming", {}, session, user=intruder_user)["events"] == []
+
+        # Direct access to the other user's event fails without leaking existence.
+        for action, payload in [
+            ("event.get", {"event_id": event_id}),
+            ("event.update", {"event_id": event_id, "title": "Hacked"}),
+            ("event.delete", {"event_id": event_id}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: get, update, list.
+        got = execute_action("event.get", {"event_id": event_id}, session, user=owner_user)
+        assert got["event"]["id"] == event_id
+        execute_action("event.update", {"event_id": event_id, "title": "Renommé"}, session, user=owner_user)
+        assert [e["id"] for e in execute_action("event.list", {}, session, user=owner_user)["events"]] == [event_id]
+
+
+def test_backfill_claims_events_for_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from datetime import UTC, datetime, timedelta
+
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(
+            CalendarEvent(
+                title="Legacy event",
+                start_at=datetime.now(UTC) + timedelta(days=5),
+                end_at=datetime.now(UTC) + timedelta(days=5, minutes=30),
+                user_id=None,
+            )
+        )
+        session.commit()
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/events", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        committed = backfill(session, owner_id, commit=True)
+    assert committed["commit"] is True
+    assert committed["updated"]["calendarevent"] == 1
+
+    # After backfill the owner (legacy API-key path and owner JWT) sees the rows;
+    # a non-owner JWT user still sees none of them.
+    assert [e["title"] for e in client.get("/api/v1/events", headers=auth_headers).json()] == ["Legacy event"]
+    assert [e["title"] for e in client.get("/api/v1/events", headers=owner_headers).json()] == ["Legacy event"]
+    stranger = register_user(client, "event-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/events", headers=stranger["headers"]).json() == []

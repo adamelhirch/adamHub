@@ -2,18 +2,16 @@ from tests.conftest import register_user
 
 
 # ── Off-MVP domains are Owner-only (#59) ─────────────────────────────────────
-# The unscoped domains (tasks, events, …) must reject any JWT that does not
-# belong to ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the
-# Owner's own JWT keep working. Finances was tenant-scoped (t1: user_id on
-# transactions/budgets) and moved to CurrentOrOwnerUser, so it is no longer
-# part of this gate.
+# The unscoped domains (tasks, …) must reject any JWT that does not belong to
+# ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the Owner's own JWT
+# keep working. Finances (t1), goals (t4), events (t7) and habits (t10) were
+# tenant-scoped and moved to CurrentOrOwnerUser, so they are no longer part of
+# this gate.
 
 def test_owner_only_route_rejects_non_owner_jwt(client, jwt_headers):
     saas = register_user(client, "saas-user@adamelhirch.com")
 
     assert client.get("/api/v1/tasks", headers=jwt_headers).status_code == 401
-    assert client.get("/api/v1/events", headers=jwt_headers).status_code == 401
-    assert client.get("/api/v1/habits", headers=jwt_headers).status_code == 401
 
     # Write routes are gated the same way.
     assert (
@@ -31,6 +29,20 @@ def test_finances_router_accepts_any_authenticated_user(client, jwt_headers):
     # reaches it (and simply sees their own empty data).
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).status_code == 200
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).json() == []
+
+
+def test_events_router_accepts_any_authenticated_user(client, jwt_headers):
+    # Tenant-scoped events (user_id on CalendarEvent) no longer gate on
+    # ownership: a plain JWT user reaches it (and simply sees their own data).
+    assert client.get("/api/v1/events", headers=jwt_headers).status_code == 200
+    assert client.get("/api/v1/events", headers=jwt_headers).json() == []
+
+
+def test_habits_router_accepts_any_authenticated_user(client, jwt_headers):
+    # Tenant-scoped habits (t10) no longer gate on ownership either: a plain
+    # JWT user reaches /habits and sees their own empty data.
+    assert client.get("/api/v1/habits", headers=jwt_headers).status_code == 200
+    assert client.get("/api/v1/habits", headers=jwt_headers).json() == []
 
 
 def test_owner_only_route_accepts_api_key_and_owner_jwt(client, auth_headers, owner_headers):

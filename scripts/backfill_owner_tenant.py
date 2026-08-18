@@ -3,7 +3,7 @@
 
 After the additive multi-tenant migrations (user_id on groceryitem/pantryitem/
 recipe/mealplan/note/account/savingsgoal/financetransaction/budget/goal/
-fitnesssession/fitnessmeasurement),
+fitnesssession/fitnessmeasurement/calendarevent/habit/habitlog),
 pre-existing rows have user_id = NULL and are invisible to everyone. This
 script claims them for the account whose email is given with --email (which
 must already exist — register it first via POST /auth/register).
@@ -30,11 +30,14 @@ from app.core.db import engine
 from app.models import (
     Account,
     Budget,
+    CalendarEvent,
     FinanceTransaction,
     FitnessMeasurement,
     FitnessSession,
     Goal,
     GroceryItem,
+    Habit,
+    HabitLog,
     MealPlan,
     Note,
     PantryItem,
@@ -56,6 +59,9 @@ BACKFILL_MODELS = [
     FinanceTransaction,
     Budget,
     Goal,
+    CalendarEvent,
+    Habit,
+    HabitLog,
 ]
 
 
