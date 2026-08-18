@@ -283,6 +283,13 @@ def _get_owned_meal_plan(session, meal_plan_id: int, user_id: int) -> MealPlan:
     return plan
 
 
+def _get_owned_note(session, note_id: int, user_id: int) -> Note:
+    note = session.get(Note, note_id)
+    if not note or note.user_id != user_id:
+        raise ValueError("note_id not found")
+    return note
+
+
 def _is_owner_user(user: User | None) -> bool:
     """True when the acting user is the configured ADAMHUB_OWNER_EMAIL user."""
     if user is None:
@@ -369,7 +376,7 @@ def _handle_task_delete(payload, session, *, user, now, user_id):
 
 def _handle_finance_add_transaction(payload, session, *, user, now, user_id):
     data = FinanceTransactionCreate.model_validate(payload)
-    tx = FinanceTransaction(**data.model_dump())
+    tx = FinanceTransaction(**data.model_dump(), user_id=user_id)
     if tx.occurred_at is None:
         tx.occurred_at = now
     tx = create(session, tx)
@@ -378,7 +385,12 @@ def _handle_finance_add_transaction(payload, session, *, user, now, user_id):
 
 def _handle_finance_list_transactions(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    statement = select(FinanceTransaction).order_by(FinanceTransaction.occurred_at.desc()).limit(limit)
+    statement = (
+        select(FinanceTransaction)
+        .where(FinanceTransaction.user_id == user_id)
+        .order_by(FinanceTransaction.occurred_at.desc())
+        .limit(limit)
+    )
 
     if payload.get("kind"):
         statement = statement.where(FinanceTransaction.kind == TransactionKind(payload["kind"]))
@@ -405,12 +417,16 @@ def _handle_finance_create_budget(payload, session, *, user, now, user_id):
     data = BudgetCreate.model_validate(payload)
     if len(data.month) != 7 or data.month[4] != "-":
         raise ValueError("month must be in format YYYY-MM")
-    budget = create(session, Budget(**data.model_dump()))
+    budget = create(session, Budget(**data.model_dump(), user_id=user_id))
     return {"budget": budget.model_dump(mode="json")}
 
 
 def _handle_finance_list_budgets(payload, session, *, user, now, user_id):
-    statement = select(Budget).order_by(Budget.month.desc(), Budget.category.asc())
+    statement = (
+        select(Budget)
+        .where(Budget.user_id == user_id)
+        .order_by(Budget.month.desc(), Budget.category.asc())
+    )
     if payload.get("month"):
         statement = statement.where(Budget.month == payload["month"])
     budgets = session.exec(statement).all()
@@ -420,7 +436,7 @@ def _handle_finance_list_budgets(payload, session, *, user, now, user_id):
 def _handle_finance_month_summary(payload, session, *, user, now, user_id):
     year = int(payload.get("year", now.year))
     month = int(payload.get("month", now.month))
-    summary = build_month_summary(session, year, month)
+    summary = build_month_summary(session, year, month, user_id=user_id)
     return {"summary": summary.model_dump(mode="json")}
 
 
@@ -1725,9 +1741,15 @@ def _handle_subscription_projection(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_overview(payload, session, *, user, now, user_id):
     accounts = session.exec(
-        select(Account).where(Account.is_active.is_(True)).order_by(Account.name.asc())
+        select(Account)
+        .where(Account.user_id == user_id, Account.is_active.is_(True))
+        .order_by(Account.name.asc())
     ).all()
-    goals = session.exec(select(SavingsGoal).order_by(SavingsGoal.target_date.asc())).all()
+    goals = session.exec(
+        select(SavingsGoal)
+        .where(SavingsGoal.user_id == user_id)
+        .order_by(SavingsGoal.target_date.asc())
+    ).all()
     accounts_by_id = {account.id: account for account in accounts if account.id is not None}
     return {
         "overview": {
@@ -1743,7 +1765,7 @@ def _handle_patrimony_overview(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_list_accounts(payload, session, *, user, now, user_id):
     active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = select(Account).order_by(Account.name.asc())
+    statement = select(Account).where(Account.user_id == user_id).order_by(Account.name.asc())
     if active_only:
         statement = statement.where(Account.is_active.is_(True))
     rows = session.exec(statement).all()
@@ -1752,14 +1774,14 @@ def _handle_patrimony_list_accounts(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_add_account(payload, session, *, user, now, user_id):
     data = AccountCreate.model_validate(payload)
-    row = create(session, Account(**data.model_dump()))
+    row = create(session, Account(**data.model_dump(), user_id=user_id))
     return {"account": _build_account_read_payload(row)}
 
 
 def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
     account_id = _int_id(payload, "account_id")
     row = session.get(Account, account_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("account_id not found")
     patch = AccountUpdate.model_validate(
         {k: v for k, v in payload.items() if k != "account_id"}
@@ -1775,19 +1797,26 @@ def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
 def _handle_patrimony_delete_account(payload, session, *, user, now, user_id):
     account_id = _int_id(payload, "account_id")
     row = session.get(Account, account_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("account_id not found")
     delete(session, row)
     return {"ok": True, "deleted_id": account_id}
 
 
+def _scoped_accounts_by_id(session, user_id: int) -> dict[int, Account]:
+    rows = session.exec(
+        select(Account).where(Account.user_id == user_id)
+    ).all()
+    return {account.id: account for account in rows if account.id is not None}
+
+
 def _handle_patrimony_list_goals(payload, session, *, user, now, user_id):
-    goals = session.exec(select(SavingsGoal).order_by(SavingsGoal.target_date.asc())).all()
-    accounts_by_id = {
-        account.id: account
-        for account in session.exec(select(Account)).all()
-        if account.id is not None
-    }
+    goals = session.exec(
+        select(SavingsGoal)
+        .where(SavingsGoal.user_id == user_id)
+        .order_by(SavingsGoal.target_date.asc())
+    ).all()
+    accounts_by_id = _scoped_accounts_by_id(session, user_id)
     return {
         "goals": [
             _build_savings_goal_read_payload(goal, accounts_by_id) for goal in goals
@@ -1797,19 +1826,15 @@ def _handle_patrimony_list_goals(payload, session, *, user, now, user_id):
 
 def _handle_patrimony_add_goal(payload, session, *, user, now, user_id):
     data = SavingsGoalCreate.model_validate(payload)
-    row = create(session, SavingsGoal(**data.model_dump()))
-    accounts_by_id = {
-        account.id: account
-        for account in session.exec(select(Account)).all()
-        if account.id is not None
-    }
+    row = create(session, SavingsGoal(**data.model_dump(), user_id=user_id))
+    accounts_by_id = _scoped_accounts_by_id(session, user_id)
     return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
 
 
 def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
     row = session.get(SavingsGoal, goal_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("goal_id not found")
     patch = SavingsGoalUpdate.model_validate(
         {k: v for k, v in payload.items() if k != "goal_id"}
@@ -1819,18 +1844,14 @@ def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
         raise ValueError("No patrimony goal fields to update")
     apply_updates(row, updates, touch=True)
     row = save(session, row)
-    accounts_by_id = {
-        account.id: account
-        for account in session.exec(select(Account)).all()
-        if account.id is not None
-    }
+    accounts_by_id = _scoped_accounts_by_id(session, user_id)
     return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
 
 
 def _handle_patrimony_delete_goal(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
     row = session.get(SavingsGoal, goal_id)
-    if not row:
+    if not row or row.user_id != user_id:
         raise ValueError("goal_id not found")
     delete(session, row)
     return {"ok": True, "deleted_id": goal_id}
@@ -1920,13 +1941,18 @@ def _handle_pantry_overview(payload, session, *, user, now, user_id):
 
 def _handle_note_create(payload, session, *, user, now, user_id):
     data = NoteCreate.model_validate(payload)
-    note = create(session, Note(**data.model_dump()))
+    note = create(session, Note(**data.model_dump(), user_id=user_id))
     return {"note": note.model_dump(mode="json")}
 
 
 def _handle_note_list(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=300, minimum=1, maximum=1000)
-    statement = select(Note).order_by(Note.pinned.desc(), Note.updated_at.desc()).limit(limit)
+    statement = (
+        select(Note)
+        .where(Note.user_id == user_id)
+        .order_by(Note.pinned.desc(), Note.updated_at.desc())
+        .limit(limit)
+    )
     if payload.get("kind"):
         statement = statement.where(Note.kind == NoteKind(payload["kind"]))
     if payload.get("pinned") is not None:
@@ -1946,17 +1972,13 @@ def _handle_note_list(payload, session, *, user, now, user_id):
 
 def _handle_note_get(payload, session, *, user, now, user_id):
     note_id = _int_id(payload, "note_id")
-    note = session.get(Note, note_id)
-    if not note:
-        raise ValueError("note_id not found")
+    note = _get_owned_note(session, note_id, user_id)
     return {"note": note.model_dump(mode="json")}
 
 
 def _handle_note_update(payload, session, *, user, now, user_id):
     note_id = _int_id(payload, "note_id")
-    note = session.get(Note, note_id)
-    if not note:
-        raise ValueError("note_id not found")
+    note = _get_owned_note(session, note_id, user_id)
 
     patch = NoteUpdate.model_validate({k: v for k, v in payload.items() if k != "note_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1970,9 +1992,7 @@ def _handle_note_update(payload, session, *, user, now, user_id):
 
 def _handle_note_delete(payload, session, *, user, now, user_id):
     note_id = _int_id(payload, "note_id")
-    note = session.get(Note, note_id)
-    if not note:
-        raise ValueError("note_id not found")
+    note = _get_owned_note(session, note_id, user_id)
 
     delete(session, note)
     return {"ok": True, "deleted_id": note_id}
@@ -1980,7 +2000,12 @@ def _handle_note_delete(payload, session, *, user, now, user_id):
 
 def _handle_note_journal(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=1000)
-    statement = select(Note).where(Note.kind == NoteKind.JOURNAL).order_by(Note.created_at.desc()).limit(limit)
+    statement = (
+        select(Note)
+        .where(Note.kind == NoteKind.JOURNAL, Note.user_id == user_id)
+        .order_by(Note.created_at.desc())
+        .limit(limit)
+    )
     notes = session.exec(statement).all()
 
     from_date = _parse_date(payload.get("from_date"), "from_date")
@@ -1994,7 +2019,7 @@ def _handle_note_journal(payload, session, *, user, now, user_id):
 
 
 def _handle_dashboard_overview(payload, session, *, user, now, user_id):
-    return {"overview": build_dashboard_overview(session).model_dump(mode="json")}
+    return {"overview": build_dashboard_overview(session, user_id=user_id).model_dump(mode="json")}
 
 
 ACTION_CATALOG = [

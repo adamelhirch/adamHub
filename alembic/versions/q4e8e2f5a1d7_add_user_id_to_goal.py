@@ -9,7 +9,7 @@ backfilling existing NULL rows is a separate operational step
 (see scripts/backfill_owner_tenant.py).
 
 Revision ID: q4e8e2f5a1d7
-Revises: p7g9b2c4e6d8
+Revises: q8f2a4c6e1d3
 Create Date: 2026-08-18 09:00:00.000000
 """
 
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "q4e8e2f5a1d7"
-down_revision: Union[str, Sequence[str], None] = "p7g9b2c4e6d8"
+down_revision: Union[str, Sequence[str], None] = "q8f2a4c6e1d3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

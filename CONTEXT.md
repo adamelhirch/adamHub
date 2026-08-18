@@ -85,7 +85,7 @@ The user a multi-tenant request is scoped to: a signed-in SaaS user authenticate
 _Avoid_: Current user, requester, caller
 
 **Owner**:
-The single account the personal frontend always acts as; it is not a superuser role, just the one Tenant that pre-dates the SaaS pivot. The Owner is also the only caller allowed into the off-MVP domains (finances, tasks, calendar, …), which are not user-scoped — see ADR-0001.
+The single account the personal frontend always acts as; it is not a superuser role, just the one Tenant that pre-dates the SaaS pivot. The Owner is also the only caller allowed into the off-MVP domains (tasks, calendar, …), which are not user-scoped — see ADR-0001.
 _Avoid_: Admin, superuser, master account
 
 **Tenant**:

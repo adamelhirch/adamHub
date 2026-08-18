@@ -46,11 +46,13 @@ def test_per_user_api_key_reaches_mvp_routes(client, jwt_headers):
     assert client.get("/api/v1/supermarket/connections", headers=key_headers).status_code == 200
 
 
-def test_per_user_api_key_never_satisfies_owner_only_gate(client, jwt_headers):
+def test_per_user_api_key_reaches_scoped_domains_but_not_owner_only_gate(client, jwt_headers):
     raw_key = client.post("/api/v1/auth/api-key", headers=jwt_headers).json()["api_key"]
     key_headers = {"X-API-Key": raw_key}
 
-    assert client.get("/api/v1/finances/transactions", headers=key_headers).status_code == 401
+    # Tenant-scoped domains resolve the per-user key to its owner (finances was
+    # scoped in t1; tasks is still an unscoped Owner-only domain).
+    assert client.get("/api/v1/finances/transactions", headers=key_headers).status_code == 200
     assert client.get("/api/v1/tasks", headers=key_headers).status_code == 401
 
 

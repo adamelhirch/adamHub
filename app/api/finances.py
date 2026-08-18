@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
 from app.api._crud import create
-from app.api.deps import SessionDep, owner_only_user
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import Budget, FinanceTransaction, TransactionKind
 from app.schemas import (
     BudgetCreate,
@@ -15,12 +15,14 @@ from app.schemas import (
 )
 from app.services.life import build_month_summary
 
-router = APIRouter(prefix="/finances", tags=["finances"], dependencies=[Depends(owner_only_user)])
+router = APIRouter(prefix="/finances", tags=["finances"])
 
 
 @router.post("/transactions", response_model=FinanceTransactionRead)
-def create_transaction(payload: FinanceTransactionCreate, session: SessionDep) -> FinanceTransactionRead:
-    tx = FinanceTransaction(**payload.model_dump())
+def create_transaction(
+    payload: FinanceTransactionCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> FinanceTransactionRead:
+    tx = FinanceTransaction(**payload.model_dump(), user_id=user.id)
     if tx.occurred_at is None:
         tx.occurred_at = datetime.now(timezone.utc)
     tx = create(session, tx)
@@ -30,12 +32,18 @@ def create_transaction(payload: FinanceTransactionCreate, session: SessionDep) -
 @router.get("/transactions", response_model=list[FinanceTransactionRead])
 def list_transactions(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     kind: TransactionKind | None = None,
     year: int | None = Query(default=None, ge=2000, le=2100),
     month: int | None = Query(default=None, ge=1, le=12),
     limit: int = Query(default=100, ge=1, le=300),
 ) -> list[FinanceTransactionRead]:
-    statement = select(FinanceTransaction).order_by(FinanceTransaction.occurred_at.desc()).limit(limit)
+    statement = (
+        select(FinanceTransaction)
+        .where(FinanceTransaction.user_id == user.id)
+        .order_by(FinanceTransaction.occurred_at.desc())
+        .limit(limit)
+    )
     if kind:
         statement = statement.where(FinanceTransaction.kind == kind)
     if year and month:
@@ -54,17 +62,25 @@ def list_transactions(
 
 
 @router.post("/budgets", response_model=BudgetRead)
-def create_budget(payload: BudgetCreate, session: SessionDep) -> BudgetRead:
+def create_budget(
+    payload: BudgetCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> BudgetRead:
     if len(payload.month) != 7 or payload.month[4] != "-":
         raise HTTPException(status_code=400, detail="month must be in format YYYY-MM")
 
-    budget = create(session, Budget(**payload.model_dump()))
+    budget = create(session, Budget(**payload.model_dump(), user_id=user.id))
     return BudgetRead.model_validate(budget, from_attributes=True)
 
 
 @router.get("/budgets", response_model=list[BudgetRead])
-def list_budgets(session: SessionDep, month: str | None = None) -> list[BudgetRead]:
-    statement = select(Budget).order_by(Budget.month.desc(), Budget.category.asc())
+def list_budgets(
+    session: SessionDep, user: CurrentOrOwnerUser, month: str | None = None
+) -> list[BudgetRead]:
+    statement = (
+        select(Budget)
+        .where(Budget.user_id == user.id)
+        .order_by(Budget.month.desc(), Budget.category.asc())
+    )
     if month:
         statement = statement.where(Budget.month == month)
 
@@ -75,17 +91,19 @@ def list_budgets(session: SessionDep, month: str | None = None) -> list[BudgetRe
 @router.get("/summary", response_model=FinanceMonthSummary)
 def month_summary(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     year: int = Query(ge=2000, le=2100),
     month: int = Query(ge=1, le=12),
 ) -> FinanceMonthSummary:
-    return build_month_summary(session, year, month)
+    return build_month_summary(session, year, month, user_id=user.id)
 
 
 @router.get("/analytics", response_model=FinanceMonthSummary)
 def month_analytics_compat(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     year: int = Query(ge=2000, le=2100),
     month: int = Query(ge=1, le=12),
 ) -> FinanceMonthSummary:
     """Compatibility alias for older frontend clients."""
-    return build_month_summary(session, year, month)
+    return build_month_summary(session, year, month, user_id=user.id)

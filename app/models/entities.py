@@ -167,6 +167,7 @@ class Task(SQLModel, table=True):
 
 class FinanceTransaction(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL", index=True)
     kind: TransactionKind
     amount: float
     currency: str = Field(default="EUR", max_length=8)
@@ -179,6 +180,7 @@ class FinanceTransaction(SQLModel, table=True):
 
 class Budget(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL", index=True)
     month: str
     category: str
     monthly_limit: float
@@ -411,6 +413,7 @@ class PantryItem(SQLModel, table=True):
 
 class Note(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     title: str
     content: str
     kind: NoteKind = NoteKind.NOTE
@@ -601,6 +604,7 @@ class SupermarketCartItem(SQLModel, table=True):
 
 class Account(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     account_type: AccountType = AccountType.SAVINGS
     balance: float = 0.0
@@ -614,6 +618,7 @@ class Account(SQLModel, table=True):
 
 class SavingsGoal(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     title: str
     target_amount: float
     current_amount: float = 0.0
