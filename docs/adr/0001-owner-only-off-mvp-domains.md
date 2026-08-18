@@ -79,6 +79,18 @@ are scoped the same way. A non-Owner JWT now reaches `/subscriptions` and
 sees only its own subscriptions; cross-tenant subscriptions are 404. This
 ADR still governs the other off-MVP domains (tasks, events, habits, notes, …).
 
+## Superseded for events (2026-08-18)
+
+`events` is now tenant-scoped (`user_id` on `calendarevent`, additive
+migration `r5a8c1e4f7b2`, backfill via `scripts/backfill_owner_tenant.py`)
+and its router uses `CurrentOrOwnerUser` per route instead of the
+router-level `owner_only_user` gate. The `event.*` skill handlers scope the
+same way. This scopes the `CalendarEvent` table only — the calendar domain's
+`CalendarItem` (and `app/services/calendar_hub.py`) stays shared and
+un-scoped. A non-Owner JWT now reaches `/events` and sees only its own
+events; cross-tenant events are 404. This ADR still governs the other
+off-MVP domains (tasks, habits, notes, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own

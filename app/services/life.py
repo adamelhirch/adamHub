@@ -251,7 +251,12 @@ def build_dashboard_overview(session: Session, *, user_id: int | None = None) ->
     )
 
 
-def list_upcoming_events(session: Session, days: int = 7, event_type: EventType | None = None) -> list[CalendarEvent]:
+def list_upcoming_events(
+    session: Session,
+    days: int = 7,
+    event_type: EventType | None = None,
+    user_id: int | None = None,
+) -> list[CalendarEvent]:
     now = datetime.now(timezone.utc)
     until = now + timedelta(days=days)
     statement = (
@@ -259,6 +264,8 @@ def list_upcoming_events(session: Session, days: int = 7, event_type: EventType 
         .where(CalendarEvent.start_at >= now, CalendarEvent.start_at <= until)
         .order_by(CalendarEvent.start_at.asc())
     )
+    if user_id is not None:
+        statement = statement.where(CalendarEvent.user_id == user_id)
     if event_type:
         statement = statement.where(CalendarEvent.type == event_type)
     return session.exec(statement).all()

@@ -3,9 +3,10 @@
 
 After the additive multi-tenant migrations (user_id on groceryitem/pantryitem/
 recipe/mealplan/note/account/savingsgoal/financetransaction/budget/goal/
-subscription), pre-existing rows have user_id = NULL and are invisible to
-everyone. This script claims them for the account whose email is given with
---email (which must already exist — register it first via POST /auth/register).
+subscription/calendarevent), pre-existing rows have user_id = NULL and are
+invisible to everyone. This script claims them for the account whose email
+is given with --email (which must already exist — register it first via
+POST /auth/register).
 
 Default is a dry run that only prints how many NULL rows exist per table.
 Pass --commit to actually set user_id on those rows inside a transaction.
@@ -29,6 +30,7 @@ from app.core.db import engine
 from app.models import (
     Account,
     Budget,
+    CalendarEvent,
     FinanceTransaction,
     Goal,
     GroceryItem,
@@ -53,6 +55,7 @@ BACKFILL_MODELS = [
     Budget,
     Goal,
     Subscription,
+    CalendarEvent,
 ]
 
 
