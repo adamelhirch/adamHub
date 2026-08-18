@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from sqlmodel import Session, select
 
-from app.models import GroceryItem, MealPlan, PantryItem, Recipe
+from app.models import Goal, GoalMilestone, GroceryItem, MealPlan, PantryItem, Recipe
 
 from tests.conftest import OWNER_EMAIL, register_user
 
@@ -18,6 +18,12 @@ def _create_recipe_for(client, headers, name="Poulet", servings=1) -> int:
         headers=headers,
         json={"name": name, "instructions": "Cuire", "servings": servings},
     )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _create_goal_for(client, headers, title="Apprendre le piano") -> int:
+    response = client.post("/api/v1/goals", headers=headers, json={"title": title})
     assert response.status_code == 200, response.text
     return response.json()["id"]
 
@@ -38,10 +44,13 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     assert meal_plan.status_code == 200, meal_plan.text
     meal_plan_id = meal_plan.json()["id"]
 
+    goal_id = client.post("/api/v1/goals", headers=jwt_headers, json={"title": "Courir un 10 km"}).json()["id"]
+
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
     assert _db_user_id(test_engine, Recipe, recipe_id) == user["id"]
     assert _db_user_id(test_engine, MealPlan, meal_plan_id) == user["id"]
+    assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
 
 def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
@@ -70,6 +79,13 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
 
+    goal_id = client.post(
+        "/api/v1/goals",
+        headers=jwt_headers,
+        json={"title": "Lire 12 livres", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
+
 
 def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_headers):
     user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
@@ -84,6 +100,15 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     assert updated.status_code == 200
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
 
+    goal_id = _create_goal_for(client, jwt_headers, title="Gravir un sommet")
+    patched_goal = client.patch(
+        f"/api/v1/goals/{goal_id}",
+        headers=jwt_headers,
+        json={"progress_percent": 50, "user_id": other["id"]},
+    )
+    assert patched_goal.status_code == 200
+    assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
+
 
 # ── Cross-user access is 404 everywhere (no existence leak) ──────────────────
 
@@ -96,11 +121,20 @@ def _seed_resources_as_user_a(client, headers):
         headers=headers,
         json={"planned_for": date.today().isoformat(), "slot": "dinner", "recipe_id": recipe_id, "auto_add_missing_ingredients": False},
     )
+    goal_id = _create_goal_for(client, headers, title="Objectif secret de A")
+    milestone = client.post(
+        f"/api/v1/goals/{goal_id}/milestones",
+        headers=headers,
+        json={"title": "Premiere etape"},
+    )
+    assert milestone.status_code == 200, milestone.text
     return {
         "grocery": grocery_id,
         "pantry": pantry_id,
         "recipe": recipe_id,
         "meal_plan": meal_plan.json()["id"],
+        "goal": goal_id,
+        "milestone": milestone.json()["id"],
     }
 
 
@@ -113,12 +147,15 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get(f"/api/v1/pantry/items/{ids['pantry']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"]).status_code == 404
 
     # Lists only expose the caller's own rows.
     assert client.get("/api/v1/groceries", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/pantry/items", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/recipes", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/meal-plans", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/goals", headers=user_b["headers"]).json() == []
 
 
 def test_user_cannot_modify_another_users_resources(client, jwt_headers):
@@ -130,6 +167,15 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(f"/api/v1/pantry/items/{ids['pantry']}", headers=user_b["headers"], json={"quantity": 0}).status_code == 404
     assert client.patch(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"], json={"note": "Hacked"}).status_code == 404
+    assert client.patch(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
+    assert (
+        client.patch(
+            f"/api/v1/goals/{ids['goal']}/milestones/{ids['milestone']}",
+            headers=user_b["headers"],
+            json={"completed": True},
+        ).status_code
+        == 404
+    )
 
 
 def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_headers):
@@ -148,6 +194,7 @@ def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_header
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/sync-groceries", headers=user_b["headers"]).status_code == 404
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/confirm-cooked", headers=user_b["headers"], json={}).status_code == 404
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/unconfirm-cooked", headers=user_b["headers"]).status_code == 404
+    assert client.post(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"], json={"title": "Intrusion"}).status_code == 404
 
 
 # ── Legacy API-key path resolves to the owner user ───────────────────────────
@@ -289,6 +336,60 @@ def test_meal_plan_not_blocked_by_unrelated_event_at_same_time(client, auth_head
     assert meal_plan.status_code == 200, meal_plan.text
 
 
+# ── Skill goal.* actions are scoped to the acting user ───────────────────────
+
+def test_skill_goal_actions_scoped_to_acting_user(client, test_engine):
+    from sqlmodel import Session
+
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-goal-a@adamelhirch.com")
+    intruder = register_user(client, "skill-goal-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action("goal.create", {"title": "Objectif A"}, session, user=owner_user)
+        goal_id = created["goal"]["id"]
+        assert created["goal"]["status"] == "planned"
+
+        # The intruder's list never sees owner A's goal.
+        assert execute_action("goal.list", {}, session, user=intruder_user)["goals"] == []
+
+        # Direct access to the other user's goal fails without leaking existence.
+        for action, payload in [
+            ("goal.get", {"goal_id": goal_id}),
+            ("goal.update", {"goal_id": goal_id, "title": "Hacked"}),
+            ("goal.add_milestone", {"goal_id": goal_id, "title": "Intrusion"}),
+            ("goal.list_milestones", {"goal_id": goal_id}),
+            ("goal.update_milestone", {"goal_id": goal_id, "milestone_id": 1, "completed": True}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: get, update, milestone lifecycle.
+        got = execute_action("goal.get", {"goal_id": goal_id}, session, user=owner_user)
+        assert got["goal"]["id"] == goal_id
+        execute_action("goal.update", {"goal_id": goal_id, "progress_percent": 25}, session, user=owner_user)
+        milestone = execute_action(
+            "goal.add_milestone", {"goal_id": goal_id, "title": "Etape 1"}, session, user=owner_user
+        )
+        milestone_id = milestone["milestone"]["id"]
+        execute_action(
+            "goal.update_milestone",
+            {"goal_id": goal_id, "milestone_id": milestone_id, "completed": True},
+            session,
+            user=owner_user,
+        )
+        milestones = execute_action("goal.list_milestones", {"goal_id": goal_id}, session, user=owner_user)
+        assert milestones["milestones"][0]["completed"] is True
+
+
 # ── Supermarket connection ownership (#58) ───────────────────────────────────
 
 def _import_connection(client, headers, label="Mon drive", store="intermarche") -> int:
@@ -376,6 +477,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(recipe)
         session.flush()
         session.add(MealPlan(recipe_id=recipe.id, user_id=None))
+        goal = Goal(title="Lire 20 livres", user_id=None)
+        session.add(goal)
+        session.flush()
+        session.add(GoalMilestone(goal_id=goal.id, title="Premier livre"))
         session.commit()
 
     with Session(test_engine) as session:
@@ -384,36 +489,40 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "pantryitem": 1,
             "recipe": 1,
             "mealplan": 1,
+            "goal": 1,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
-        assert dry["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0}
+        assert dry["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0, "goal": 0}
         assert count_null_rows(session) == {
             "groceryitem": 2,
             "pantryitem": 1,
             "recipe": 1,
             "mealplan": 1,
+            "goal": 1,
         }
 
     with Session(test_engine) as session:
         committed = backfill(session, owner_id, commit=True)
         assert committed["commit"] is True
-        assert committed["updated"] == {"groceryitem": 2, "pantryitem": 1, "recipe": 1, "mealplan": 1}
+        assert committed["updated"] == {"groceryitem": 2, "pantryitem": 1, "recipe": 1, "mealplan": 1, "goal": 1}
         assert count_null_rows(session) == {
             "groceryitem": 0,
             "pantryitem": 0,
             "recipe": 0,
             "mealplan": 0,
+            "goal": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
     with Session(test_engine) as session:
         again = backfill(session, owner_id, commit=True)
-        assert again["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0}
+        assert again["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0, "goal": 0}
 
     # The claimed rows now belong to the owner and show up for the owner.
     with Session(test_engine) as session:
         assert session.exec(select(GroceryItem)).all()[0].user_id == owner_id
+        assert session.exec(select(Goal)).all()[0].user_id == owner_id
 
 
 def test_backfill_rejects_unknown_owner(client, test_engine):
