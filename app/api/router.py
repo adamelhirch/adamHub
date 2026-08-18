@@ -9,7 +9,6 @@ from app.api.finances import router as finances_router
 from app.api.goals import router as goals_router
 from app.api.groceries import router as groceries_router
 from app.api.habits import router as habits_router
-from app.api.linear_hub import router as linear_router
 from app.api.meal_plans import router as meal_plans_router
 from app.api.notes import router as notes_router
 from app.api.pantry import router as pantry_router
@@ -38,7 +37,6 @@ api_router.include_router(subscriptions_router)
 api_router.include_router(pantry_router)
 api_router.include_router(patrimony_router)
 api_router.include_router(notes_router)
-api_router.include_router(linear_router)
 api_router.include_router(skill_router)
 api_router.include_router(supermarket_router)
 api_router.include_router(video_router)

@@ -59,7 +59,6 @@ from app.schemas.goals import (
 )
 from app.schemas.groceries import GroceryItemCreate, GroceryItemRead, GroceryItemUpdate
 from app.schemas.habits import HabitCreate, HabitLogCreate, HabitLogRead, HabitRead, HabitUpdate
-from app.schemas.linear import LinearIssueCreate, LinearIssueRead, LinearProjectRead, LinearSyncResult
 from app.schemas.meal_planning import (
     MealPlanCreate,
     MealPlanConfirmCooked,
@@ -156,10 +155,6 @@ __all__ = [
     "HabitLogRead",
     "HabitRead",
     "HabitUpdate",
-    "LinearIssueCreate",
-    "LinearIssueRead",
-    "LinearProjectRead",
-    "LinearSyncResult",
     "MealPlanCreate",
     "MealPlanConfirmCooked",
     "MealPlanConfirmResult",

@@ -440,31 +440,6 @@ class CalendarItem(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
-class LinearProjectCache(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    linear_id: str = Field(index=True)
-    name: str
-    key: str | None = None
-    state: str | None = None
-    description: str | None = None
-    url: str | None = None
-    synced_at: datetime = Field(default_factory=utcnow)
-
-
-class LinearIssueCache(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    linear_id: str = Field(index=True)
-    identifier: str | None = Field(default=None, index=True)
-    title: str
-    state: str | None = None
-    priority: int | None = None
-    due_date: date | None = None
-    assignee_name: str | None = None
-    project_linear_id: str | None = Field(default=None, index=True)
-    url: str | None = None
-    synced_at: datetime = Field(default_factory=utcnow)
-
-
 class SupermarketProduct(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str

@@ -4,7 +4,7 @@ description: >-
   Master skill for piloting AdamHUB as one coherent personal-life system —
   tasks, finances, patrimony, groceries/supermarket search and cart, pantry,
   recipes, meal planning, calendar, fitness, habits, goals, subscriptions,
-  notes, video-to-recipe intake, and Linear — via the unified skill API
+  notes, and video-to-recipe intake — via the unified skill API
   (GET /api/v1/skill/manifest, POST /api/v1/skill/execute). Use whenever an
   AI assistant needs to read or write AdamHUB data on the user's behalf.
 ---
@@ -18,7 +18,7 @@ The source of truth is always the live manifest returned by:
 - `GET /api/v1/skill/manifest`
 
 <!-- BEGIN GENERATED: action-count (source: app/skill/actions.py ACTION_CATALOG) -->
-As of `2026-08-14`, the skill surface exposes `108` actions.
+As of `2026-08-18`, the skill surface exposes `104` actions.
 <!-- END GENERATED: action-count -->
 
 ## 1) Runtime contract
@@ -105,7 +105,6 @@ Never perform destructive writes on implicit intent.
 - subscriptions -> `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
 - notes -> `note.create|note.list|note.get|note.update|note.delete|note.journal`
 - video ingestion -> `video.fetch`
-- linear -> `linear.sync|linear.projects|linear.issues|linear.issue_create`
 
 ## 7) Domain rules you must respect
 
@@ -288,6 +287,5 @@ After a read:
 - `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
 - `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
 - `note.create|note.list|note.get|note.update|note.delete|note.journal`
-- `linear.projects|linear.issues|linear.issue_create|linear.sync`
 - `dashboard.overview`
 <!-- END GENERATED: action-index -->

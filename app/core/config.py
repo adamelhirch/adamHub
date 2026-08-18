@@ -58,9 +58,6 @@ class Settings(BaseSettings):
     ntfy_topic: str | None = None
     ntfy_server: str = "https://ntfy.sh"
 
-    linear_api_token: str | None = None
-    linear_team_id: str | None = None
-
     # Email verification via Resend. Without ADAMHUB_RESEND_API_KEY (dev/test)
     # sending is a logged no-op and registration is never blocked.
     resend_api_key: str | None = None

@@ -24,8 +24,6 @@ from app.models import (
     Habit,
     HabitFrequency,
     HabitLog,
-    LinearIssueCache,
-    LinearProjectCache,
     MealPlan,
     MealPlanCookConfirmation,
     MealSlot,
@@ -68,7 +66,6 @@ from app.schemas import (
     GroceryItemUpdate,
     HabitCreate,
     HabitUpdate,
-    LinearIssueCreate,
     MealPlanCreate,
     MealPlanUpdate,
     NoteCreate,
@@ -98,13 +95,6 @@ from app.services.life import (
     list_upcoming_events,
     list_upcoming_subscriptions,
     update_habit_streak,
-)
-from app.services.linear_hub import (
-    LinearIntegrationError,
-    create_issue as create_linear_issue_live,
-    fetch_issues as fetch_linear_issues_live,
-    fetch_projects as fetch_linear_projects_live,
-    sync_linear_cache,
 )
 from app.services.cook import (
     confirm_meal_plan_cooked,
@@ -2001,97 +1991,6 @@ def _handle_note_journal(payload, session, *, user, now, user_id):
     return {"notes": [note.model_dump(mode="json") for note in notes]}
 
 
-def _handle_linear_projects(payload, session, *, user, now, user_id):
-    source = str(payload.get("source", "cache")).lower()
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=500)
-    if source == "live":
-        try:
-            projects = fetch_linear_projects_live()[:limit]
-        except LinearIntegrationError as exc:
-            raise ValueError(str(exc)) from exc
-        return {"projects": [item.model_dump(mode="json") for item in projects]}
-
-    rows = session.exec(select(LinearProjectCache).order_by(LinearProjectCache.name.asc()).limit(limit)).all()
-    return {
-        "projects": [
-            {
-                "id": row.linear_id,
-                "name": row.name,
-                "key": row.key,
-                "state": row.state,
-                "description": row.description,
-                "url": row.url,
-            }
-            for row in rows
-        ]
-    }
-
-
-def _handle_linear_issues(payload, session, *, user, now, user_id):
-    source = str(payload.get("source", "cache")).lower()
-    project_id = payload.get("project_id")
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=500)
-    if source == "live":
-        try:
-            issues = fetch_linear_issues_live(project_id=project_id, limit=limit)
-        except LinearIntegrationError as exc:
-            raise ValueError(str(exc)) from exc
-        return {"issues": [item.model_dump(mode="json") for item in issues]}
-
-    statement = select(LinearIssueCache).order_by(LinearIssueCache.synced_at.desc()).limit(limit)
-    if project_id:
-        statement = statement.where(LinearIssueCache.project_linear_id == project_id)
-    rows = session.exec(statement).all()
-    return {
-        "issues": [
-            {
-                "id": row.linear_id,
-                "identifier": row.identifier,
-                "title": row.title,
-                "state": row.state,
-                "priority": row.priority,
-                "due_date": row.due_date.isoformat() if row.due_date else None,
-                "assignee_name": row.assignee_name,
-                "project_id": row.project_linear_id,
-                "url": row.url,
-            }
-            for row in rows
-        ]
-    }
-
-
-def _handle_linear_issue_create(payload, session, *, user, now, user_id):
-    data = LinearIssueCreate.model_validate(payload)
-    try:
-        issue = create_linear_issue_live(data)
-    except LinearIntegrationError as exc:
-        raise ValueError(str(exc)) from exc
-    cache_row = LinearIssueCache(
-        linear_id=issue.id,
-        identifier=issue.identifier,
-        title=issue.title,
-        state=issue.state,
-        priority=issue.priority,
-        due_date=issue.due_date,
-        assignee_name=issue.assignee_name,
-        project_linear_id=issue.project_id,
-        url=issue.url,
-        synced_at=now,
-    )
-    session.add(cache_row)
-    session.commit()
-    return {"issue": issue.model_dump(mode="json")}
-
-
-def _handle_linear_sync(payload, session, *, user, now, user_id):
-    project_id = payload.get("project_id")
-    try:
-        projects, issues = sync_linear_cache(session, project_id=project_id)
-    except LinearIntegrationError as exc:
-        raise ValueError(str(exc)) from exc
-    return {"projects": projects, "issues": issues, "synced_at": now.isoformat()}
-
-
 def _handle_dashboard_overview(payload, session, *, user, now, user_id):
     return {"overview": build_dashboard_overview(session).model_dump(mode="json")}
 
@@ -2201,10 +2100,6 @@ ACTION_CATALOG = [
     {"action": "note.update", "description": "Update note", "input_schema": {"note_id": "int", "title": "string?", "content": "string?", "kind": "note|journal|idea?", "tags": "string[]?", "pinned": "bool?", "mood": "1..10?"}, "handler": _handle_note_update},
     {"action": "note.delete", "description": "Delete note", "input_schema": {"note_id": "int"}, "handler": _handle_note_delete},
     {"action": "note.journal", "description": "List journal entries", "input_schema": {"from_date": "YYYY-MM-DD?", "to_date": "YYYY-MM-DD?", "limit": "int?"}, "handler": _handle_note_journal},
-    {"action": "linear.projects", "description": "List Linear projects", "input_schema": {"source": "cache|live?", "limit": "int?"}, "handler": _handle_linear_projects},
-    {"action": "linear.issues", "description": "List Linear issues", "input_schema": {"project_id": "string?", "source": "cache|live?", "limit": "int?"}, "handler": _handle_linear_issues},
-    {"action": "linear.issue_create", "description": "Create a Linear issue", "input_schema": {"title": "string", "description": "string?", "project_id": "string?", "team_id": "string?", "priority": "0..4?", "assignee_id": "string?", "due_date": "YYYY-MM-DD?"}, "handler": _handle_linear_issue_create},
-    {"action": "linear.sync", "description": "Sync Linear projects/issues into local cache", "input_schema": {"project_id": "string?"}, "handler": _handle_linear_sync},
     {"action": "dashboard.overview", "description": "Return current productivity and life overview", "input_schema": {}, "handler": _handle_dashboard_overview},
 ]
 
