@@ -15,7 +15,9 @@ import {
 const $ = (sel) => document.querySelector(sel);
 const statusEl = $("#status");
 const authPrompt = $("#auth-prompt");
+const accountInfo = $("#account-info");
 const accountBadge = $("#account-badge");
+const switchAccountBtn = $("#switch-account");
 const syncPanel = $("#sync-panel");
 const syncNowBtn = $("#sync-now");
 const openHubBtn = $("#open-hub");
@@ -92,21 +94,21 @@ async function fetchAccount(token) {
 async function refreshAccountBadge() {
   const token = await resolveToken();
   if (!token) {
-    accountBadge.classList.add("hidden");
+    accountInfo.classList.add("hidden");
     syncPanel.classList.add("hidden");
     showAuthPrompt(true);
     return false;
   }
   const account = await fetchAccount(token);
   if (!account) {
-    accountBadge.classList.add("hidden");
+    accountInfo.classList.add("hidden");
     syncPanel.classList.add("hidden");
     showAuthPrompt(true);
     await auth.clearToken();
     return false;
   }
   accountBadge.textContent = account.display_name;
-  accountBadge.classList.remove("hidden");
+  accountInfo.classList.remove("hidden");
   syncPanel.classList.remove("hidden");
   showAuthPrompt(false);
   return true;
@@ -182,6 +184,28 @@ async function runSyncNow() {
   }
 }
 
+async function handleSwitchAccount() {
+  // resolveToken() only re-scans open AdamHUB tabs when there is no cached
+  // token (cache-first, by design — see lib/auth.js); clearing it here is
+  // the only way to pick up a different account without waiting for a 401.
+  hideStatus();
+  switchAccountBtn.disabled = true;
+  try {
+    await auth.clearToken();
+    const ok = await refreshAccountBadge();
+    await refreshConnectionStatus();
+    if (ok) {
+      showStatus("success", `✓ Compte actif : ${accountBadge.textContent}.`);
+    } else {
+      showStatus("info", "Ouvre AdamHUB dans un onglet, connecté au compte voulu, puis réessaie.");
+    }
+  } catch (err) {
+    showStatus("error", `✗ ${err.message ?? err}`);
+  } finally {
+    switchAccountBtn.disabled = false;
+  }
+}
+
 function bindEventListeners() {
   openHubBtn.addEventListener("click", async () => {
     try {
@@ -192,6 +216,9 @@ function bindEventListeners() {
   });
   syncNowBtn.addEventListener("click", () => {
     void runSyncNow();
+  });
+  switchAccountBtn.addEventListener("click", () => {
+    void handleSwitchAccount();
   });
 }
 
