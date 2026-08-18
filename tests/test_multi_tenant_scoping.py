@@ -14,6 +14,7 @@ from app.models import (
     PantryItem,
     Recipe,
     SavingsGoal,
+    Subscription,
     TransactionKind,
 )
 
@@ -51,6 +52,30 @@ def _create_goal_for(client, headers, title="Apprendre le piano") -> int:
     return response.json()["id"]
 
 
+def _create_subscription_for(
+    client,
+    headers,
+    name="Netflix",
+    amount=12.99,
+    next_due_date: date | None = None,
+) -> int:
+    """Create one subscription via the API, defaulting to a date 10 days out."""
+    if next_due_date is None:
+        next_due_date = date.today() + timedelta(days=10)
+    response = client.post(
+        "/api/v1/subscriptions",
+        headers=headers,
+        json={
+            "name": name,
+            "amount": amount,
+            "next_due_date": next_due_date.isoformat(),
+            "interval": "monthly",
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
 # ── Create auto-scopes to the authenticated user; client can't override ──────
 
 def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_headers, owner_headers):
@@ -68,6 +93,7 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     meal_plan_id = meal_plan.json()["id"]
     note_id = _create_note_for(client, jwt_headers)
     goal_id = _create_goal_for(client, jwt_headers, title="Courir un 10 km")
+    subscription_id = _create_subscription_for(client, jwt_headers, name="Apple One")
 
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
@@ -75,6 +101,7 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     assert _db_user_id(test_engine, MealPlan, meal_plan_id) == user["id"]
     assert _db_user_id(test_engine, Note, note_id) == user["id"]
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
+    assert _db_user_id(test_engine, Subscription, subscription_id) == user["id"]
 
 
 def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
@@ -117,6 +144,19 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
+    subscription_id = client.post(
+        "/api/v1/subscriptions",
+        headers=jwt_headers,
+        json={
+            "name": "Netflix",
+            "amount": 12.99,
+            "next_due_date": (date.today() + timedelta(days=15)).isoformat(),
+            "interval": "monthly",
+            "user_id": other["id"],
+        },
+    ).json()["id"]
+    assert _db_user_id(test_engine, Subscription, subscription_id) == user["id"]
+
 
 def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_headers):
     user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
@@ -140,6 +180,15 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     assert patched_goal.status_code == 200
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
+    subscription_id = _create_subscription_for(client, jwt_headers, name="Preview")
+    patched_subscription = client.patch(
+        f"/api/v1/subscriptions/{subscription_id}",
+        headers=jwt_headers,
+        json={"amount": 20.0, "user_id": other["id"]},
+    )
+    assert patched_subscription.status_code == 200
+    assert _db_user_id(test_engine, Subscription, subscription_id) == user["id"]
+
 
 # ── Cross-user access is 404 everywhere (no existence leak) ──────────────────
 
@@ -155,6 +204,9 @@ def _seed_resources_as_user_a(client, headers):
     note_id = _create_note_for(client, headers, title="Note privée")
     journal_id = _create_note_for(client, headers, title="Journal privé", kind="journal")
     goal_id = _create_goal_for(client, headers, title="Objectif secret de A")
+    subscription_id = _create_subscription_for(
+        client, headers, name="Abonnement privé de A", next_due_date=date.today() + timedelta(days=10)
+    )
     milestone = client.post(
         f"/api/v1/goals/{goal_id}/milestones",
         headers=headers,
@@ -170,6 +222,7 @@ def _seed_resources_as_user_a(client, headers):
         "journal": journal_id,
         "goal": goal_id,
         "milestone": milestone.json()["id"],
+        "subscription": subscription_id,
     }
 
 
@@ -186,6 +239,7 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get(f"/api/v1/notes/{ids['journal']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/subscriptions/{ids['subscription']}", headers=user_b["headers"]).status_code == 404
 
     # Lists only expose the caller's own rows (journal included).
     assert client.get("/api/v1/groceries", headers=user_b["headers"]).json() == []
@@ -195,6 +249,9 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get("/api/v1/notes", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/notes/journal", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/goals", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions/upcoming", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions/projection", headers=user_b["headers"]).json()["monthly_total"] == 0.0
 
 
 def test_user_cannot_modify_another_users_resources(client, jwt_headers):
@@ -207,6 +264,7 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"], json={"note": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
+    assert client.patch(f"/api/v1/subscriptions/{ids['subscription']}", headers=user_b["headers"], json={"amount": 0.01}).status_code == 404
     assert client.patch(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
     assert (
         client.patch(
@@ -253,12 +311,16 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     meal_plan_id = meal_plan.json()["id"]
     note_id = _create_note_for(client, auth_headers, title="Note legacy")
     goal_id = _create_goal_for(client, auth_headers, title="Objectif legacy")
+    subscription_id = _create_subscription_for(
+        client, auth_headers, name="Abonnement legacy", next_due_date=date.today() + timedelta(days=14)
+    )
 
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
     assert [i["id"] for i in client.get("/api/v1/meal-plans", headers=owner_headers).json()] == [meal_plan_id]
     assert [n["id"] for n in client.get("/api/v1/notes", headers=owner_headers).json()] == [note_id]
     assert [g["id"] for g in client.get("/api/v1/goals", headers=owner_headers).json()] == [goal_id]
+    assert [s["id"] for s in client.get("/api/v1/subscriptions", headers=owner_headers).json()] == [subscription_id]
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
@@ -266,6 +328,7 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     assert client.get("/api/v1/meal-plans", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/notes", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/goals", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions", headers=stranger["headers"]).json() == []
 
 
 def test_legacy_api_key_requires_owner_email_config(client, test_engine, auth_headers, monkeypatch):
@@ -437,6 +500,58 @@ def test_skill_goal_actions_scoped_to_acting_user(client, test_engine):
         assert milestones["milestones"][0]["completed"] is True
 
 
+# ── Skill subscription.* actions are scoped to the acting user ──────────────
+
+def test_skill_subscription_actions_scoped_to_acting_user(client, test_engine):
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-sub-a@adamelhirch.com")
+    intruder = register_user(client, "skill-sub-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action(
+            "subscription.create",
+            {"name": "Netflix", "amount": 12.99, "next_due_date": (date.today() + timedelta(days=3)).isoformat()},
+            session,
+            user=owner_user,
+        )
+        sub_id = created["subscription"]["id"]
+
+        # The intruder's lists/upcoming/projection never see owner A's rows.
+        assert execute_action("subscription.list", {}, session, user=intruder_user)["subscriptions"] == []
+        assert execute_action("subscription.upcoming", {"days": 30}, session, user=intruder_user)["subscriptions"] == []
+        assert (
+            execute_action("subscription.projection", {}, session, user=intruder_user)["projection"]["monthly_total"]
+            == 0.0
+        )
+
+        # Direct access to the other user's subscription fails without leaking existence.
+        for action, payload in [
+            ("subscription.get", {"subscription_id": sub_id}),
+            ("subscription.update", {"subscription_id": sub_id, "amount": 0.01}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: get, update, list, upcoming, projection.
+        got = execute_action("subscription.get", {"subscription_id": sub_id}, session, user=owner_user)
+        assert got["subscription"]["id"] == sub_id
+        execute_action("subscription.update", {"subscription_id": sub_id, "amount": 20.0}, session, user=owner_user)
+        listed = execute_action("subscription.list", {}, session, user=owner_user)["subscriptions"]
+        assert [s["id"] for s in listed] == [sub_id]
+        upcoming = execute_action("subscription.upcoming", {"days": 30}, session, user=owner_user)["subscriptions"]
+        assert [s["id"] for s in upcoming] == [sub_id]
+        projection = execute_action("subscription.projection", {}, session, user=owner_user)["projection"]
+        assert projection["monthly_total"] == 20.0
+
+
 # ── Supermarket connection ownership (#58) ───────────────────────────────────
 
 def _import_connection(client, headers, label="Mon drive", store="intermarche") -> int:
@@ -526,6 +641,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(MealPlan(recipe_id=recipe.id, user_id=None))
         session.add(Note(title="Note legacy", content="Contenu", user_id=None))
         session.add(Account(name="Livret A", user_id=None))
+        session.add(
+            Subscription(
+                name="Apple One",
+                amount=4.99,
+                currency="EUR",
+                next_due_date=date.today() + timedelta(days=25),
+                user_id=None,
+            )
+        )
         goal = SavingsGoal(title="Voyage", target_amount=5000.0, current_amount=1000.0, user_id=None)
         session.add(goal)
         hiking_goal = Goal(title="Gravir l'Everest", user_id=None)
@@ -544,6 +668,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "subscription": 1,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -558,6 +683,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "subscription": 0,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -570,6 +696,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "subscription": 1,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -586,6 +713,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "subscription": 1,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -598,6 +726,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "subscription": 0,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -614,6 +743,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "subscription": 0,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -630,6 +760,41 @@ def test_backfill_rejects_unknown_owner(client, test_engine):
     with Session(test_engine) as session:
         assert resolve_owner(session, "does-not-exist@adamelhirch.com") is None
         assert resolve_owner(session, OWNER_EMAIL) is not None
+
+
+def test_backfill_claims_subscription_rows_for_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        sub = Subscription(
+            name="Legacy SaaS",
+            amount=9.99,
+            currency="EUR",
+            next_due_date=date.today() + timedelta(days=20),
+            user_id=None,
+        )
+        session.add(sub)
+        session.commit()
+        legacy_id = sub.id
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/subscriptions", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        result = backfill(session, owner_id, commit=True)
+    assert result["commit"] is True
+    assert result["updated"]["subscription"] == 1
+
+    # After backfill the owner finds their rows again via both auth paths;
+    # a non-owner JWT user still cannot see or touch them.
+    assert [s["id"] for s in client.get("/api/v1/subscriptions", headers=auth_headers).json()] == [legacy_id]
+    assert [s["id"] for s in client.get("/api/v1/subscriptions", headers=owner_headers).json()] == [legacy_id]
+    stranger = register_user(client, "subscription-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/subscriptions", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions/upcoming", headers=stranger["headers"]).json() == []
+    assert client.patch(
+        f"/api/v1/subscriptions/{legacy_id}", headers=stranger["headers"], json={"amount": 0}
+    ).status_code == 404
 
 
 # ── Finance scoping: transactions & budgets (t1) ─────────────────────────────
