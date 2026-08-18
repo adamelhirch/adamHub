@@ -2,9 +2,10 @@
 """One-off operational backfill: assign legacy NULL-user rows to the owner tenant.
 
 After the additive multi-tenant migration (user_id on groceryitem/pantryitem/
-recipe/mealplan), pre-existing rows have user_id = NULL and are invisible to
-everyone. This script claims them for the account whose email is given with
---email (which must already exist — register it first via POST /auth/register).
+recipe/mealplan/goal), pre-existing rows have user_id = NULL and are invisible
+to everyone. This script claims them for the account whose email is given
+with --email (which must already exist — register it first via POST
+/auth/register).
 
 Default is a dry run that only prints how many NULL rows exist per table.
 Pass --commit to actually set user_id on those rows inside a transaction.
@@ -25,9 +26,9 @@ from sqlmodel import Session, func, select, update
 
 from app.core.config import get_settings  # noqa: F401  (loads .env)
 from app.core.db import engine
-from app.models import GroceryItem, MealPlan, PantryItem, Recipe, User
+from app.models import Goal, GroceryItem, MealPlan, PantryItem, Recipe, User
 
-BACKFILL_MODELS = [GroceryItem, PantryItem, Recipe, MealPlan]
+BACKFILL_MODELS = [GroceryItem, PantryItem, Recipe, MealPlan, Goal]
 
 
 def count_null_rows(session: Session) -> dict[str, int]:
