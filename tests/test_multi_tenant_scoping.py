@@ -6,6 +6,8 @@ from app.models import (
     Account,
     Budget,
     FinanceTransaction,
+    Goal,
+    GoalMilestone,
     GroceryItem,
     MealPlan,
     Note,
@@ -43,6 +45,12 @@ def _create_note_for(client, headers, title="Note", kind="note") -> int:
     return response.json()["id"]
 
 
+def _create_goal_for(client, headers, title="Apprendre le piano") -> int:
+    response = client.post("/api/v1/goals", headers=headers, json={"title": title})
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
 # ── Create auto-scopes to the authenticated user; client can't override ──────
 
 def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_headers, owner_headers):
@@ -59,12 +67,14 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     assert meal_plan.status_code == 200, meal_plan.text
     meal_plan_id = meal_plan.json()["id"]
     note_id = _create_note_for(client, jwt_headers)
+    goal_id = _create_goal_for(client, jwt_headers, title="Courir un 10 km")
 
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
     assert _db_user_id(test_engine, Recipe, recipe_id) == user["id"]
     assert _db_user_id(test_engine, MealPlan, meal_plan_id) == user["id"]
     assert _db_user_id(test_engine, Note, note_id) == user["id"]
+    assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
 
 def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
@@ -100,6 +110,13 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, Note, note_id) == user["id"]
 
+    goal_id = client.post(
+        "/api/v1/goals",
+        headers=jwt_headers,
+        json={"title": "Lire 12 livres", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
+
 
 def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_headers):
     user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
@@ -113,6 +130,15 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     )
     assert updated.status_code == 200
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
+
+    goal_id = _create_goal_for(client, jwt_headers, title="Gravir un sommet")
+    patched_goal = client.patch(
+        f"/api/v1/goals/{goal_id}",
+        headers=jwt_headers,
+        json={"progress_percent": 50, "user_id": other["id"]},
+    )
+    assert patched_goal.status_code == 200
+    assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
 
 # ── Cross-user access is 404 everywhere (no existence leak) ──────────────────
@@ -128,6 +154,13 @@ def _seed_resources_as_user_a(client, headers):
     )
     note_id = _create_note_for(client, headers, title="Note privée")
     journal_id = _create_note_for(client, headers, title="Journal privé", kind="journal")
+    goal_id = _create_goal_for(client, headers, title="Objectif secret de A")
+    milestone = client.post(
+        f"/api/v1/goals/{goal_id}/milestones",
+        headers=headers,
+        json={"title": "Premiere etape"},
+    )
+    assert milestone.status_code == 200, milestone.text
     return {
         "grocery": grocery_id,
         "pantry": pantry_id,
@@ -135,6 +168,8 @@ def _seed_resources_as_user_a(client, headers):
         "meal_plan": meal_plan.json()["id"],
         "note": note_id,
         "journal": journal_id,
+        "goal": goal_id,
+        "milestone": milestone.json()["id"],
     }
 
 
@@ -149,6 +184,8 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/notes/{ids['journal']}", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"]).status_code == 404
 
     # Lists only expose the caller's own rows (journal included).
     assert client.get("/api/v1/groceries", headers=user_b["headers"]).json() == []
@@ -157,6 +194,7 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get("/api/v1/meal-plans", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/notes", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/notes/journal", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/goals", headers=user_b["headers"]).json() == []
 
 
 def test_user_cannot_modify_another_users_resources(client, jwt_headers):
@@ -169,6 +207,15 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"], json={"note": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
+    assert client.patch(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
+    assert (
+        client.patch(
+            f"/api/v1/goals/{ids['goal']}/milestones/{ids['milestone']}",
+            headers=user_b["headers"],
+            json={"completed": True},
+        ).status_code
+        == 404
+    )
 
 
 def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_headers):
@@ -188,6 +235,7 @@ def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_header
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/sync-groceries", headers=user_b["headers"]).status_code == 404
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/confirm-cooked", headers=user_b["headers"], json={}).status_code == 404
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/unconfirm-cooked", headers=user_b["headers"]).status_code == 404
+    assert client.post(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"], json={"title": "Intrusion"}).status_code == 404
 
 
 # ── Legacy API-key path resolves to the owner user ───────────────────────────
@@ -204,17 +252,20 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     assert meal_plan.status_code == 200, meal_plan.text
     meal_plan_id = meal_plan.json()["id"]
     note_id = _create_note_for(client, auth_headers, title="Note legacy")
+    goal_id = _create_goal_for(client, auth_headers, title="Objectif legacy")
 
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
     assert [i["id"] for i in client.get("/api/v1/meal-plans", headers=owner_headers).json()] == [meal_plan_id]
     assert [n["id"] for n in client.get("/api/v1/notes", headers=owner_headers).json()] == [note_id]
+    assert [g["id"] for g in client.get("/api/v1/goals", headers=owner_headers).json()] == [goal_id]
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
     assert client.get("/api/v1/groceries", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/meal-plans", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/notes", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/goals", headers=stranger["headers"]).json() == []
 
 
 def test_legacy_api_key_requires_owner_email_config(client, test_engine, auth_headers, monkeypatch):
@@ -332,6 +383,60 @@ def test_meal_plan_not_blocked_by_unrelated_event_at_same_time(client, auth_head
     assert meal_plan.status_code == 200, meal_plan.text
 
 
+# ── Skill goal.* actions are scoped to the acting user ───────────────────────
+
+def test_skill_goal_actions_scoped_to_acting_user(client, test_engine):
+    from sqlmodel import Session
+
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-goal-a@adamelhirch.com")
+    intruder = register_user(client, "skill-goal-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action("goal.create", {"title": "Objectif A"}, session, user=owner_user)
+        goal_id = created["goal"]["id"]
+        assert created["goal"]["status"] == "planned"
+
+        # The intruder's list never sees owner A's goal.
+        assert execute_action("goal.list", {}, session, user=intruder_user)["goals"] == []
+
+        # Direct access to the other user's goal fails without leaking existence.
+        for action, payload in [
+            ("goal.get", {"goal_id": goal_id}),
+            ("goal.update", {"goal_id": goal_id, "title": "Hacked"}),
+            ("goal.add_milestone", {"goal_id": goal_id, "title": "Intrusion"}),
+            ("goal.list_milestones", {"goal_id": goal_id}),
+            ("goal.update_milestone", {"goal_id": goal_id, "milestone_id": 1, "completed": True}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: get, update, milestone lifecycle.
+        got = execute_action("goal.get", {"goal_id": goal_id}, session, user=owner_user)
+        assert got["goal"]["id"] == goal_id
+        execute_action("goal.update", {"goal_id": goal_id, "progress_percent": 25}, session, user=owner_user)
+        milestone = execute_action(
+            "goal.add_milestone", {"goal_id": goal_id, "title": "Etape 1"}, session, user=owner_user
+        )
+        milestone_id = milestone["milestone"]["id"]
+        execute_action(
+            "goal.update_milestone",
+            {"goal_id": goal_id, "milestone_id": milestone_id, "completed": True},
+            session,
+            user=owner_user,
+        )
+        milestones = execute_action("goal.list_milestones", {"goal_id": goal_id}, session, user=owner_user)
+        assert milestones["milestones"][0]["completed"] is True
+
+
 # ── Supermarket connection ownership (#58) ───────────────────────────────────
 
 def _import_connection(client, headers, label="Mon drive", store="intermarche") -> int:
@@ -423,6 +528,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(Account(name="Livret A", user_id=None))
         goal = SavingsGoal(title="Voyage", target_amount=5000.0, current_amount=1000.0, user_id=None)
         session.add(goal)
+        hiking_goal = Goal(title="Gravir l'Everest", user_id=None)
+        session.add(hiking_goal)
+        session.flush()
+        session.add(GoalMilestone(goal_id=hiking_goal.id, title="Camp de base"))
         session.commit()
 
     with Session(test_engine) as session:
@@ -434,6 +543,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 1,
             "account": 1,
             "savingsgoal": 1,
+            "goal": 1,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -447,6 +557,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 0,
             "account": 0,
             "savingsgoal": 0,
+            "goal": 0,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -458,6 +569,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 1,
             "account": 1,
             "savingsgoal": 1,
+            "goal": 1,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -473,6 +585,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 1,
             "account": 1,
             "savingsgoal": 1,
+            "goal": 1,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -484,6 +597,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 0,
             "account": 0,
             "savingsgoal": 0,
+            "goal": 0,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -499,6 +613,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 0,
             "account": 0,
             "savingsgoal": 0,
+            "goal": 0,
             "financetransaction": 0,
             "budget": 0,
         }
@@ -506,6 +621,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
     # The claimed rows now belong to the owner and show up for the owner.
     with Session(test_engine) as session:
         assert session.exec(select(GroceryItem)).all()[0].user_id == owner_id
+        assert session.exec(select(Goal)).all()[0].user_id == owner_id
 
 
 def test_backfill_rejects_unknown_owner(client, test_engine):

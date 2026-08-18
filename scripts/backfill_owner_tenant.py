@@ -2,7 +2,7 @@
 """One-off operational backfill: assign legacy NULL-user rows to the owner tenant.
 
 After the additive multi-tenant migrations (user_id on groceryitem/pantryitem/
-recipe/mealplan/note/account/savingsgoal/financetransaction/budget),
+recipe/mealplan/note/account/savingsgoal/financetransaction/budget/goal),
 pre-existing rows have user_id = NULL and are invisible to everyone. This
 script claims them for the account whose email is given with --email (which
 must already exist — register it first via POST /auth/register).
@@ -30,6 +30,7 @@ from app.models import (
     Account,
     Budget,
     FinanceTransaction,
+    Goal,
     GroceryItem,
     MealPlan,
     Note,
@@ -49,6 +50,7 @@ BACKFILL_MODELS = [
     SavingsGoal,
     FinanceTransaction,
     Budget,
+    Goal,
 ]
 
 

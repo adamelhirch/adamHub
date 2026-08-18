@@ -54,6 +54,18 @@ gate. A non-Owner JWT now reaches `/finances` and sees only its own rows;
 cross-tenant rows are invisible. This ADR still governs the other off-MVP
 domains (tasks, events, habits, goals, notes, subscriptions, …).
 
+## Superseded for goals (2026-08-18)
+
+`goals` is now tenant-scoped (`user_id` on `goal`, additive migration
+`q4e8e2f5a1d7`, backfill via `scripts/backfill_owner_tenant.py`) and its
+router uses `CurrentOrOwnerUser` per route instead of the router-level
+`owner_only_user` gate. Goal milestones inherit their owner through the
+`goal_id` FK — every milestone route/handler resolves the parent goal and
+requires ownership before touching the milestone. A non-Owner JWT now
+reaches `/goals` and sees only its own goals; cross-tenant goals (and their
+milestones) are 404. This ADR still governs the other off-MVP domains
+(tasks, events, habits, notes, subscriptions, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own

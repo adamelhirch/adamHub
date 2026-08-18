@@ -1481,32 +1481,40 @@ def _handle_habit_list_logs(payload, session, *, user, now, user_id):
 
 def _handle_goal_create(payload, session, *, user, now, user_id):
     data = GoalCreate.model_validate(payload)
-    goal = create(session, Goal(**data.model_dump()))
+    goal = create(session, Goal(**data.model_dump(), user_id=user_id))
     return {"goal": goal.model_dump(mode="json")}
 
 
 def _handle_goal_list(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    statement = select(Goal).order_by(Goal.created_at.desc()).limit(limit)
+    statement = (
+        select(Goal)
+        .where(Goal.user_id == user_id)
+        .order_by(Goal.created_at.desc())
+        .limit(limit)
+    )
     if payload.get("status"):
         statement = statement.where(Goal.status == GoalStatus(payload["status"]))
     goals = session.exec(statement).all()
     return {"goals": [goal.model_dump(mode="json") for goal in goals]}
 
 
+def _get_owned_goal(session, user_id: int, goal_id: int) -> Goal:
+    goal = session.get(Goal, goal_id)
+    if not goal or goal.user_id != user_id:
+        raise ValueError("goal_id not found")
+    return goal
+
+
 def _handle_goal_get(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
-    goal = session.get(Goal, goal_id)
-    if not goal:
-        raise ValueError("goal_id not found")
+    goal = _get_owned_goal(session, user_id, goal_id)
     return {"goal": goal.model_dump(mode="json")}
 
 
 def _handle_goal_update(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
-    goal = session.get(Goal, goal_id)
-    if not goal:
-        raise ValueError("goal_id not found")
+    goal = _get_owned_goal(session, user_id, goal_id)
 
     patch = GoalUpdate.model_validate({k: v for k, v in payload.items() if k != "goal_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1520,25 +1528,21 @@ def _handle_goal_update(payload, session, *, user, now, user_id):
 
 def _handle_goal_add_milestone(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
-    goal = session.get(Goal, goal_id)
-    if not goal:
-        raise ValueError("goal_id not found")
+    goal = _get_owned_goal(session, user_id, goal_id)
 
     data = GoalMilestoneCreate.model_validate({k: v for k, v in payload.items() if k != "goal_id"})
-    milestone = create(session, GoalMilestone(goal_id=goal_id, **data.model_dump()))
+    milestone = create(session, GoalMilestone(goal_id=goal.id, **data.model_dump()))
     return {"milestone": milestone.model_dump(mode="json")}
 
 
 def _handle_goal_list_milestones(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
-    goal = session.get(Goal, goal_id)
-    if not goal:
-        raise ValueError("goal_id not found")
+    goal = _get_owned_goal(session, user_id, goal_id)
 
     limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
     milestones = session.exec(
         select(GoalMilestone)
-        .where(GoalMilestone.goal_id == goal_id)
+        .where(GoalMilestone.goal_id == goal.id)
         .order_by(GoalMilestone.created_at.desc())
         .limit(limit)
     ).all()
@@ -1548,12 +1552,10 @@ def _handle_goal_list_milestones(payload, session, *, user, now, user_id):
 def _handle_goal_update_milestone(payload, session, *, user, now, user_id):
     goal_id = _int_id(payload, "goal_id")
     milestone_id = _int_id(payload, "milestone_id")
-    goal = session.get(Goal, goal_id)
-    if not goal:
-        raise ValueError("goal_id not found")
+    goal = _get_owned_goal(session, user_id, goal_id)
 
     milestone = session.get(GoalMilestone, milestone_id)
-    if not milestone or milestone.goal_id != goal_id:
+    if not milestone or milestone.goal_id != goal.id:
         raise ValueError("milestone_id not found")
 
     patch = GoalMilestoneUpdate.model_validate(

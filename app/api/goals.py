@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api._crud import apply_updates, create, get_or_404, save
-from app.api.deps import SessionDep, owner_only_user
+from app.api._crud import apply_updates, create, get_owned_or_404, save
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import Goal, GoalMilestone, GoalStatus
 from app.schemas import (
     GoalCreate,
@@ -15,22 +15,28 @@ from app.schemas import (
     GoalUpdate,
 )
 
-router = APIRouter(prefix="/goals", tags=["goals"], dependencies=[Depends(owner_only_user)])
+router = APIRouter(prefix="/goals", tags=["goals"])
 
 
 @router.post("", response_model=GoalRead)
-def create_goal(payload: GoalCreate, session: SessionDep) -> GoalRead:
-    goal = create(session, Goal(**payload.model_dump()))
+def create_goal(payload: GoalCreate, session: SessionDep, user: CurrentOrOwnerUser) -> GoalRead:
+    goal = create(session, Goal(**payload.model_dump(), user_id=user.id))
     return GoalRead.model_validate(goal, from_attributes=True)
 
 
 @router.get("", response_model=list[GoalRead])
 def list_goals(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     status: GoalStatus | None = None,
     limit: int = Query(default=100, ge=1, le=300),
 ) -> list[GoalRead]:
-    statement = select(Goal).order_by(Goal.created_at.desc()).limit(limit)
+    statement = (
+        select(Goal)
+        .where(Goal.user_id == user.id)
+        .order_by(Goal.created_at.desc())
+        .limit(limit)
+    )
     if status:
         statement = statement.where(Goal.status == status)
 
@@ -39,14 +45,14 @@ def list_goals(
 
 
 @router.get("/{goal_id}", response_model=GoalRead)
-def get_goal(goal_id: int, session: SessionDep) -> GoalRead:
-    goal = get_or_404(session, Goal, goal_id, detail="Goal not found")
+def get_goal(goal_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> GoalRead:
+    goal = get_owned_or_404(session, Goal, goal_id, user_id=user.id, detail="Goal not found")
     return GoalRead.model_validate(goal, from_attributes=True)
 
 
 @router.patch("/{goal_id}", response_model=GoalRead)
-def update_goal(goal_id: int, payload: GoalUpdate, session: SessionDep) -> GoalRead:
-    goal = get_or_404(session, Goal, goal_id, detail="Goal not found")
+def update_goal(goal_id: int, payload: GoalUpdate, session: SessionDep, user: CurrentOrOwnerUser) -> GoalRead:
+    goal = get_owned_or_404(session, Goal, goal_id, user_id=user.id, detail="Goal not found")
 
     updates = payload.model_dump(exclude_unset=True)
     apply_updates(goal, updates, touch=True)
@@ -55,8 +61,10 @@ def update_goal(goal_id: int, payload: GoalUpdate, session: SessionDep) -> GoalR
 
 
 @router.post("/{goal_id}/milestones", response_model=GoalMilestoneRead)
-def create_goal_milestone(goal_id: int, payload: GoalMilestoneCreate, session: SessionDep) -> GoalMilestoneRead:
-    get_or_404(session, Goal, goal_id, detail="Goal not found")
+def create_goal_milestone(
+    goal_id: int, payload: GoalMilestoneCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> GoalMilestoneRead:
+    get_owned_or_404(session, Goal, goal_id, user_id=user.id, detail="Goal not found")
 
     milestone = create(session, GoalMilestone(goal_id=goal_id, **payload.model_dump()))
     return GoalMilestoneRead.model_validate(milestone, from_attributes=True)
@@ -66,9 +74,10 @@ def create_goal_milestone(goal_id: int, payload: GoalMilestoneCreate, session: S
 def list_goal_milestones(
     goal_id: int,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     limit: int = Query(default=200, ge=1, le=500),
 ) -> list[GoalMilestoneRead]:
-    get_or_404(session, Goal, goal_id, detail="Goal not found")
+    get_owned_or_404(session, Goal, goal_id, user_id=user.id, detail="Goal not found")
 
     milestones = session.exec(
         select(GoalMilestone)
@@ -85,8 +94,9 @@ def update_goal_milestone(
     milestone_id: int,
     payload: GoalMilestoneUpdate,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
 ) -> GoalMilestoneRead:
-    get_or_404(session, Goal, goal_id, detail="Goal not found")
+    get_owned_or_404(session, Goal, goal_id, user_id=user.id, detail="Goal not found")
 
     milestone = session.get(GoalMilestone, milestone_id)
     if not milestone or milestone.goal_id != goal_id:
