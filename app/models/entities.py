@@ -338,6 +338,7 @@ class FitnessMeasurement(SQLModel, table=True):
 
 class Goal(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     title: str
     description: str | None = None
     status: GoalStatus = GoalStatus.PLANNED
