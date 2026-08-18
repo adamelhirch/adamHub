@@ -285,6 +285,7 @@ class MealPlanCookConfirmation(SQLModel, table=True):
 
 class Habit(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     description: str | None = None
     frequency: HabitFrequency = HabitFrequency.DAILY
@@ -302,6 +303,7 @@ class Habit(SQLModel, table=True):
 
 class HabitLog(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     habit_id: int = Field(foreign_key="habit.id", index=True)
     logged_at: datetime = Field(default_factory=utcnow)
     value: int = 1

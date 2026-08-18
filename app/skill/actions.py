@@ -1357,7 +1357,7 @@ def _handle_calendar_ack_reminder(payload, session, *, user, now, user_id):
 
 def _handle_habit_create(payload, session, *, user, now, user_id):
     data = HabitCreate.model_validate(payload)
-    habit = Habit(**data.model_dump())
+    habit = Habit(**data.model_dump(), user_id=user_id)
     validate_habit_schedule_free(session, habit)
     session.add(habit)
     session.commit()
@@ -1365,11 +1365,16 @@ def _handle_habit_create(payload, session, *, user, now, user_id):
     return {"habit": habit.model_dump(mode="json")}
 
 
+def _get_owned_habit(session, user_id: int, habit_id: int) -> Habit:
+    habit = session.get(Habit, habit_id)
+    if not habit or habit.user_id != user_id:
+        raise ValueError("habit_id not found")
+    return habit
+
+
 def _handle_habit_update(payload, session, *, user, now, user_id):
     habit_id = _int_id(payload, "habit_id")
-    habit = session.get(Habit, habit_id)
-    if not habit:
-        raise ValueError("habit_id not found")
+    habit = _get_owned_habit(session, user_id, habit_id)
 
     patch = HabitUpdate.model_validate({k: v for k, v in payload.items() if k != "habit_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1423,7 +1428,11 @@ def _handle_habit_update(payload, session, *, user, now, user_id):
 
 def _handle_habit_list(payload, session, *, user, now, user_id):
     active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = select(Habit).order_by(Habit.created_at.desc())
+    statement = (
+        select(Habit)
+        .where(Habit.user_id == user_id)
+        .order_by(Habit.created_at.desc())
+    )
     if active_only:
         statement = statement.where(Habit.active.is_(True))
     habits = session.exec(statement).all()
@@ -1433,9 +1442,7 @@ def _handle_habit_list(payload, session, *, user, now, user_id):
 def _handle_habit_set_active(payload, session, *, user, now, user_id):
     habit_id = _int_id(payload, "habit_id")
     active = _as_bool(payload.get("active"), default=True)
-    habit = session.get(Habit, habit_id)
-    if not habit:
-        raise ValueError("habit_id not found")
+    habit = _get_owned_habit(session, user_id, habit_id)
     habit.active = active
     habit.updated_at = now
     session.add(habit)
@@ -1446,33 +1453,33 @@ def _handle_habit_set_active(payload, session, *, user, now, user_id):
 
 def _handle_habit_log(payload, session, *, user, now, user_id):
     habit_id = _int_id(payload, "habit_id")
-    habit = session.get(Habit, habit_id)
-    if not habit:
-        raise ValueError("habit_id not found")
+    habit = _get_owned_habit(session, user_id, habit_id)
 
     log = create(
         session,
         HabitLog(
             habit_id=habit_id,
+            user_id=user_id,
             value=int(payload.get("value", 1)),
             note=payload.get("note"),
         ),
     )
 
     streak = update_habit_streak(session, habit_id)
+    # update_habit_streak commits (expiring every instance in the session);
+    # reload the log so its fields survive model_dump.
+    session.refresh(log)
     return {"log": log.model_dump(mode="json"), "streak": streak}
 
 
 def _handle_habit_list_logs(payload, session, *, user, now, user_id):
     habit_id = _int_id(payload, "habit_id")
-    habit = session.get(Habit, habit_id)
-    if not habit:
-        raise ValueError("habit_id not found")
+    habit = _get_owned_habit(session, user_id, habit_id)
 
     limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=500)
     logs = session.exec(
         select(HabitLog)
-        .where(HabitLog.habit_id == habit_id)
+        .where(HabitLog.habit_id == habit_id, HabitLog.user_id == user_id)
         .order_by(HabitLog.logged_at.desc())
         .limit(limit)
     ).all()
