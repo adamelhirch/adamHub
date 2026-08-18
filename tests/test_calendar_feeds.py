@@ -1,5 +1,9 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlmodel import Session
+
+from app.models import CalendarFeed
+
 
 def test_calendar_feed_returns_filtered_ics(client, auth_headers):
     tomorrow = datetime.now(UTC) + timedelta(days=1)
@@ -82,3 +86,32 @@ def test_calendar_feed_supports_etag(client, auth_headers):
         headers={"If-None-Match": first.headers["etag"]},
     )
     assert second.status_code == 304
+
+
+def test_legacy_feed_without_user_id_still_serves_owner_calendar(client, auth_headers, test_engine):
+    # Pre-backfill feeds have user_id = NULL. Their public .ics must keep
+    # working and resolve to the owner tenant (the backfill's semantics), never
+    # to "all users" or to a stranger's calendar. Guard against the regression
+    # where the token route stops scoping legacy feeds at all.
+    with Session(test_engine) as session:
+        session.add(
+            CalendarFeed(name="Feed hérité", token="legacy-token-no-user", user_id=None, sources=["task"])
+        )
+        session.commit()
+
+    tomorrow = datetime.now(UTC) + timedelta(days=1)
+    task = client.post(
+        "/api/v1/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Tâche owner héritée",
+            "due_at": tomorrow.replace(hour=11, minute=0, second=0, microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        },
+    )
+    assert task.status_code == 200, task.text
+
+    public = client.get("/calendar/feed/legacy-token-no-user.ics")
+    assert public.status_code == 200
+    assert "SUMMARY:Tâche owner héritée" in public.text

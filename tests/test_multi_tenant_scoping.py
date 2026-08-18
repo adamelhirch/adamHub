@@ -6,6 +6,7 @@ from app.models import (
     Account,
     Budget,
     CalendarEvent,
+    CalendarFeed,
     CalendarItem,
     FinanceTransaction,
     FitnessMeasurement,
@@ -887,6 +888,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
 
             "calendarevent": 0,
             "calendaritem": 0,
+            "calendarfeed": 0,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
@@ -910,6 +912,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
 
             "calendarevent": 0,
             "calendaritem": 0,
+            "calendarfeed": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 2,
@@ -931,6 +934,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
 
             "calendarevent": 0,
             "calendaritem": 0,
+            "calendarfeed": 0,
         }
 
     with Session(test_engine) as session:
@@ -956,6 +960,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
 
             "calendarevent": 0,
             "calendaritem": 0,
+            "calendarfeed": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 0,
@@ -977,6 +982,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
 
             "calendarevent": 0,
             "calendaritem": 0,
+            "calendarfeed": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
@@ -1002,6 +1008,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
 
             "calendarevent": 0,
             "calendaritem": 0,
+            "calendarfeed": 0,
         }
 
     # The claimed rows now belong to the owner and show up for the owner.
@@ -2048,3 +2055,120 @@ def test_calendar_backfill_claims_legacy_rows_to_owner(client, test_engine, owne
     assert [i["title"] for i in client.get("/api/v1/calendar/items", headers=owner_headers).json()] == ["Item legacy"]
     stranger = register_user(client, "calendar-backfill-stranger@adamelhirch.com")
     assert client.get("/api/v1/calendar/items", headers=stranger["headers"]).json() == []
+
+
+# ── Calendar feeds (t12): CalendarFeed user_id + token-scoped public .ics ────
+
+def _create_calendar_feed_for(client, headers, name="Feed perso", sources=None) -> int:
+    response = client.post(
+        "/api/v1/calendar/feeds",
+        headers=headers,
+        json={"name": name, "sources": sources or []},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def test_calendar_feed_create_auto_assigns_user_id(client, test_engine, jwt_headers):
+    user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
+    feed_id = _create_calendar_feed_for(client, jwt_headers, name="Feed auto")
+    assert _db_user_id(test_engine, CalendarFeed, feed_id) == user["id"]
+
+
+def test_calendar_feeds_cross_tenant_is_404(client):
+    user_a = register_user(client, "feeds-a@adamelhirch.com")
+    user_b = register_user(client, "feeds-b@adamelhirch.com")
+    feed_id = _create_calendar_feed_for(client, user_a["headers"], name="Feed A")
+
+    # Lists only expose the caller's own feeds.
+    assert client.get("/api/v1/calendar/feeds", headers=user_b["headers"]).json() == []
+
+    # Deleting another user's feed is 404 (no existence leak).
+    assert client.delete(
+        f"/api/v1/calendar/feeds/{feed_id}", headers=user_b["headers"]
+    ).status_code == 404
+
+    # The tenant that owns the feed still lists and deletes it.
+    assert [f["id"] for f in client.get("/api/v1/calendar/feeds", headers=user_a["headers"]).json()] == [feed_id]
+    assert client.delete(f"/api/v1/calendar/feeds/{feed_id}", headers=user_a["headers"]).status_code == 200
+
+
+def test_public_feed_never_exposes_another_users_items(client):
+    # The public .ics route is unauthenticated but token-scoped: a feed only
+    # ever exposes the calendar items of the user who owns it, never another
+    # user's items — even when both users have items in the same window.
+    user_a = register_user(client, "pub-feed-a@adamelhirch.com")
+    user_b = register_user(client, "pub-feed-b@adamelhirch.com")
+    day = "2026-09-10"
+
+    _create_calendar_item_for(
+        client, user_a["headers"], title="Bloc privé A", start_at=f"{day}T10:00:00Z", end_at=f"{day}T11:00:00Z"
+    )
+    _create_calendar_item_for(
+        client, user_b["headers"], title="Bloc privé B", start_at=f"{day}T15:00:00Z", end_at=f"{day}T16:00:00Z"
+    )
+
+    task_a = client.post(
+        "/api/v1/tasks",
+        headers=user_a["headers"],
+        json={"title": "Tâche secrète A", "due_at": f"{day}T09:30:00Z", "estimated_minutes": 30},
+    )
+    assert task_a.status_code == 200, task_a.text
+    task_b = client.post(
+        "/api/v1/tasks",
+        headers=user_b["headers"],
+        json={"title": "Tâche secrète B", "due_at": f"{day}T17:30:00Z", "estimated_minutes": 30},
+    )
+    assert task_b.status_code == 200, task_b.text
+
+    feed_a = client.post("/api/v1/calendar/feeds", headers=user_a["headers"], json={"name": "Feed A"})
+    assert feed_a.status_code == 200, feed_a.text
+    feed_b = client.post("/api/v1/calendar/feeds", headers=user_b["headers"], json={"name": "Feed B"})
+    assert feed_b.status_code == 200, feed_b.text
+    token_a = feed_a.json()["token"]
+    token_b = feed_b.json()["token"]
+
+    # A's public feed exposes A's items and only A's items.
+    public_a = client.get(f"/calendar/feed/{token_a}.ics")
+    assert public_a.status_code == 200
+    assert "Bloc privé A" in public_a.text
+    assert "Tâche secrète A" in public_a.text
+    assert "Bloc privé B" not in public_a.text
+    assert "Tâche secrète B" not in public_a.text
+
+    # B's public feed exposes B's items and never A's.
+    public_b = client.get(f"/calendar/feed/{token_b}.ics")
+    assert public_b.status_code == 200
+    assert "Bloc privé B" in public_b.text
+    assert "Tâche secrète B" in public_b.text
+    assert "Bloc privé A" not in public_b.text
+    assert "Tâche secrète A" not in public_b.text
+
+
+def test_calendar_feed_backfill_claims_legacy_rows_to_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(CalendarFeed(name="Feed legacy", token="legacy-feed-token", user_id=None))
+        session.commit()
+
+    # Pre-scoping NULL rows are invisible in the private list until the
+    # backfill claims them (the public token route keeps working: it falls
+    # back to the owner tenant, see test_calendar_feeds.py).
+    assert client.get("/api/v1/calendar/feeds", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        dry = backfill(session, owner_id, commit=False)
+    assert dry["counts"]["calendarfeed"] == 1
+
+    with Session(test_engine) as session:
+        committed = backfill(session, owner_id, commit=True)
+    assert committed["commit"] is True
+    assert committed["updated"]["calendarfeed"] == 1
+
+    # After backfill the owner (legacy API-key path and owner JWT) sees the
+    # feed; a non-owner JWT user still sees none of it.
+    assert [f["name"] for f in client.get("/api/v1/calendar/feeds", headers=auth_headers).json()] == ["Feed legacy"]
+    assert [f["name"] for f in client.get("/api/v1/calendar/feeds", headers=owner_headers).json()] == ["Feed legacy"]
+    stranger = register_user(client, "feeds-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/calendar/feeds", headers=stranger["headers"]).json() == []

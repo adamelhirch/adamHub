@@ -138,6 +138,9 @@ class CalendarSource(str, Enum):
 
 class CalendarFeed(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None, foreign_key="user.id", ondelete="SET NULL", index=True
+    )
     name: str
     token: str = Field(sa_column=Column(String, unique=True, nullable=False, index=True))
     sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
