@@ -2,23 +2,23 @@ from tests.conftest import register_user
 
 
 # ── Off-MVP domains are Owner-only (#59) ─────────────────────────────────────
-# The unscoped domains (tasks, …) must reject any JWT that does not belong to
-# ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the Owner's own JWT
-# keep working. Finances (t1), goals (t4), events (t7) and habits (t10) were
-# tenant-scoped and moved to CurrentOrOwnerUser, so they are no longer part of
-# this gate.
+# The unscoped domains (fitness, calendar, …) must reject any JWT that does
+# not belong to ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the
+# Owner's own JWT keep working. Finances (t1), tasks (t6), events (t7),
+# subscriptions (t8) and habits (t10) were tenant-scoped and moved to
+# CurrentOrOwnerUser, so they are no longer part of this gate.
 
 def test_owner_only_route_rejects_non_owner_jwt(client, jwt_headers):
     saas = register_user(client, "saas-user@adamelhirch.com")
 
-    assert client.get("/api/v1/tasks", headers=jwt_headers).status_code == 401
+    assert client.get("/api/v1/fitness/sessions", headers=jwt_headers).status_code == 401
 
     # Write routes are gated the same way.
     assert (
         client.post(
-            "/api/v1/tasks",
+            "/api/v1/fitness/sessions",
             headers=saas["headers"],
-            json={"title": "Réunion", "due_at": "2026-09-01T09:00:00Z", "estimated_minutes": 30},
+            json={"title": "Sortie", "session_type": "cardio", "planned_at": "2026-09-01T09:00:00Z", "duration_minutes": 45},
         ).status_code
         == 401
     )
@@ -29,6 +29,13 @@ def test_finances_router_accepts_any_authenticated_user(client, jwt_headers):
     # reaches it (and simply sees their own empty data).
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).status_code == 200
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).json() == []
+
+
+def test_tasks_router_accepts_any_authenticated_user(client, jwt_headers):
+    # Tenant-scoped tasks (t6) no longer gates on ownership: a plain JWT user
+    # reaches it (and simply sees their own empty data).
+    assert client.get("/api/v1/tasks", headers=jwt_headers).status_code == 200
+    assert client.get("/api/v1/tasks", headers=jwt_headers).json() == []
 
 
 def test_events_router_accepts_any_authenticated_user(client, jwt_headers):
