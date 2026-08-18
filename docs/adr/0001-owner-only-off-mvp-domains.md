@@ -44,6 +44,16 @@ When a domain gets tenant-scoped (a `user_id` column + scoping reads and writes)
 it moves out of the Owner-only list and adopts `CurrentOrOwnerUser` — this ADR
 is the default state, not a permanent restriction.
 
+## Superseded for finances (2026-08-18)
+
+`finances` (transactions + budgets) is now tenant-scoped (`user_id` on
+`financetransaction` and `budget`, additive migration `q8f2a4c6e1d3`,
+backfill via `scripts/backfill_owner_tenant.py`) and its router uses
+`CurrentOrOwnerUser` per route instead of the router-level `owner_only_user`
+gate. A non-Owner JWT now reaches `/finances` and sees only its own rows;
+cross-tenant rows are invisible. This ADR still governs the other off-MVP
+domains (tasks, events, habits, goals, notes, subscriptions, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own

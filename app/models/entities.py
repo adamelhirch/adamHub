@@ -167,6 +167,7 @@ class Task(SQLModel, table=True):
 
 class FinanceTransaction(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL", index=True)
     kind: TransactionKind
     amount: float
     currency: str = Field(default="EUR", max_length=8)
@@ -179,6 +180,7 @@ class FinanceTransaction(SQLModel, table=True):
 
 class Budget(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL", index=True)
     month: str
     category: str
     monthly_limit: float

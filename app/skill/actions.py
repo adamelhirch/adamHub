@@ -376,7 +376,7 @@ def _handle_task_delete(payload, session, *, user, now, user_id):
 
 def _handle_finance_add_transaction(payload, session, *, user, now, user_id):
     data = FinanceTransactionCreate.model_validate(payload)
-    tx = FinanceTransaction(**data.model_dump())
+    tx = FinanceTransaction(**data.model_dump(), user_id=user_id)
     if tx.occurred_at is None:
         tx.occurred_at = now
     tx = create(session, tx)
@@ -385,7 +385,12 @@ def _handle_finance_add_transaction(payload, session, *, user, now, user_id):
 
 def _handle_finance_list_transactions(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    statement = select(FinanceTransaction).order_by(FinanceTransaction.occurred_at.desc()).limit(limit)
+    statement = (
+        select(FinanceTransaction)
+        .where(FinanceTransaction.user_id == user_id)
+        .order_by(FinanceTransaction.occurred_at.desc())
+        .limit(limit)
+    )
 
     if payload.get("kind"):
         statement = statement.where(FinanceTransaction.kind == TransactionKind(payload["kind"]))
@@ -412,12 +417,16 @@ def _handle_finance_create_budget(payload, session, *, user, now, user_id):
     data = BudgetCreate.model_validate(payload)
     if len(data.month) != 7 or data.month[4] != "-":
         raise ValueError("month must be in format YYYY-MM")
-    budget = create(session, Budget(**data.model_dump()))
+    budget = create(session, Budget(**data.model_dump(), user_id=user_id))
     return {"budget": budget.model_dump(mode="json")}
 
 
 def _handle_finance_list_budgets(payload, session, *, user, now, user_id):
-    statement = select(Budget).order_by(Budget.month.desc(), Budget.category.asc())
+    statement = (
+        select(Budget)
+        .where(Budget.user_id == user_id)
+        .order_by(Budget.month.desc(), Budget.category.asc())
+    )
     if payload.get("month"):
         statement = statement.where(Budget.month == payload["month"])
     budgets = session.exec(statement).all()
@@ -427,7 +436,7 @@ def _handle_finance_list_budgets(payload, session, *, user, now, user_id):
 def _handle_finance_month_summary(payload, session, *, user, now, user_id):
     year = int(payload.get("year", now.year))
     month = int(payload.get("month", now.month))
-    summary = build_month_summary(session, year, month)
+    summary = build_month_summary(session, year, month, user_id=user_id)
     return {"summary": summary.model_dump(mode="json")}
 
 
@@ -2008,7 +2017,7 @@ def _handle_note_journal(payload, session, *, user, now, user_id):
 
 
 def _handle_dashboard_overview(payload, session, *, user, now, user_id):
-    return {"overview": build_dashboard_overview(session).model_dump(mode="json")}
+    return {"overview": build_dashboard_overview(session, user_id=user_id).model_dump(mode="json")}
 
 
 ACTION_CATALOG = [

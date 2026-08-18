@@ -4,12 +4,15 @@ from sqlmodel import Session, select
 
 from app.models import (
     Account,
+    Budget,
+    FinanceTransaction,
     GroceryItem,
     MealPlan,
     Note,
     PantryItem,
     Recipe,
     SavingsGoal,
+    TransactionKind,
 )
 
 from tests.conftest import OWNER_EMAIL, register_user
@@ -431,6 +434,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 1,
             "account": 1,
             "savingsgoal": 1,
+            "financetransaction": 0,
+            "budget": 0,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
@@ -442,6 +447,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 0,
             "account": 0,
             "savingsgoal": 0,
+            "financetransaction": 0,
+            "budget": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 2,
@@ -451,6 +458,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 1,
             "account": 1,
             "savingsgoal": 1,
+            "financetransaction": 0,
+            "budget": 0,
         }
 
     with Session(test_engine) as session:
@@ -464,6 +473,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 1,
             "account": 1,
             "savingsgoal": 1,
+            "financetransaction": 0,
+            "budget": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 0,
@@ -473,6 +484,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 0,
             "account": 0,
             "savingsgoal": 0,
+            "financetransaction": 0,
+            "budget": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
@@ -486,6 +499,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "note": 0,
             "account": 0,
             "savingsgoal": 0,
+            "financetransaction": 0,
+            "budget": 0,
         }
 
     # The claimed rows now belong to the owner and show up for the owner.
@@ -501,6 +516,177 @@ def test_backfill_rejects_unknown_owner(client, test_engine):
         assert resolve_owner(session, OWNER_EMAIL) is not None
 
 
+# ── Finance scoping: transactions & budgets (t1) ─────────────────────────────
+
+def _seed_finance_for(client, headers, month="2026-04") -> tuple[int, int]:
+    tx = client.post(
+        "/api/v1/finances/transactions",
+        headers=headers,
+        json={
+            "kind": "expense",
+            "amount": 55.5,
+            "currency": "EUR",
+            "category": "resto",
+            "occurred_at": f"{month}-15T12:00:00Z",
+        },
+    )
+    assert tx.status_code == 200, tx.text
+    budget = client.post(
+        "/api/v1/finances/budgets",
+        headers=headers,
+        json={"month": month, "category": "resto", "monthly_limit": 200.0},
+    )
+    assert budget.status_code == 200, budget.text
+    return tx.json()["id"], budget.json()["id"]
+
+
+def test_finance_create_auto_scopes_to_user(client, test_engine, jwt_headers):
+    user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
+    tx_id, budget_id = _seed_finance_for(client, jwt_headers)
+
+    assert _db_user_id(test_engine, FinanceTransaction, tx_id) == user["id"]
+    assert _db_user_id(test_engine, Budget, budget_id) == user["id"]
+
+
+def test_finance_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
+    user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
+    other = register_user(client, "finance-override@adamelhirch.com")["user"]
+
+    tx = client.post(
+        "/api/v1/finances/transactions",
+        headers=jwt_headers,
+        json={"kind": "expense", "amount": 10, "currency": "EUR", "category": "test", "user_id": other["id"]},
+    )
+    assert tx.status_code == 200, tx.text
+    budget = client.post(
+        "/api/v1/finances/budgets",
+        headers=jwt_headers,
+        json={"month": "2026-02", "category": "test", "monthly_limit": 100.0, "user_id": other["id"]},
+    )
+    assert budget.status_code == 200, budget.text
+
+    assert _db_user_id(test_engine, FinanceTransaction, tx.json()["id"]) == user["id"]
+    assert _db_user_id(test_engine, Budget, budget.json()["id"]) == user["id"]
+
+
+def test_user_cannot_see_another_users_finance_data(client):
+    user_b = register_user(client, "finance-b@adamelhirch.com")
+    user_a = register_user(client, "finance-a@adamelhirch.com")
+    _seed_finance_for(client, user_a["headers"], month="2026-04")
+
+    # Lists only expose the caller's own rows.
+    assert client.get("/api/v1/finances/transactions", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/finances/budgets", headers=user_b["headers"]).json() == []
+
+    # The month summary aggregates only the caller's own rows.
+    summary = client.get("/api/v1/finances/summary?year=2026&month=4", headers=user_b["headers"]).json()
+    assert summary["income"] == 0.0
+    assert summary["expense"] == 0.0
+    assert summary["budgets"] == []
+
+
+def test_user_month_summary_only_mixes_own_budgets_and_transactions(client):
+    user = register_user(client, "finance-mix@adamelhirch.com")
+    _seed_finance_for(client, user["headers"], month="2026-05")
+    client.post(
+        "/api/v1/finances/transactions",
+        headers=user["headers"],
+        json={"kind": "income", "amount": 900.0, "currency": "EUR", "category": "salary", "occurred_at": "2026-05-02T09:00:00Z"},
+    )
+
+    summary = client.get("/api/v1/finances/summary?year=2026&month=5", headers=user["headers"]).json()
+    assert summary["income"] == 900.0
+    assert summary["expense"] == 55.5
+    assert len(summary["budgets"]) == 1
+    assert summary["budgets"][0]["category"] == "resto"
+
+
+def test_legacy_api_key_finance_scopes_to_owner_user(client, auth_headers, owner_headers):
+    # Legacy API-key rows (via the finances API and the skill actions) are
+    # scoped to the owner user; the owner's JWT sees them, a second user doesn't.
+    tx = client.post(
+        "/api/v1/finances/transactions",
+        headers=auth_headers,
+        json={"kind": "expense", "amount": 12.0, "currency": "EUR", "category": "legacy-api", "occurred_at": "2026-06-10T10:00:00Z"},
+    )
+    assert tx.status_code == 200, tx.text
+
+    budget = client.post(
+        "/api/v1/finances/budgets",
+        headers=auth_headers,
+        json={"month": "2026-06", "category": "legacy-api", "monthly_limit": 100.0},
+    )
+    assert budget.status_code == 200, budget.text
+
+    skill_tx = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "finance.add_transaction", "input": {"kind": "expense", "amount": 7.0, "currency": "EUR", "category": "skill-api", "occurred_at": "2026-06-11T10:00:00Z"}},
+    )
+    assert skill_tx.status_code == 200, skill_tx.text
+    skill_budget = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "finance.create_budget", "input": {"month": "2026-06", "category": "skill-api", "monthly_limit": 50.0}},
+    )
+    assert skill_budget.status_code == 200, skill_budget.text
+
+    owner_txs = client.get("/api/v1/finances/transactions", headers=owner_headers).json()
+    owner_budgets = client.get("/api/v1/finances/budgets", headers=owner_headers).json()
+    assert sorted(t["category"] for t in owner_txs) == ["legacy-api", "skill-api"]
+    assert sorted(b["category"] for b in owner_budgets) == ["legacy-api", "skill-api"]
+
+    stranger = register_user(client, "finance-legacy-stranger@adamelhirch.com")
+    assert client.get("/api/v1/finances/transactions", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/finances/budgets", headers=stranger["headers"]).json() == []
+
+
+def test_skill_finance_month_summary_is_scoped_to_caller(client, auth_headers):
+    # Owner seeds data via the skill action; a JWT user with no data gets an
+    # empty summary even though the owner's rows exist.
+    client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "finance.add_transaction", "input": {"kind": "income", "amount": 30.0, "currency": "EUR", "category": "skill", "occurred_at": "2026-07-10T10:00:00Z"}},
+    )
+    stranger = register_user(client, "finance-summary-stranger@adamelhirch.com")
+    empty = client.get("/api/v1/finances/summary?year=2026&month=7", headers=stranger["headers"]).json()
+    assert empty["income"] == 0.0
+    assert empty["expense"] == 0.0
+    assert empty["budgets"] == []
+
+    owner_summary = client.post(
+        "/api/v1/skill/execute",
+        headers=auth_headers,
+        json={"action": "finance.month_summary", "input": {"year": 2026, "month": 7}},
+    ).json()["data"]["summary"]
+    assert owner_summary["income"] == 30.0
+    assert owner_summary["expense"] == 0.0
+
+
+def test_backfill_claims_finance_rows_for_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(
+            FinanceTransaction(kind=TransactionKind.EXPENSE, amount=42.0, category="legacy", user_id=None)
+        )
+        session.add(Budget(month="2026-01", category="legacy", monthly_limit=100.0, user_id=None))
+        session.commit()
+
+    with Session(test_engine) as session:
+        committed = backfill(session, owner_id, commit=True)
+        assert committed["updated"]["financetransaction"] == 1
+        assert committed["updated"]["budget"] == 1
+
+    # The owner finds their pre-backfill rows again via both auth paths.
+    assert [t["category"] for t in client.get("/api/v1/finances/transactions", headers=auth_headers).json()] == ["legacy"]
+    assert [b["category"] for b in client.get("/api/v1/finances/budgets", headers=owner_headers).json()] == ["legacy"]
+
+    # A non-owner user still sees none of it.
+    stranger = register_user(client, "finance-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/finances/transactions", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/finances/budgets", headers=stranger["headers"]).json() == []
 # ── Patrimony ownership (accounts + savings goals) ───────────────────────────
 
 def _seed_patrimony_for(client, headers):

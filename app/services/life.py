@@ -34,12 +34,16 @@ def month_range(year: int, month: int) -> tuple[datetime, datetime]:
     return start, end
 
 
-def build_month_summary(session: Session, year: int, month: int) -> FinanceMonthSummary:
+def build_month_summary(
+    session: Session, year: int, month: int, *, user_id: int | None = None
+) -> FinanceMonthSummary:
     start, end = month_range(year, month)
     statement = select(FinanceTransaction).where(
         FinanceTransaction.occurred_at >= start,
         FinanceTransaction.occurred_at < end,
     )
+    if user_id is not None:
+        statement = statement.where(FinanceTransaction.user_id == user_id)
     txs = session.exec(statement).all()
 
     income = sum(tx.amount for tx in txs if tx.kind == TransactionKind.INCOME)
@@ -51,7 +55,10 @@ def build_month_summary(session: Session, year: int, month: int) -> FinanceMonth
         by_category[tx.category] = by_category.get(tx.category, 0.0) + tx.amount
 
     month_str = f"{year}-{month:02d}"
-    budgets = session.exec(select(Budget).where(Budget.month == month_str)).all()
+    budget_statement = select(Budget).where(Budget.month == month_str)
+    if user_id is not None:
+        budget_statement = budget_statement.where(Budget.user_id == user_id)
+    budgets = session.exec(budget_statement).all()
     budget_analytics = []
     
     for b in budgets:
@@ -186,7 +193,7 @@ def build_pantry_overview(
     )
 
 
-def build_dashboard_overview(session: Session) -> DashboardOverview:
+def build_dashboard_overview(session: Session, *, user_id: int | None = None) -> DashboardOverview:
     now = datetime.now(timezone.utc)
     next_week = now + timedelta(days=7)
 
@@ -221,7 +228,7 @@ def build_dashboard_overview(session: Session) -> DashboardOverview:
         select(func.count()).select_from(PantryItem).where(PantryItem.quantity <= PantryItem.min_quantity)
     ).one()
 
-    month_summary = build_month_summary(session, now.year, now.month)
+    month_summary = build_month_summary(session, now.year, now.month, user_id=user_id)
 
     notes_total = session.exec(select(func.count()).select_from(Note)).one()
 
