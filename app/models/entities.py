@@ -365,6 +365,7 @@ class GoalMilestone(SQLModel, table=True):
 
 class CalendarEvent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     title: str
     description: str | None = None
     start_at: datetime

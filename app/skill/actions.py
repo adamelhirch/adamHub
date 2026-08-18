@@ -1582,6 +1582,13 @@ def _handle_goal_update_milestone(payload, session, *, user, now, user_id):
     return {"milestone": milestone.model_dump(mode="json")}
 
 
+def _get_owned_event(session, user_id: int, event_id: int) -> CalendarEvent:
+    event = session.get(CalendarEvent, event_id)
+    if not event or event.user_id != user_id:
+        raise ValueError("event_id not found")
+    return event
+
+
 def _handle_event_create(payload, session, *, user, now, user_id):
     data = EventCreate.model_validate(payload)
     if data.end_at <= data.start_at:
@@ -1592,7 +1599,7 @@ def _handle_event_create(payload, session, *, user, now, user_id):
         data.end_at,
         source=CalendarSource.EVENT,
     )
-    event = CalendarEvent(**data.model_dump())
+    event = CalendarEvent(**data.model_dump(), user_id=user_id)
     session.add(event)
     session.commit()
     session.refresh(event)
@@ -1601,7 +1608,12 @@ def _handle_event_create(payload, session, *, user, now, user_id):
 
 def _handle_event_list(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
-    statement = select(CalendarEvent).order_by(CalendarEvent.start_at.asc()).limit(limit)
+    statement = (
+        select(CalendarEvent)
+        .where(CalendarEvent.user_id == user_id)
+        .order_by(CalendarEvent.start_at.asc())
+        .limit(limit)
+    )
     from_at = _parse_datetime(payload.get("from_at"), "from_at")
     to_at = _parse_datetime(payload.get("to_at"), "to_at")
     if from_at:
@@ -1618,23 +1630,19 @@ def _handle_event_list(payload, session, *, user, now, user_id):
 def _handle_event_upcoming(payload, session, *, user, now, user_id):
     days = _clamp_int(payload.get("days"), default=7, minimum=1, maximum=365)
     event_type = EventType(payload["type"]) if payload.get("type") else None
-    events = list_upcoming_events(session, days=days, event_type=event_type)
+    events = list_upcoming_events(session, days=days, event_type=event_type, user_id=user_id)
     return {"events": [event.model_dump(mode="json") for event in events]}
 
 
 def _handle_event_get(payload, session, *, user, now, user_id):
     event_id = _int_id(payload, "event_id")
-    event = session.get(CalendarEvent, event_id)
-    if not event:
-        raise ValueError("event_id not found")
+    event = _get_owned_event(session, user_id, event_id)
     return {"event": event.model_dump(mode="json")}
 
 
 def _handle_event_update(payload, session, *, user, now, user_id):
     event_id = _int_id(payload, "event_id")
-    event = session.get(CalendarEvent, event_id)
-    if not event:
-        raise ValueError("event_id not found")
+    event = _get_owned_event(session, user_id, event_id)
 
     patch = EventUpdate.model_validate({k: v for k, v in payload.items() if k != "event_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1662,9 +1670,7 @@ def _handle_event_update(payload, session, *, user, now, user_id):
 
 def _handle_event_delete(payload, session, *, user, now, user_id):
     event_id = _int_id(payload, "event_id")
-    event = session.get(CalendarEvent, event_id)
-    if not event:
-        raise ValueError("event_id not found")
+    event = _get_owned_event(session, user_id, event_id)
     delete(session, event)
     return {"ok": True, "deleted_id": event_id}
 

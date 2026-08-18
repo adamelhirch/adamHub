@@ -7,10 +7,12 @@ then be scoped independently of the parent habit's FK. No data mutation —
 backfilling existing NULL rows is a separate operational step
 (see scripts/backfill_owner_tenant.py).
 
-Chains onto q4e8e2f5a1d7 (goal) — the current single head.
+Chains onto r5a8c1e4f7b2 (events) — the current single head after merging
+main (events and habits both branched off q4e8e2f5a1d7/goal independently;
+re-chained here to keep a single linear head).
 
 Revision ID: r5a7c9e2b4d6f
-Revises: q4e8e2f5a1d7
+Revises: r5a8c1e4f7b2
 Create Date: 2026-08-18 14:00:00.000000
 """
 
@@ -22,7 +24,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "r5a7c9e2b4d6f"
-down_revision: Union[str, Sequence[str], None] = "q4e8e2f5a1d7"
+down_revision: Union[str, Sequence[str], None] = "r5a8c1e4f7b2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

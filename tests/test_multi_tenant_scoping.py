@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from app.models import (
     Account,
     Budget,
+    CalendarEvent,
     FinanceTransaction,
     Goal,
     GoalMilestone,
@@ -602,6 +603,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "habitlog": 1,
             "financetransaction": 0,
             "budget": 0,
+            "calendarevent": 0,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
@@ -618,6 +620,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "habitlog": 0,
             "financetransaction": 0,
             "budget": 0,
+            "calendarevent": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 2,
@@ -632,6 +635,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "habitlog": 1,
             "financetransaction": 0,
             "budget": 0,
+            "calendarevent": 0,
         }
 
     with Session(test_engine) as session:
@@ -650,6 +654,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "habitlog": 1,
             "financetransaction": 0,
             "budget": 0,
+            "calendarevent": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 0,
@@ -664,6 +669,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "habitlog": 0,
             "financetransaction": 0,
             "budget": 0,
+            "calendarevent": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
@@ -682,6 +688,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "habitlog": 0,
             "financetransaction": 0,
             "budget": 0,
+            "calendarevent": 0,
         }
 
     # The claimed rows now belong to the owner and show up for the owner.
@@ -1123,3 +1130,161 @@ def test_habit_backfill_claims_legacy_rows_to_owner(client, test_engine, owner_i
         f"/api/v1/habits/{legacy_habit_id}", headers=stranger["headers"], json={"description": "x"}
     ).status_code == 404
     assert client.get(f"/api/v1/habits/{legacy_habit_id}/logs", headers=stranger["headers"]).status_code == 404
+
+
+# ── Events ownership (CalendarEvent — distinct from CalendarItem) ────────────
+
+def _create_event_for(client, headers, when=None) -> int:
+    from datetime import UTC, datetime, timedelta
+
+    # +3 days keeps the event inside the default 7-day "upcoming" window.
+    start = when or datetime.now(UTC) + timedelta(days=3)
+    end = start + timedelta(minutes=30)
+    response = client.post(
+        "/api/v1/events",
+        headers=headers,
+        json={
+            "title": "Rendez-vous",
+            "start_at": start.isoformat().replace("+00:00", "Z"),
+            "end_at": end.isoformat().replace("+00:00", "Z"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def test_events_create_auto_scopes_to_user_and_cannot_override(client, test_engine, jwt_headers):
+    user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
+    other = register_user(client, "event-override@adamelhirch.com")["user"]
+
+    # user_id is not part of EventCreate and is silently ignored.
+    event_id = client.post(
+        "/api/v1/events",
+        headers=jwt_headers,
+        json={
+            "title": "Appel",
+            "start_at": "2031-06-01T10:00:00Z",
+            "end_at": "2031-06-01T10:30:00Z",
+            "user_id": other["id"],
+        },
+    ).json()["id"]
+    assert _db_user_id(test_engine, CalendarEvent, event_id) == user["id"]
+
+    patched = client.patch(
+        f"/api/v1/events/{event_id}",
+        headers=jwt_headers,
+        json={"title": "Renommé", "user_id": other["id"]},
+    )
+    assert patched.status_code == 200
+    assert _db_user_id(test_engine, CalendarEvent, event_id) == user["id"]
+
+
+def test_events_cross_tenant_is_404(client):
+    user_a = register_user(client, "event-a@adamelhirch.com")
+    user_b = register_user(client, "event-b@adamelhirch.com")
+    event_id = _create_event_for(client, user_a["headers"])
+
+    # Reads/writes on another user's event are 404 (no existence leak).
+    assert client.get(f"/api/v1/events/{event_id}", headers=user_b["headers"]).status_code == 404
+    assert client.patch(
+        f"/api/v1/events/{event_id}", headers=user_b["headers"], json={"title": "Hacked"}
+    ).status_code == 404
+    assert client.delete(f"/api/v1/events/{event_id}", headers=user_b["headers"]).status_code == 404
+
+    # Lists and upcoming only expose the caller's own rows.
+    assert client.get("/api/v1/events", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/events/upcoming", headers=user_b["headers"]).json() == []
+
+    # The owner still sees and operates the event.
+    assert client.get(f"/api/v1/events/{event_id}", headers=user_a["headers"]).status_code == 200
+    assert [e["id"] for e in client.get("/api/v1/events", headers=user_a["headers"]).json()] == [event_id]
+    assert [e["id"] for e in client.get("/api/v1/events/upcoming", headers=user_a["headers"]).json()] == [event_id]
+
+
+def test_legacy_api_key_events_scoped_to_owner_user(client, auth_headers, owner_headers):
+    event_id = _create_event_for(client, auth_headers)
+
+    # The owner (via JWT) sees everything the legacy key created.
+    assert [e["id"] for e in client.get("/api/v1/events", headers=owner_headers).json()] == [event_id]
+    assert [e["id"] for e in client.get("/api/v1/events/upcoming", headers=owner_headers).json()] == [event_id]
+
+    # A freshly-registered JWT user sees none of it.
+    stranger = register_user(client, "event-legacy-stranger@adamelhirch.com")
+    assert client.get("/api/v1/events", headers=stranger["headers"]).json() == []
+    assert client.get(f"/api/v1/events/{event_id}", headers=stranger["headers"]).status_code == 404
+
+
+def test_skill_event_actions_scoped_to_acting_user(client, test_engine):
+    from sqlmodel import Session
+
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-event-a@adamelhirch.com")
+    intruder = register_user(client, "skill-event-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action(
+            "event.create",
+            {"title": "Appel A", "start_at": "2031-07-01T09:00:00Z", "end_at": "2031-07-01T09:30:00Z"},
+            session,
+            user=owner_user,
+        )
+        event_id = created["event"]["id"]
+
+        # The intruder's list/upcoming never see owner A's event.
+        assert execute_action("event.list", {}, session, user=intruder_user)["events"] == []
+        assert execute_action("event.upcoming", {}, session, user=intruder_user)["events"] == []
+
+        # Direct access to the other user's event fails without leaking existence.
+        for action, payload in [
+            ("event.get", {"event_id": event_id}),
+            ("event.update", {"event_id": event_id, "title": "Hacked"}),
+            ("event.delete", {"event_id": event_id}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: get, update, list.
+        got = execute_action("event.get", {"event_id": event_id}, session, user=owner_user)
+        assert got["event"]["id"] == event_id
+        execute_action("event.update", {"event_id": event_id, "title": "Renommé"}, session, user=owner_user)
+        assert [e["id"] for e in execute_action("event.list", {}, session, user=owner_user)["events"]] == [event_id]
+
+
+def test_backfill_claims_events_for_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from datetime import UTC, datetime, timedelta
+
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(
+            CalendarEvent(
+                title="Legacy event",
+                start_at=datetime.now(UTC) + timedelta(days=5),
+                end_at=datetime.now(UTC) + timedelta(days=5, minutes=30),
+                user_id=None,
+            )
+        )
+        session.commit()
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/events", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        committed = backfill(session, owner_id, commit=True)
+    assert committed["commit"] is True
+    assert committed["updated"]["calendarevent"] == 1
+
+    # After backfill the owner (legacy API-key path and owner JWT) sees the rows;
+    # a non-owner JWT user still sees none of them.
+    assert [e["title"] for e in client.get("/api/v1/events", headers=auth_headers).json()] == ["Legacy event"]
+    assert [e["title"] for e in client.get("/api/v1/events", headers=owner_headers).json()] == ["Legacy event"]
+    stranger = register_user(client, "event-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/events", headers=stranger["headers"]).json() == []
