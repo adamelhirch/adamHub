@@ -283,6 +283,13 @@ def _get_owned_meal_plan(session, meal_plan_id: int, user_id: int) -> MealPlan:
     return plan
 
 
+def _get_owned_note(session, note_id: int, user_id: int) -> Note:
+    note = session.get(Note, note_id)
+    if not note or note.user_id != user_id:
+        raise ValueError("note_id not found")
+    return note
+
+
 def _is_owner_user(user: User | None) -> bool:
     """True when the acting user is the configured ADAMHUB_OWNER_EMAIL user."""
     if user is None:
@@ -1918,13 +1925,18 @@ def _handle_pantry_overview(payload, session, *, user, now, user_id):
 
 def _handle_note_create(payload, session, *, user, now, user_id):
     data = NoteCreate.model_validate(payload)
-    note = create(session, Note(**data.model_dump()))
+    note = create(session, Note(**data.model_dump(), user_id=user_id))
     return {"note": note.model_dump(mode="json")}
 
 
 def _handle_note_list(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=300, minimum=1, maximum=1000)
-    statement = select(Note).order_by(Note.pinned.desc(), Note.updated_at.desc()).limit(limit)
+    statement = (
+        select(Note)
+        .where(Note.user_id == user_id)
+        .order_by(Note.pinned.desc(), Note.updated_at.desc())
+        .limit(limit)
+    )
     if payload.get("kind"):
         statement = statement.where(Note.kind == NoteKind(payload["kind"]))
     if payload.get("pinned") is not None:
@@ -1944,17 +1956,13 @@ def _handle_note_list(payload, session, *, user, now, user_id):
 
 def _handle_note_get(payload, session, *, user, now, user_id):
     note_id = _int_id(payload, "note_id")
-    note = session.get(Note, note_id)
-    if not note:
-        raise ValueError("note_id not found")
+    note = _get_owned_note(session, note_id, user_id)
     return {"note": note.model_dump(mode="json")}
 
 
 def _handle_note_update(payload, session, *, user, now, user_id):
     note_id = _int_id(payload, "note_id")
-    note = session.get(Note, note_id)
-    if not note:
-        raise ValueError("note_id not found")
+    note = _get_owned_note(session, note_id, user_id)
 
     patch = NoteUpdate.model_validate({k: v for k, v in payload.items() if k != "note_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1968,9 +1976,7 @@ def _handle_note_update(payload, session, *, user, now, user_id):
 
 def _handle_note_delete(payload, session, *, user, now, user_id):
     note_id = _int_id(payload, "note_id")
-    note = session.get(Note, note_id)
-    if not note:
-        raise ValueError("note_id not found")
+    note = _get_owned_note(session, note_id, user_id)
 
     delete(session, note)
     return {"ok": True, "deleted_id": note_id}
@@ -1978,7 +1984,12 @@ def _handle_note_delete(payload, session, *, user, now, user_id):
 
 def _handle_note_journal(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=1000)
-    statement = select(Note).where(Note.kind == NoteKind.JOURNAL).order_by(Note.created_at.desc()).limit(limit)
+    statement = (
+        select(Note)
+        .where(Note.kind == NoteKind.JOURNAL, Note.user_id == user_id)
+        .order_by(Note.created_at.desc())
+        .limit(limit)
+    )
     notes = session.exec(statement).all()
 
     from_date = _parse_date(payload.get("from_date"), "from_date")

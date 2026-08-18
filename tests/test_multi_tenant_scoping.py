@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from sqlmodel import Session, select
 
-from app.models import GroceryItem, MealPlan, PantryItem, Recipe
+from app.models import GroceryItem, MealPlan, Note, PantryItem, Recipe
 
 from tests.conftest import OWNER_EMAIL, register_user
 
@@ -17,6 +17,16 @@ def _create_recipe_for(client, headers, name="Poulet", servings=1) -> int:
         "/api/v1/recipes",
         headers=headers,
         json={"name": name, "instructions": "Cuire", "servings": servings},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _create_note_for(client, headers, title="Note", kind="note") -> int:
+    response = client.post(
+        "/api/v1/notes",
+        headers=headers,
+        json={"title": title, "content": "Contenu", "kind": kind},
     )
     assert response.status_code == 200, response.text
     return response.json()["id"]
@@ -37,11 +47,13 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     )
     assert meal_plan.status_code == 200, meal_plan.text
     meal_plan_id = meal_plan.json()["id"]
+    note_id = _create_note_for(client, jwt_headers)
 
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
     assert _db_user_id(test_engine, Recipe, recipe_id) == user["id"]
     assert _db_user_id(test_engine, MealPlan, meal_plan_id) == user["id"]
+    assert _db_user_id(test_engine, Note, note_id) == user["id"]
 
 
 def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
@@ -70,6 +82,13 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
 
+    note_id = client.post(
+        "/api/v1/notes",
+        headers=jwt_headers,
+        json={"title": "Note", "content": "Contenu", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, Note, note_id) == user["id"]
+
 
 def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_headers):
     user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
@@ -96,11 +115,15 @@ def _seed_resources_as_user_a(client, headers):
         headers=headers,
         json={"planned_for": date.today().isoformat(), "slot": "dinner", "recipe_id": recipe_id, "auto_add_missing_ingredients": False},
     )
+    note_id = _create_note_for(client, headers, title="Note privée")
+    journal_id = _create_note_for(client, headers, title="Journal privé", kind="journal")
     return {
         "grocery": grocery_id,
         "pantry": pantry_id,
         "recipe": recipe_id,
         "meal_plan": meal_plan.json()["id"],
+        "note": note_id,
+        "journal": journal_id,
     }
 
 
@@ -113,12 +136,16 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get(f"/api/v1/pantry/items/{ids['pantry']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/notes/{ids['journal']}", headers=user_b["headers"]).status_code == 404
 
-    # Lists only expose the caller's own rows.
+    # Lists only expose the caller's own rows (journal included).
     assert client.get("/api/v1/groceries", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/pantry/items", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/recipes", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/meal-plans", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/notes", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/notes/journal", headers=user_b["headers"]).json() == []
 
 
 def test_user_cannot_modify_another_users_resources(client, jwt_headers):
@@ -130,6 +157,7 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(f"/api/v1/pantry/items/{ids['pantry']}", headers=user_b["headers"], json={"quantity": 0}).status_code == 404
     assert client.patch(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"], json={"note": "Hacked"}).status_code == 404
+    assert client.patch(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
 
 
 def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_headers):
@@ -141,6 +169,7 @@ def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_header
     assert client.delete(f"/api/v1/pantry/items/{ids['pantry']}", headers=user_b["headers"]).status_code == 404
     assert client.delete(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"]).status_code == 404
     assert client.delete(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"]).status_code == 404
+    assert client.delete(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"]).status_code == 404
 
     assert client.post(f"/api/v1/pantry/items/{ids['pantry']}/consume", headers=user_b["headers"], json={"amount": 1}).status_code == 404
     assert client.post(f"/api/v1/recipes/{ids['recipe']}/confirm-cooked", headers=user_b["headers"], json={}).status_code == 404
@@ -163,15 +192,18 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     )
     assert meal_plan.status_code == 200, meal_plan.text
     meal_plan_id = meal_plan.json()["id"]
+    note_id = _create_note_for(client, auth_headers, title="Note legacy")
 
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
     assert [i["id"] for i in client.get("/api/v1/meal-plans", headers=owner_headers).json()] == [meal_plan_id]
+    assert [n["id"] for n in client.get("/api/v1/notes", headers=owner_headers).json()] == [note_id]
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
     assert client.get("/api/v1/groceries", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/meal-plans", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/notes", headers=stranger["headers"]).json() == []
 
 
 def test_legacy_api_key_requires_owner_email_config(client, test_engine, auth_headers, monkeypatch):
@@ -376,6 +408,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(recipe)
         session.flush()
         session.add(MealPlan(recipe_id=recipe.id, user_id=None))
+        session.add(Note(title="Note legacy", content="Contenu", user_id=None))
         session.commit()
 
     with Session(test_engine) as session:
@@ -384,32 +417,35 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "pantryitem": 1,
             "recipe": 1,
             "mealplan": 1,
+            "note": 1,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
-        assert dry["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0}
+        assert dry["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0, "note": 0}
         assert count_null_rows(session) == {
             "groceryitem": 2,
             "pantryitem": 1,
             "recipe": 1,
             "mealplan": 1,
+            "note": 1,
         }
 
     with Session(test_engine) as session:
         committed = backfill(session, owner_id, commit=True)
         assert committed["commit"] is True
-        assert committed["updated"] == {"groceryitem": 2, "pantryitem": 1, "recipe": 1, "mealplan": 1}
+        assert committed["updated"] == {"groceryitem": 2, "pantryitem": 1, "recipe": 1, "mealplan": 1, "note": 1}
         assert count_null_rows(session) == {
             "groceryitem": 0,
             "pantryitem": 0,
             "recipe": 0,
             "mealplan": 0,
+            "note": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
     with Session(test_engine) as session:
         again = backfill(session, owner_id, commit=True)
-        assert again["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0}
+        assert again["updated"] == {"groceryitem": 0, "pantryitem": 0, "recipe": 0, "mealplan": 0, "note": 0}
 
     # The claimed rows now belong to the owner and show up for the owner.
     with Session(test_engine) as session:
