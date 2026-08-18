@@ -80,6 +80,19 @@ sees only its own sessions and measurements; cross-tenant rows are 404.
 This ADR still governs the other off-MVP domains (tasks, events, habits,
 notes, subscriptions, …).
 
+## Superseded for subscriptions (2026-08-18)
+
+`subscriptions` is now tenant-scoped (`user_id` on `subscription`, additive
+migration `r5a7b9c1e3d2f`, backfill via
+`scripts/backfill_owner_tenant.py`) and its router uses `CurrentOrOwnerUser`
+per route instead of the router-level `owner_only_user` gate. Creates
+auto-assign the acting user, lists/upcoming/projection filter by it, and
+get/update resolve the subscription with an ownership check that 404s on
+another user's rows (no existence leak). The `subscription.*` skill actions
+are scoped the same way. A non-Owner JWT now reaches `/subscriptions` and
+sees only its own subscriptions; cross-tenant subscriptions are 404. This
+ADR still governs the other off-MVP domains (tasks, events, habits, notes, …).
+
 ## Superseded for events (2026-08-18)
 
 `events` is now tenant-scoped (`user_id` on `calendarevent`, additive
@@ -90,7 +103,7 @@ same way. This scopes the `CalendarEvent` table only — the calendar domain's
 `CalendarItem` (and `app/services/calendar_hub.py`) stays shared and
 un-scoped. A non-Owner JWT now reaches `/events` and sees only its own
 events; cross-tenant events are 404. This ADR still governs the other
-off-MVP domains (tasks, habits, notes, subscriptions, …).
+off-MVP domains (tasks, habits, notes, …).
 
 ## Superseded for habits (2026-08-18)
 
@@ -101,8 +114,20 @@ per route instead of the router-level `owner_only_user` gate. Habit logs carry
 their own `user_id`; every log route/handler first resolves the parent habit
 with an ownership check. A non-Owner JWT now reaches `/habits` and sees only
 its own habits and logs; cross-tenant habits (and their logs) are 404. This
-ADR still governs the other off-MVP domains (tasks, events, notes,
-subscriptions, …).
+ADR still governs the other off-MVP domains (tasks, notes, subscriptions, …).
+
+## Superseded for tasks (2026-08-18)
+
+`tasks` is now tenant-scoped (`user_id` on `task`, additive migration
+`r3e5g7i9k2m4`, backfill via `scripts/backfill_owner_tenant.py`) and its
+router uses `CurrentOrOwnerUser` per route instead of the router-level
+`owner_only_user` gate. Creates auto-assign `user_id`, lists filter by it,
+and get/update/complete/delete routes 404 on another user's rows (no
+existence leak). The skill `task.*` actions are scoped to the acting user.
+Note: `app/services/calendar_hub.py` is intentionally untouched here — its
+calendar projection and slot validation still scan all tasks and are scoped
+to the acting user in a follow-up change that depends on this `user_id`. This
+ADR still governs the other off-MVP domains (notes, subscriptions, …).
 
 ## Consequences
 

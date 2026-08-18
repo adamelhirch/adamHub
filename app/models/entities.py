@@ -150,6 +150,7 @@ class CalendarFeed(SQLModel, table=True):
 
 class Task(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", ondelete="SET NULL", index=True)
     title: str
     description: str | None = None
     subtasks: list[dict] = Field(default_factory=list, sa_column=Column(JSON))
@@ -382,6 +383,7 @@ class CalendarEvent(SQLModel, table=True):
 
 class Subscription(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     category: str = "general"
     amount: float

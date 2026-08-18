@@ -1,10 +1,10 @@
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api._crud import get_or_404
-from app.api.deps import SessionDep, owner_only_user
+from app.api._crud import get_owned_or_404
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import CalendarSource, Subscription
 from app.schemas import (
     SubscriptionCreate,
@@ -15,7 +15,7 @@ from app.schemas import (
 from app.services.life import build_subscription_projection
 from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/subscriptions", tags=["subscriptions"], dependencies=[Depends(owner_only_user)])
+router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
 
 def _subscription_slot_start(day: date) -> datetime:
@@ -23,7 +23,9 @@ def _subscription_slot_start(day: date) -> datetime:
 
 
 @router.post("", response_model=SubscriptionRead)
-def create_subscription(payload: SubscriptionCreate, session: SessionDep) -> SubscriptionRead:
+def create_subscription(
+    payload: SubscriptionCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> SubscriptionRead:
     slot_start = _subscription_slot_start(payload.next_due_date)
     try:
         validate_calendar_slot_free(
@@ -35,7 +37,7 @@ def create_subscription(payload: SubscriptionCreate, session: SessionDep) -> Sub
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    sub = Subscription(**payload.model_dump())
+    sub = Subscription(**payload.model_dump(), user_id=user.id)
     session.add(sub)
     session.commit()
     session.refresh(sub)
@@ -45,10 +47,16 @@ def create_subscription(payload: SubscriptionCreate, session: SessionDep) -> Sub
 @router.get("", response_model=list[SubscriptionRead])
 def list_subscriptions(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     active_only: bool = True,
     limit: int = Query(default=200, ge=1, le=500),
 ) -> list[SubscriptionRead]:
-    statement = select(Subscription).order_by(Subscription.next_due_date.asc()).limit(limit)
+    statement = (
+        select(Subscription)
+        .where(Subscription.user_id == user.id)
+        .order_by(Subscription.next_due_date.asc())
+        .limit(limit)
+    )
     if active_only:
         statement = statement.where(Subscription.active.is_(True))
 
@@ -59,6 +67,7 @@ def list_subscriptions(
 @router.get("/upcoming", response_model=list[SubscriptionRead])
 def list_upcoming_subscriptions(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     days: int = Query(default=30, ge=1, le=365),
 ) -> list[SubscriptionRead]:
     today = date.today()
@@ -66,28 +75,46 @@ def list_upcoming_subscriptions(
 
     subs = session.exec(
         select(Subscription)
-        .where(Subscription.active.is_(True), Subscription.next_due_date >= today, Subscription.next_due_date <= until)
+        .where(
+            Subscription.user_id == user.id,
+            Subscription.active.is_(True),
+            Subscription.next_due_date >= today,
+            Subscription.next_due_date <= until,
+        )
         .order_by(Subscription.next_due_date.asc())
     ).all()
     return [SubscriptionRead.model_validate(sub, from_attributes=True) for sub in subs]
 
 
 @router.get("/projection", response_model=SubscriptionProjection)
-def subscription_projection(session: SessionDep, currency: str = "EUR") -> SubscriptionProjection:
-    return build_subscription_projection(session, currency=currency)
+def subscription_projection(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+    currency: str = "EUR",
+) -> SubscriptionProjection:
+    return build_subscription_projection(session, currency=currency, user_id=user.id)
 
 
 @router.get("/{subscription_id}", response_model=SubscriptionRead)
-def get_subscription(subscription_id: int, session: SessionDep) -> SubscriptionRead:
-    sub = get_or_404(session, Subscription, subscription_id, detail="Subscription not found")
+def get_subscription(
+    subscription_id: int, session: SessionDep, user: CurrentOrOwnerUser
+) -> SubscriptionRead:
+    sub = get_owned_or_404(
+        session, Subscription, subscription_id, user_id=user.id, detail="Subscription not found"
+    )
     return SubscriptionRead.model_validate(sub, from_attributes=True)
 
 
 @router.patch("/{subscription_id}", response_model=SubscriptionRead)
-def update_subscription(subscription_id: int, payload: SubscriptionUpdate, session: SessionDep) -> SubscriptionRead:
-    sub = session.get(Subscription, subscription_id)
-    if not sub:
-        raise HTTPException(status_code=404, detail="Subscription not found")
+def update_subscription(
+    subscription_id: int,
+    payload: SubscriptionUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SubscriptionRead:
+    sub = get_owned_or_404(
+        session, Subscription, subscription_id, user_id=user.id, detail="Subscription not found"
+    )
 
     updates = payload.model_dump(exclude_unset=True)
     next_due_date = updates.get("next_due_date", sub.next_due_date)

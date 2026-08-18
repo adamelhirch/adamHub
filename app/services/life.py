@@ -137,10 +137,15 @@ def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
     )
 
 
-def build_subscription_projection(session: Session, currency: str = "EUR") -> SubscriptionProjection:
-    subscriptions = session.exec(
-        select(Subscription).where(Subscription.active.is_(True), Subscription.currency == currency)
-    ).all()
+def build_subscription_projection(
+    session: Session, currency: str = "EUR", *, user_id: int | None = None
+) -> SubscriptionProjection:
+    statement = select(Subscription).where(
+        Subscription.active.is_(True), Subscription.currency == currency
+    )
+    if user_id is not None:
+        statement = statement.where(Subscription.user_id == user_id)
+    subscriptions = session.exec(statement).all()
 
     monthly = 0.0
     for sub in subscriptions:
@@ -266,7 +271,9 @@ def list_upcoming_events(
     return session.exec(statement).all()
 
 
-def list_upcoming_subscriptions(session: Session, days: int = 30) -> list[Subscription]:
+def list_upcoming_subscriptions(
+    session: Session, days: int = 30, *, user_id: int | None = None
+) -> list[Subscription]:
     today = date.today()
     until = today + timedelta(days=days)
     statement = (
@@ -274,6 +281,8 @@ def list_upcoming_subscriptions(session: Session, days: int = 30) -> list[Subscr
         .where(Subscription.active.is_(True), Subscription.next_due_date >= today, Subscription.next_due_date <= until)
         .order_by(Subscription.next_due_date.asc())
     )
+    if user_id is not None:
+        statement = statement.where(Subscription.user_id == user_id)
     return session.exec(statement).all()
 
 

@@ -19,6 +19,9 @@ from app.models import (
     PantryItem,
     Recipe,
     SavingsGoal,
+    Subscription,
+
+    Task,
     TransactionKind,
 )
 
@@ -80,6 +83,30 @@ def _create_fitness_measurement_for(
     return response.json()["id"]
 
 
+def _create_subscription_for(
+    client,
+    headers,
+    name="Netflix",
+    amount=12.99,
+    next_due_date: date | None = None,
+) -> int:
+    """Create one subscription via the API, defaulting to a date 10 days out."""
+    if next_due_date is None:
+        next_due_date = date.today() + timedelta(days=10)
+    response = client.post(
+        "/api/v1/subscriptions",
+        headers=headers,
+        json={
+            "name": name,
+            "amount": amount,
+            "next_due_date": next_due_date.isoformat(),
+            "interval": "monthly",
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
 def _create_habit_for(client, headers, name="Boire de l'eau") -> int:
     response = client.post("/api/v1/habits", headers=headers, json={"name": name})
     assert response.status_code == 200, response.text
@@ -93,6 +120,14 @@ def _log_habit_for(client, headers, habit_id: int, value: int = 1) -> int:
         json={"value": value, "note": "matin"},
 
     )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _create_task_for(client, headers, title="Réunion") -> int:
+    # No due_at => schedule_mode NONE => no calendar slot to validate, so tasks
+    # from different tenants never collide in the shared calendar projection.
+    response = client.post("/api/v1/tasks", headers=headers, json={"title": title})
     assert response.status_code == 200, response.text
     return response.json()["id"]
 
@@ -117,9 +152,11 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     fitness_session_id = _create_fitness_session_for(client, jwt_headers, title="Séance auto")
     measurement_id = _create_fitness_measurement_for(client, jwt_headers)
 
+    subscription_id = _create_subscription_for(client, jwt_headers, name="Apple One")
     habit_id = _create_habit_for(client, jwt_headers, name="Étirer le dos")
     habit_log_id = _log_habit_for(client, jwt_headers, habit_id)
 
+    task_id = _create_task_for(client, jwt_headers, title="Préparer le voyage")
 
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
@@ -130,8 +167,11 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     assert _db_user_id(test_engine, FitnessSession, fitness_session_id) == user["id"]
     assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
 
+    assert _db_user_id(test_engine, Subscription, subscription_id) == user["id"]
     assert _db_user_id(test_engine, Habit, habit_id) == user["id"]
     assert _db_user_id(test_engine, HabitLog, habit_log_id) == user["id"]
+
+    assert _db_user_id(test_engine, Task, task_id) == user["id"]
 
 
 
@@ -189,12 +229,31 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
 
+    subscription_id = client.post(
+        "/api/v1/subscriptions",
+        headers=jwt_headers,
+        json={
+            "name": "Netflix",
+            "amount": 12.99,
+            "next_due_date": (date.today() + timedelta(days=15)).isoformat(),
+            "interval": "monthly",
+            "user_id": other["id"],
+        },
+    ).json()["id"]
+    assert _db_user_id(test_engine, Subscription, subscription_id) == user["id"]
     habit_id = client.post(
         "/api/v1/habits",
         headers=jwt_headers,
         json={"name": "Courir", "user_id": other["id"]},
     ).json()["id"]
     assert _db_user_id(test_engine, Habit, habit_id) == user["id"]
+
+    task_id = client.post(
+        "/api/v1/tasks",
+        headers=jwt_headers,
+        json={"title": "Ménage", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, Task, task_id) == user["id"]
 
 
 
@@ -238,6 +297,14 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     assert patched_measurement.status_code == 200
     assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
 
+    subscription_id = _create_subscription_for(client, jwt_headers, name="Preview")
+    patched_subscription = client.patch(
+        f"/api/v1/subscriptions/{subscription_id}",
+        headers=jwt_headers,
+        json={"amount": 20.0, "user_id": other["id"]},
+    )
+    assert patched_subscription.status_code == 200
+    assert _db_user_id(test_engine, Subscription, subscription_id) == user["id"]
     habit_id = _create_habit_for(client, jwt_headers, name="Lire")
     patched_habit = client.patch(
         f"/api/v1/habits/{habit_id}",
@@ -246,6 +313,15 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     )
     assert patched_habit.status_code == 200
     assert _db_user_id(test_engine, Habit, habit_id) == user["id"]
+
+    task_id = _create_task_for(client, jwt_headers, title="Réunion annuelle")
+    patched_task = client.patch(
+        f"/api/v1/tasks/{task_id}",
+        headers=jwt_headers,
+        json={"title": "Réunion déplacée", "user_id": other["id"]},
+    )
+    assert patched_task.status_code == 200
+    assert _db_user_id(test_engine, Task, task_id) == user["id"]
 
 
 
@@ -263,6 +339,11 @@ def _seed_resources_as_user_a(client, headers):
     note_id = _create_note_for(client, headers, title="Note privée")
     journal_id = _create_note_for(client, headers, title="Journal privé", kind="journal")
     goal_id = _create_goal_for(client, headers, title="Objectif secret de A")
+    subscription_id = _create_subscription_for(
+        client, headers, name="Abonnement privé de A", next_due_date=date.today() + timedelta(days=10)
+    )
+
+    task_id = _create_task_for(client, headers, title="Tâche secrète de A")
     milestone = client.post(
         f"/api/v1/goals/{goal_id}/milestones",
         headers=headers,
@@ -283,10 +364,12 @@ def _seed_resources_as_user_a(client, headers):
         "note": note_id,
         "journal": journal_id,
         "goal": goal_id,
+        "task": task_id,
         "milestone": milestone.json()["id"],
         "fitness_session": fitness_session_id,
         "measurement": measurement_id,
 
+        "subscription": subscription_id,
         "habit": habit_id,
         "habit_log": habit_log_id,
 
@@ -306,6 +389,7 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get(f"/api/v1/notes/{ids['journal']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"]).status_code == 404
     assert client.get(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"]).status_code == 404
+    assert client.get(f"/api/v1/subscriptions/{ids['subscription']}", headers=user_b["headers"]).status_code == 404
     assert client.patch(f"/api/v1/habits/{ids['habit']}", headers=user_b["headers"], json={"active": False}).status_code == 404
     assert client.get(f"/api/v1/habits/{ids['habit']}/logs", headers=user_b["headers"]).status_code == 404
 
@@ -320,7 +404,12 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get("/api/v1/fitness/sessions", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/fitness/measurements", headers=user_b["headers"]).json() == []
 
+    assert client.get("/api/v1/subscriptions", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions/upcoming", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions/projection", headers=user_b["headers"]).json()["monthly_total"] == 0.0
     assert client.get("/api/v1/habits", headers=user_b["headers"]).json() == []
+
+    assert client.get("/api/v1/tasks", headers=user_b["headers"]).json() == []
 
 
 
@@ -334,6 +423,7 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(f"/api/v1/recipes/{ids['recipe']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"], json={"note": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
+    assert client.patch(f"/api/v1/subscriptions/{ids['subscription']}", headers=user_b["headers"], json={"amount": 0.01}).status_code == 404
     assert client.patch(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
     assert client.patch(
         f"/api/v1/fitness/sessions/{ids['fitness_session']}", headers=user_b["headers"], json={"note": "Hacked"}
@@ -346,6 +436,7 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     ).status_code == 404
 
     assert client.patch(f"/api/v1/habits/{ids['habit']}", headers=user_b["headers"], json={"name": "Hacked"}).status_code == 404
+    assert client.patch(f"/api/v1/tasks/{ids['task']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
 
     assert (
         client.patch(
@@ -380,6 +471,9 @@ def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_header
 
     assert client.post(f"/api/v1/habits/{ids['habit']}/logs", headers=user_b["headers"], json={"value": 1}).status_code == 404
 
+    assert client.post(f"/api/v1/tasks/{ids['task']}/complete", headers=user_b["headers"]).status_code == 404
+    assert client.delete(f"/api/v1/tasks/{ids['task']}", headers=user_b["headers"]).status_code == 404
+
 
 
 # ── Legacy API-key path resolves to the owner user ───────────────────────────
@@ -400,8 +494,12 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     fitness_session_id = _create_fitness_session_for(client, auth_headers, title="Séance legacy")
     measurement_id = _create_fitness_measurement_for(client, auth_headers)
 
+    subscription_id = _create_subscription_for(
+        client, auth_headers, name="Abonnement legacy", next_due_date=date.today() + timedelta(days=14)
+    )
     habit_id = _create_habit_for(client, auth_headers, name="Habitude legacy")
 
+    task_id = _create_task_for(client, auth_headers, title="Tâche legacy")
 
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
@@ -413,6 +511,9 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
 
     assert [h["id"] for h in client.get("/api/v1/habits", headers=owner_headers).json()] == [habit_id]
 
+    assert [s["id"] for s in client.get("/api/v1/subscriptions", headers=owner_headers).json()] == [subscription_id]
+
+    assert [t["id"] for t in client.get("/api/v1/tasks", headers=owner_headers).json()] == [task_id]
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
@@ -423,7 +524,10 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     assert client.get("/api/v1/fitness/sessions", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/fitness/measurements", headers=stranger["headers"]).json() == []
 
+    assert client.get("/api/v1/subscriptions", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/habits", headers=stranger["headers"]).json() == []
+
+    assert client.get("/api/v1/tasks", headers=stranger["headers"]).json() == []
 
 
 
@@ -499,8 +603,9 @@ def test_meal_plan_not_blocked_by_unrelated_task_at_same_time(client, auth_heade
     user = register_user(client, "meal-not-blocked@adamelhirch.com")
     recipe_id = _create_recipe_for(client, user["headers"])
 
-    # An unrelated one-shot task occupies the exact same time window. Tasks are
-    # owner-only (unscoped domain), so it is created as the owner via X-API-Key.
+    # An unrelated one-shot task occupies the exact same time window. The task
+    # is created through the legacy X-API-Key path, which resolves to the owner
+    # tenant (tasks is tenant-scoped since t6).
     planned_for = (date.today() + timedelta(days=1)).isoformat()
     task = client.post(
         "/api/v1/tasks",
@@ -596,6 +701,58 @@ def test_skill_goal_actions_scoped_to_acting_user(client, test_engine):
         assert milestones["milestones"][0]["completed"] is True
 
 
+# ── Skill subscription.* actions are scoped to the acting user ──────────────
+
+def test_skill_subscription_actions_scoped_to_acting_user(client, test_engine):
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-sub-a@adamelhirch.com")
+    intruder = register_user(client, "skill-sub-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action(
+            "subscription.create",
+            {"name": "Netflix", "amount": 12.99, "next_due_date": (date.today() + timedelta(days=3)).isoformat()},
+            session,
+            user=owner_user,
+        )
+        sub_id = created["subscription"]["id"]
+
+        # The intruder's lists/upcoming/projection never see owner A's rows.
+        assert execute_action("subscription.list", {}, session, user=intruder_user)["subscriptions"] == []
+        assert execute_action("subscription.upcoming", {"days": 30}, session, user=intruder_user)["subscriptions"] == []
+        assert (
+            execute_action("subscription.projection", {}, session, user=intruder_user)["projection"]["monthly_total"]
+            == 0.0
+        )
+
+        # Direct access to the other user's subscription fails without leaking existence.
+        for action, payload in [
+            ("subscription.get", {"subscription_id": sub_id}),
+            ("subscription.update", {"subscription_id": sub_id, "amount": 0.01}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: get, update, list, upcoming, projection.
+        got = execute_action("subscription.get", {"subscription_id": sub_id}, session, user=owner_user)
+        assert got["subscription"]["id"] == sub_id
+        execute_action("subscription.update", {"subscription_id": sub_id, "amount": 20.0}, session, user=owner_user)
+        listed = execute_action("subscription.list", {}, session, user=owner_user)["subscriptions"]
+        assert [s["id"] for s in listed] == [sub_id]
+        upcoming = execute_action("subscription.upcoming", {"days": 30}, session, user=owner_user)["subscriptions"]
+        assert [s["id"] for s in upcoming] == [sub_id]
+        projection = execute_action("subscription.projection", {}, session, user=owner_user)["projection"]
+        assert projection["monthly_total"] == 20.0
+
+
 # ── Supermarket connection ownership (#58) ───────────────────────────────────
 
 def _import_connection(client, headers, label="Mon drive", store="intermarche") -> int:
@@ -685,6 +842,15 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(MealPlan(recipe_id=recipe.id, user_id=None))
         session.add(Note(title="Note legacy", content="Contenu", user_id=None))
         session.add(Account(name="Livret A", user_id=None))
+        session.add(
+            Subscription(
+                name="Apple One",
+                amount=4.99,
+                currency="EUR",
+                next_due_date=date.today() + timedelta(days=25),
+                user_id=None,
+            )
+        )
         goal = SavingsGoal(title="Voyage", target_amount=5000.0, current_amount=1000.0, user_id=None)
         session.add(goal)
         hiking_goal = Goal(title="Gravir l'Everest", user_id=None)
@@ -695,6 +861,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         session.add(legacy_habit)
         session.flush()
         session.add(HabitLog(habit_id=legacy_habit.id, user_id=None))
+
+        session.add(Task(title="Tâche legacy", user_id=None))
         session.commit()
 
     with Session(test_engine) as session:
@@ -707,8 +875,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "subscription": 1,
             "habit": 1,
             "habitlog": 1,
+            "task": 1,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
@@ -728,8 +898,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "subscription": 0,
             "habit": 0,
             "habitlog": 0,
+            "task": 0,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
@@ -747,8 +919,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "subscription": 1,
             "habit": 1,
             "habitlog": 1,
+            "task": 1,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
@@ -770,8 +944,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 1,
             "savingsgoal": 1,
             "goal": 1,
+            "subscription": 1,
             "habit": 1,
             "habitlog": 1,
+            "task": 1,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
@@ -789,8 +965,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "subscription": 0,
             "habit": 0,
             "habitlog": 0,
+            "task": 0,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
@@ -812,8 +990,10 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "account": 0,
             "savingsgoal": 0,
             "goal": 0,
+            "subscription": 0,
             "habit": 0,
             "habitlog": 0,
+            "task": 0,
             "financetransaction": 0,
             "budget": 0,
             "fitnessmeasurement": 0,
@@ -830,6 +1010,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
         assert session.exec(select(Habit)).all()[0].user_id == owner_id
         assert session.exec(select(HabitLog)).all()[0].user_id == owner_id
 
+        assert session.exec(select(Task)).all()[0].user_id == owner_id
+
 
 def test_backfill_rejects_unknown_owner(client, test_engine):
     from scripts.backfill_owner_tenant import resolve_owner
@@ -837,6 +1019,109 @@ def test_backfill_rejects_unknown_owner(client, test_engine):
     with Session(test_engine) as session:
         assert resolve_owner(session, "does-not-exist@adamelhirch.com") is None
         assert resolve_owner(session, OWNER_EMAIL) is not None
+
+
+def test_backfill_claims_subscription_rows_for_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        sub = Subscription(
+            name="Legacy SaaS",
+            amount=9.99,
+            currency="EUR",
+            next_due_date=date.today() + timedelta(days=20),
+            user_id=None,
+        )
+        session.add(sub)
+        session.commit()
+        legacy_id = sub.id
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/subscriptions", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        result = backfill(session, owner_id, commit=True)
+    assert result["commit"] is True
+    assert result["updated"]["subscription"] == 1
+
+    # After backfill the owner finds their rows again via both auth paths;
+    # a non-owner JWT user still cannot see or touch them.
+    assert [s["id"] for s in client.get("/api/v1/subscriptions", headers=auth_headers).json()] == [legacy_id]
+    assert [s["id"] for s in client.get("/api/v1/subscriptions", headers=owner_headers).json()] == [legacy_id]
+    stranger = register_user(client, "subscription-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/subscriptions", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/subscriptions/upcoming", headers=stranger["headers"]).json() == []
+    assert client.patch(
+        f"/api/v1/subscriptions/{legacy_id}", headers=stranger["headers"], json={"amount": 0}
+    ).status_code == 404
+
+# ── Task scoping: API + skill (t6) ───────────────────────────────────────────
+
+def test_legacy_tasks_claimed_by_backfill_are_visible_to_owner_only(client, test_engine, owner_id, auth_headers, owner_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(Task(title="Tâche d'avant la scoping", user_id=None))
+        session.commit()
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/tasks", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        committed = backfill(session, owner_id, commit=True)
+        assert committed["updated"]["task"] == 1
+
+    # The owner finds the pre-backfill task again via both auth paths.
+    assert [t["title"] for t in client.get("/api/v1/tasks", headers=auth_headers).json()] == ["Tâche d'avant la scoping"]
+    assert [t["title"] for t in client.get("/api/v1/tasks", headers=owner_headers).json()] == ["Tâche d'avant la scoping"]
+
+    # A non-owner user still sees none of it.
+    stranger = register_user(client, "task-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/tasks", headers=stranger["headers"]).json() == []
+    assert client.patch("/api/v1/tasks/1", headers=stranger["headers"], json={"title": "Hacked"}).status_code == 404
+
+
+def test_skill_task_actions_scoped_to_acting_user(client, test_engine):
+    # The skill HTTP gateway is still Owner-only (ADR-0001), so the handler
+    # seam is exercised directly — the same seam MCP dispatches through.
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-task-a@adamelhirch.com")
+    intruder = register_user(client, "skill-task-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action("task.create", {"title": "Tâche A"}, session, user=owner_user)
+        task_id = created["task"]["id"]
+        assert created["task"]["status"] == "todo"
+
+        # The intruder's list never sees owner A's task.
+        assert execute_action("task.list", {}, session, user=intruder_user)["tasks"] == []
+
+        # Direct access to the other user's task fails without leaking existence.
+        for action, payload in [
+            ("task.update", {"task_id": task_id, "title": "Hacked"}),
+            ("task.complete", {"task_id": task_id}),
+            ("task.delete", {"task_id": task_id}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on it: update, complete, list, delete.
+        updated = execute_action("task.update", {"task_id": task_id, "priority": "high"}, session, user=owner_user)
+        assert updated["task"]["priority"] == "high"
+        completed = execute_action("task.complete", {"task_id": task_id}, session, user=owner_user)
+        assert completed["task"]["status"] == "done"
+        listed = execute_action("task.list", {"status": "done"}, session, user=owner_user)["tasks"]
+        assert [t["id"] for t in listed] == [task_id]
+        execute_action("task.delete", {"task_id": task_id}, session, user=owner_user)
+        assert execute_action("task.list", {}, session, user=owner_user)["tasks"] == []
 
 
 # ── Finance scoping: transactions & budgets (t1) ─────────────────────────────
