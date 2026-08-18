@@ -6,6 +6,7 @@ from app.models import (
     Account,
     Budget,
     CalendarEvent,
+    CalendarItem,
     FinanceTransaction,
     FitnessMeasurement,
     FitnessSession,
@@ -885,7 +886,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "fitnesssession": 0,
 
             "calendarevent": 0,
-
+            "calendaritem": 0,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
@@ -908,7 +909,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "fitnesssession": 0,
 
             "calendarevent": 0,
-
+            "calendaritem": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 2,
@@ -929,7 +930,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "fitnesssession": 0,
 
             "calendarevent": 0,
-
+            "calendaritem": 0,
         }
 
     with Session(test_engine) as session:
@@ -954,7 +955,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "fitnesssession": 0,
 
             "calendarevent": 0,
-
+            "calendaritem": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 0,
@@ -975,7 +976,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "fitnesssession": 0,
 
             "calendarevent": 0,
-
+            "calendaritem": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
@@ -1000,7 +1001,7 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "fitnesssession": 0,
 
             "calendarevent": 0,
-
+            "calendaritem": 0,
         }
 
     # The claimed rows now belong to the owner and show up for the owner.
@@ -1836,3 +1837,214 @@ def test_backfill_claims_events_for_owner(client, test_engine, owner_id, auth_he
     assert [e["title"] for e in client.get("/api/v1/events", headers=owner_headers).json()] == ["Legacy event"]
     stranger = register_user(client, "event-backfill-stranger@adamelhirch.com")
     assert client.get("/api/v1/events", headers=stranger["headers"]).json() == []
+
+
+# ── Calendar items (t11): CalendarItem user_id + user-scoped calendar_hub ─────
+
+def _create_calendar_item_for(
+    client,
+    headers,
+    title="Créneau perso",
+    start_at="2026-09-10T10:00:00Z",
+    end_at="2026-09-10T11:00:00Z",
+) -> int:
+    response = client.post(
+        "/api/v1/calendar/items",
+        headers=headers,
+        json={"title": title, "start_at": start_at, "end_at": end_at, "all_day": False},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def test_calendar_items_cross_tenant_is_404(client):
+    user_a = register_user(client, "calendar-a@adamelhirch.com")
+    user_b = register_user(client, "calendar-b@adamelhirch.com")
+    item_id = _create_calendar_item_for(client, user_a["headers"], title="Bloc A")
+
+    # Lists only expose the caller's own items.
+    assert client.get("/api/v1/calendar/items", headers=user_b["headers"]).json() == []
+
+    # Direct reads/writes on another user's item are 404 (no existence leak).
+    assert client.get(f"/api/v1/calendar/items/{item_id}", headers=user_b["headers"]).status_code == 404
+    assert (
+        client.patch(
+            f"/api/v1/calendar/items/{item_id}", headers=user_b["headers"], json={"title": "Hacked"}
+        ).status_code
+        == 404
+    )
+    assert client.delete(f"/api/v1/calendar/items/{item_id}", headers=user_b["headers"]).status_code == 404
+    assert client.post(
+        f"/api/v1/calendar/reminders/{item_id}/ack", headers=user_b["headers"]
+    ).status_code == 404
+
+    # Syncing as B never materializes or exposes A's items.
+    assert client.post("/api/v1/calendar/sync", headers=user_b["headers"]).status_code == 200
+    assert client.get(f"/api/v1/calendar/items/{item_id}", headers=user_b["headers"]).status_code == 404
+
+    # The tenant that owns the item still reads, writes and deletes it.
+    assert client.get(f"/api/v1/calendar/items/{item_id}", headers=user_a["headers"]).status_code == 200
+    assert (
+        client.patch(
+            f"/api/v1/calendar/items/{item_id}", headers=user_a["headers"], json={"title": "Bloqué A"}
+        ).status_code
+        == 200
+    )
+    assert client.delete(f"/api/v1/calendar/items/{item_id}", headers=user_a["headers"]).status_code == 200
+
+
+def test_calendar_sync_and_agenda_never_include_another_users_domains(client, auth_headers):
+    day = "2026-09-10"
+    user_a = register_user(client, "agenda-a@adamelhirch.com")
+    user_b = register_user(client, "agenda-b@adamelhirch.com")
+    a_headers = user_a["headers"]
+    b_headers = user_b["headers"]
+
+    # User A spreads one record of every calendar-linked domain across the day.
+    manual_id = _create_calendar_item_for(client, a_headers, title="Bloc manuel A", start_at=f"{day}T10:00:00Z", end_at=f"{day}T11:00:00Z")
+
+    sub_id = _create_subscription_for(
+        client, a_headers, name="Netflix A", amount=12.99, next_due_date=date(2026, 9, 10)
+    )
+
+    task = client.post(
+        "/api/v1/tasks",
+        headers=a_headers,
+        json={"title": "Tâche A", "due_at": f"{day}T09:30:00Z", "estimated_minutes": 30},
+    )
+    assert task.status_code == 200, task.text
+    task_id = task.json()["id"]
+
+    event = client.post(
+        "/api/v1/events",
+        headers=a_headers,
+        json={"title": "Événement A", "start_at": f"{day}T14:00:00Z", "end_at": f"{day}T15:00:00Z"},
+    )
+    assert event.status_code == 200, event.text
+    event_id = event.json()["id"]
+
+    recipe_id = _create_recipe_for(client, a_headers, name="Repas A")
+    meal = client.post(
+        "/api/v1/meal-plans",
+        headers=a_headers,
+        json={"planned_at": f"{day}T12:30:00Z", "recipe_id": recipe_id, "auto_add_missing_ingredients": False},
+    )
+    assert meal.status_code == 200, meal.text
+    meal_plan_id = meal.json()["id"]
+
+    fitness_id = _create_fitness_session_for(client, a_headers, title="Séance A", planned_at=f"{day}T18:00:00Z")
+
+    habit_id = _create_habit_for(client, a_headers, name="Habitude A")
+    habit = client.patch(f"/api/v1/habits/{habit_id}", headers=a_headers, json={"schedule_time": "20:00"})
+    assert habit.status_code == 200, habit.text
+
+    # A synchronizes and its agenda shows every one of its own domains.
+    assert client.post("/api/v1/calendar/sync", headers=a_headers).status_code == 200
+    a_agenda = client.get(
+        "/api/v1/calendar/agenda", headers=a_headers, params={"day": day, "include_completed": "true"}
+    )
+    assert a_agenda.status_code == 200, a_agenda.text
+    a_refs = {(row["source"], row["source_ref_id"]) for row in a_agenda.json()}
+    assert ("task", task_id) in a_refs
+    assert ("event", event_id) in a_refs
+    assert ("subscription", sub_id) in a_refs
+    assert ("meal_plan", meal_plan_id) in a_refs
+    assert ("fitness_session", fitness_id) in a_refs
+    assert ("habit", habit_id) in a_refs
+    # Manual blocks carry no source_ref_id — they are matched by title here.
+    assert "Bloc manuel A" in {row["title"] for row in a_agenda.json()}
+
+    # B synchronizes and its agenda never contains any of A's domains.
+    assert client.post("/api/v1/calendar/sync", headers=b_headers).status_code == 200
+    b_agenda = client.get(
+        "/api/v1/calendar/agenda", headers=b_headers, params={"day": day, "include_completed": "true"}
+    )
+    assert b_agenda.status_code == 200, b_agenda.text
+    b_refs = {(row["source"], row["source_ref_id"]) for row in b_agenda.json()}
+    for source_ref in [("task", task_id), ("event", event_id), ("subscription", sub_id), ("meal_plan", meal_plan_id), ("fitness_session", fitness_id), ("habit", habit_id)]:
+        assert source_ref not in b_refs
+    a_titles = {"Bloc manuel A", "Tâche A", "Événement A", "Subscription: Netflix A", "Repas A", "Séance A", "Habitude A"}
+    assert not {row["title"] for row in b_agenda.json()} & a_titles
+
+    # The broad item list is isolated the same way.
+    b_items = client.get("/api/v1/calendar/items", headers=b_headers, params={"include_completed": True, "limit": 500}).json()
+    assert b_items == []
+
+
+def test_calendar_skill_actions_are_user_scoped(client, test_engine):
+    # The skill HTTP gateway is still Owner-only (ADR-0001), so the handler seam
+    # is exercised directly — the same seam MCP dispatches through.
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-calendar-a@adamelhirch.com")
+    intruder = register_user(client, "skill-calendar-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action(
+            "calendar.add_item",
+            {"title": "Bloc owner", "start_at": "2026-09-10T10:00:00Z", "end_at": "2026-09-10T11:00:00Z"},
+            session,
+            user=owner_user,
+        )
+        item_id = created["item"]["id"]
+
+        # The intruder never sees the owner's calendar items.
+        assert execute_action("calendar.list_items", {}, session, user=intruder_user)["items"] == []
+
+        # Direct operations on the other user's item fail without leaking existence.
+        for action, payload in [
+            ("calendar.update_item", {"item_id": item_id, "title": "Hacked"}),
+            ("calendar.delete_item", {"item_id": item_id}),
+            ("calendar.ack_reminder", {"item_id": item_id}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still operates on its own item.
+        assert execute_action("calendar.list_items", {}, session, user=owner_user)["items"][0]["id"] == item_id
+        execute_action("calendar.update_item", {"item_id": item_id, "title": "Renommé"}, session, user=owner_user)
+        execute_action("calendar.delete_item", {"item_id": item_id}, session, user=owner_user)
+
+
+def test_calendar_backfill_claims_legacy_rows_to_owner(client, test_engine, owner_id, auth_headers, owner_headers):
+    from datetime import UTC, datetime
+
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(
+            CalendarItem(
+                title="Item legacy",
+                start_at=datetime(2026, 9, 10, 10, tzinfo=UTC),
+                end_at=datetime(2026, 9, 10, 11, tzinfo=UTC),
+                generated=False,
+                user_id=None,
+            )
+        )
+        session.commit()
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/calendar/items", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        dry = backfill(session, owner_id, commit=False)
+    assert dry["counts"]["calendaritem"] == 1
+
+    with Session(test_engine) as session:
+        committed = backfill(session, owner_id, commit=True)
+    assert committed["commit"] is True
+    assert committed["updated"]["calendaritem"] == 1
+
+    # After backfill the owner (legacy API-key path and owner JWT) sees the row;
+    # a non-owner JWT user still sees none of it.
+    assert [i["title"] for i in client.get("/api/v1/calendar/items", headers=auth_headers).json()] == ["Item legacy"]
+    assert [i["title"] for i in client.get("/api/v1/calendar/items", headers=owner_headers).json()] == ["Item legacy"]
+    stranger = register_user(client, "calendar-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/calendar/items", headers=stranger["headers"]).json() == []

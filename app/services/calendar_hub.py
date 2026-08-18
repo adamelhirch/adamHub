@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from collections.abc import Sequence
 import hashlib
 
+from sqlalchemy import false
 from sqlmodel import Session, select
 
 from app.models import (
@@ -139,8 +140,11 @@ def _task_occurrences(task: Task, range_start: datetime, range_end: datetime) ->
     return occurrences
 
 
-def _habit_logs_by_day(session: Session) -> dict[int, dict[str, int]]:
-    rows = session.exec(select(HabitLog)).all()
+def _habit_logs_by_day(session: Session, *, user_id: int | None = None) -> dict[int, dict[str, int]]:
+    statement = select(HabitLog)
+    if user_id is not None:
+        statement = statement.where(HabitLog.user_id == user_id)
+    rows = session.exec(statement).all()
     totals: dict[int, dict[str, int]] = {}
     for row in rows:
         bucket = totals.setdefault(row.habit_id, {})
@@ -252,10 +256,24 @@ def _resolve_virtual_window(
     return start, end
 
 
-def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
+def project_persisted_generated_calendar_items(
+    session: Session, *, user_id: int | None = None
+) -> list[dict]:
+    """Project the persisted cross-domain rows that feed the generated calendar.
+
+    Every source table is tenant-filtered by ``user_id`` when given; the caller
+    (an API route resolved via CurrentOrOwnerUser, or the skill dispatch via the
+    acting user) always passes the acting user's id. ``user_id=None`` keeps the
+    unscoped global mode used by the background scheduler. Each row carries the
+    source's ``user_id`` so ``sync_generated_calendar_items`` stamps it on the
+    CalendarItem it creates.
+    """
     projected: list[dict] = []
 
-    tasks = session.exec(select(Task).where(Task.due_at.is_not(None))).all()
+    task_statement = select(Task).where(Task.due_at.is_not(None))
+    if user_id is not None:
+        task_statement = task_statement.where(Task.user_id == user_id)
+    tasks = session.exec(task_statement).all()
     for task in tasks:
         if _effective_task_schedule_mode(task) != TaskScheduleMode.ONCE:
             continue
@@ -264,6 +282,7 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             {
                 "source": CalendarSource.TASK,
                 "source_ref_id": task.id,
+                "user_id": task.user_id,
                 "title": task.title,
                 "description": task.description,
                 "start_at": due,
@@ -281,12 +300,16 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             }
         )
 
-    events = session.exec(select(CalendarEvent)).all()
+    event_statement = select(CalendarEvent)
+    if user_id is not None:
+        event_statement = event_statement.where(CalendarEvent.user_id == user_id)
+    events = session.exec(event_statement).all()
     for event in events:
         projected.append(
             {
                 "source": CalendarSource.EVENT,
                 "source_ref_id": event.id,
+                "user_id": event.user_id,
                 "title": event.title,
                 "description": event.description,
                 "start_at": _utc(event.start_at),
@@ -304,13 +327,17 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             }
         )
 
-    subs = session.exec(select(Subscription).where(Subscription.active.is_(True))).all()
+    sub_statement = select(Subscription).where(Subscription.active.is_(True))
+    if user_id is not None:
+        sub_statement = sub_statement.where(Subscription.user_id == user_id)
+    subs = session.exec(sub_statement).all()
     for sub in subs:
         due_start = _combine_utc(sub.next_due_date, time(hour=9, minute=0))
         projected.append(
             {
                 "source": CalendarSource.SUBSCRIPTION,
                 "source_ref_id": sub.id,
+                "user_id": sub.user_id,
                 "title": f"Subscription: {sub.name}",
                 "description": f"{sub.amount} {sub.currency} ({sub.interval.value})",
                 "start_at": due_start,
@@ -329,9 +356,23 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             }
         )
 
-    meal_plans = visible_meal_plans(session)
+    meal_plans = visible_meal_plans(session, user_id=user_id)
+    confirmation_statement = select(MealPlanCookConfirmation)
+    if user_id is not None:
+        # MealPlanCookConfirmation rows carry no user_id; they are scoped
+        # through the meal plans they confirm, so only the caller's plans'
+        # confirmations are read (this fixes a cross-tenant meal-plan leak
+        # that existed here before: meal plans are already tenant-scoped
+        # elsewhere but were read without any user filter).
+        plan_ids = [plan.id for plan in meal_plans if plan.id is not None]
+        if plan_ids:
+            confirmation_statement = confirmation_statement.where(
+                MealPlanCookConfirmation.meal_plan_id.in_(plan_ids)
+            )
+        else:
+            confirmation_statement = confirmation_statement.where(false())
     cooked_by_plan = {
-        row.meal_plan_id: row for row in session.exec(select(MealPlanCookConfirmation)).all()
+        row.meal_plan_id: row for row in session.exec(confirmation_statement).all()
     }
     recipes_by_id = {recipe.id: recipe for recipe in session.exec(select(Recipe)).all()}
     for plan in meal_plans:
@@ -347,6 +388,7 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             {
                 "source": CalendarSource.MEAL_PLAN,
                 "source_ref_id": plan.id,
+                "user_id": plan.user_id,
                 "title": f"Meal ({slot_label}): {recipe_name}",
                 "description": plan.note,
                 "start_at": start_at,
@@ -365,7 +407,10 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             }
         )
 
-    fitness_sessions = session.exec(select(FitnessSession)).all()
+    fitness_statement = select(FitnessSession)
+    if user_id is not None:
+        fitness_statement = fitness_statement.where(FitnessSession.user_id == user_id)
+    fitness_sessions = session.exec(fitness_statement).all()
     for workout in fitness_sessions:
         if workout.status == FitnessSessionStatus.SKIPPED:
             continue
@@ -377,6 +422,7 @@ def project_persisted_generated_calendar_items(session: Session) -> list[dict]:
             {
                 "source": CalendarSource.FITNESS_SESSION,
                 "source_ref_id": workout.id,
+                "user_id": workout.user_id,
                 "title": f"Fitness: {workout.title}",
                 "description": workout.note,
                 "start_at": start_at,
@@ -407,12 +453,16 @@ def project_virtual_calendar_items(
     from_at: datetime | None = None,
     to_at: datetime | None = None,
     source: CalendarSource | None = None,
+    user_id: int | None = None,
 ) -> list[dict]:
     projected: list[dict] = []
     range_start, range_end = _resolve_virtual_window(from_at, to_at)
 
     if source in (None, CalendarSource.TASK):
-        tasks = session.exec(select(Task)).all()
+        task_statement = select(Task)
+        if user_id is not None:
+            task_statement = task_statement.where(Task.user_id == user_id)
+        tasks = session.exec(task_statement).all()
         for task in tasks:
             mode = _effective_task_schedule_mode(task)
             if mode not in {TaskScheduleMode.DAILY, TaskScheduleMode.WEEKLY}:
@@ -425,6 +475,7 @@ def project_virtual_calendar_items(
                         "id": _virtual_calendar_item_id(CalendarSource.TASK, task.id or 0, occurrence_date),
                         "source": CalendarSource.TASK,
                         "source_ref_id": task.id,
+                        "user_id": task.user_id,
                         "title": task.title,
                         "description": task.description,
                         "start_at": occurrence["start_at"],
@@ -447,8 +498,11 @@ def project_virtual_calendar_items(
                 )
 
     if source in (None, CalendarSource.HABIT):
-        habits = session.exec(select(Habit).where(Habit.active.is_(True))).all()
-        logs_by_day = _habit_logs_by_day(session)
+        habit_statement = select(Habit).where(Habit.active.is_(True))
+        if user_id is not None:
+            habit_statement = habit_statement.where(Habit.user_id == user_id)
+        habits = session.exec(habit_statement).all()
+        logs_by_day = _habit_logs_by_day(session, user_id=user_id)
         for habit in habits:
             if habit.schedule_time is None:
                 continue
@@ -470,6 +524,7 @@ def project_virtual_calendar_items(
                         ),
                         "source": CalendarSource.HABIT,
                         "source_ref_id": habit.id,
+                        "user_id": habit.user_id,
                         "title": habit.name,
                         "description": habit.description,
                         "start_at": occurrence["start_at"],
@@ -503,10 +558,11 @@ def project_generated_calendar_items(
     *,
     from_at: datetime | None = None,
     to_at: datetime | None = None,
+    user_id: int | None = None,
 ) -> list[dict]:
-    projected = project_persisted_generated_calendar_items(session)
+    projected = project_persisted_generated_calendar_items(session, user_id=user_id)
     projected.extend(
-        project_virtual_calendar_items(session, from_at=from_at, to_at=to_at)
+        project_virtual_calendar_items(session, from_at=from_at, to_at=to_at, user_id=user_id)
     )
     projected.sort(key=lambda row: row["start_at"])
     return projected
@@ -520,13 +576,17 @@ def validate_calendar_slot_free(
     source: CalendarSource | None = None,
     source_ref_id: int | None = None,
     ignore_calendar_item_id: int | None = None,
+    user_id: int | None = None,
 ) -> None:
     start = _as_utc(start_at)
     end = _as_utc(end_at)
     if end <= start:
         raise ValueError("end_at must be after start_at")
 
-    manual_items = session.exec(select(CalendarItem).where(CalendarItem.generated.is_(False))).all()
+    manual_statement = select(CalendarItem).where(CalendarItem.generated.is_(False))
+    if user_id is not None:
+        manual_statement = manual_statement.where(CalendarItem.user_id == user_id)
+    manual_items = session.exec(manual_statement).all()
     for item in manual_items:
         if ignore_calendar_item_id is not None and item.id == ignore_calendar_item_id:
             continue
@@ -539,6 +599,7 @@ def validate_calendar_slot_free(
         session,
         from_at=start - timedelta(days=1),
         to_at=end + timedelta(days=1),
+        user_id=user_id,
     ):
         if (
             source is not None
@@ -608,6 +669,7 @@ def validate_task_schedule_free(
             occurrence["end_at"],
             source=CalendarSource.TASK,
             source_ref_id=ignore_task_id or task.id,
+            user_id=task.user_id,
         )
 
 
@@ -637,12 +699,22 @@ def validate_habit_schedule_free(
             occurrence["end_at"],
             source=CalendarSource.HABIT,
             source_ref_id=ignore_habit_id or habit.id,
+            user_id=habit.user_id,
         )
 
 
-def sync_generated_calendar_items(session: Session) -> tuple[int, int, dict[str, int]]:
-    projected = project_persisted_generated_calendar_items(session)
-    existing = session.exec(select(CalendarItem).where(CalendarItem.generated.is_(True))).all()
+def sync_generated_calendar_items(session: Session, *, user_id: int | None = None) -> tuple[int, int, dict[str, int]]:
+    """Materialise the projected cross-domain rows into generated CalendarItems.
+
+    Scoped to ``user_id`` when given (API routes, skill dispatch); the global
+    ``user_id=None`` mode is reserved for the background scheduler and stamps
+    each new/updated item with the source row's ``user_id``.
+    """
+    projected = project_persisted_generated_calendar_items(session, user_id=user_id)
+    existing_statement = select(CalendarItem).where(CalendarItem.generated.is_(True))
+    if user_id is not None:
+        existing_statement = existing_statement.where(CalendarItem.user_id == user_id)
+    existing = session.exec(existing_statement).all()
     indexed = {(item.source.value, item.source_ref_id): item for item in existing if item.source_ref_id is not None}
 
     touched: set[tuple[str, int]] = set()
@@ -654,7 +726,13 @@ def sync_generated_calendar_items(session: Session) -> tuple[int, int, dict[str,
         touched.add(key)
         item = indexed.get(key)
         if item is None:
-            item = CalendarItem(generated=True, source=row["source"], source_ref_id=row["source_ref_id"])
+            item = CalendarItem(
+                generated=True,
+                source=row["source"],
+                source_ref_id=row["source_ref_id"],
+                user_id=row.get("user_id"),
+            )
+        item.user_id = row.get("user_id")
         item.title = row["title"]
         item.description = row["description"]
         item.start_at = row["start_at"]
@@ -681,16 +759,19 @@ def sync_generated_calendar_items(session: Session) -> tuple[int, int, dict[str,
     return synced, removed, generated_by_source
 
 
-def list_due_reminders(session: Session, within_minutes: int = 30) -> list[CalendarReminderRead]:
+def list_due_reminders(session: Session, within_minutes: int = 30, *, user_id: int | None = None) -> list[CalendarReminderRead]:
     now = datetime.now(UTC)
     until = now + timedelta(minutes=max(1, within_minutes))
-    rows = session.exec(
+    statement = (
         select(CalendarItem).where(
             CalendarItem.notification_enabled.is_(True),
             CalendarItem.completed.is_(False),
             CalendarItem.end_at >= now - timedelta(days=1),
         )
-    ).all()
+    )
+    if user_id is not None:
+        statement = statement.where(CalendarItem.user_id == user_id)
+    rows = session.exec(statement).all()
 
     due: list[CalendarReminderRead] = []
     for item in rows:

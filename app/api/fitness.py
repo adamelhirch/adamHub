@@ -64,6 +64,7 @@ def create_fitness_session(
             planned_at,
             planned_at + timedelta(minutes=payload.duration_minutes),
             source=CalendarSource.FITNESS_SESSION,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -106,6 +107,7 @@ def update_fitness_session(
             next_planned_at + timedelta(minutes=next_duration_minutes),
             source=CalendarSource.FITNESS_SESSION,
             source_ref_id=row.id,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

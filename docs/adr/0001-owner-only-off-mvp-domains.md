@@ -129,6 +129,28 @@ calendar projection and slot validation still scan all tasks and are scoped
 to the acting user in a follow-up change that depends on this `user_id`. This
 ADR still governs the other off-MVP domains (notes, subscriptions, …).
 
+## Superseded for calendar (2026-08-18)
+
+`calendar` is now tenant-scoped end to end. `user_id` was added to
+`calendaritem` (additive migration `s2f4a6c8e1d3`, backfill via
+`scripts/backfill_owner_tenant.py`) and the `/calendar` router uses
+`CurrentOrOwnerUser` per route instead of the router-level `owner_only_user`
+gate. Creates auto-assign the acting user, lists/agenda/reminders/export
+filter by it, and get/update/delete/ack routes 404 on another user's rows (no
+existence leak). `app/services/calendar_hub.py` is scoped too: every
+cross-domain read (Task, CalendarEvent, Subscription, FitnessSession,
+Habit/HabitLog, and MealPlan/MealPlanCookConfirmation — the last fixing a
+cross-tenant meal-plan leak that existed here even though meal plans are
+scoped elsewhere) filters by the acting user's `user_id`, slot validation
+only checks the acting user's calendar, and `sync_generated_calendar_items`
+stamps `user_id` from the source row. The `calendar.*` skill handlers scope
+the same way. The public calendar feed stays Owner-only (feeds are created
+behind the owner gate and expose the ADAMHUB_OWNER_EMAIL user's calendar via
+their token). The background scheduler keeps a global `user_id=None` mode for
+its system-wide sync/reminder pass. A non-Owner JWT now reaches `/calendar`
+and sees only its own items; cross-tenant items are 404. This ADR still
+governs the other off-MVP domains (notes, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own

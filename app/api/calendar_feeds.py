@@ -10,8 +10,9 @@ from sqlmodel import select
 
 from app.api.calendar import list_calendar_items
 from app.api.deps import SessionDep, owner_only_user
+from app.core.auth import resolve_owner_user
 from app.core.config import get_settings
-from app.models import CalendarFeed, CalendarSource
+from app.models import CalendarFeed, CalendarSource, User
 from app.schemas import CalendarFeedCreate, CalendarFeedRead
 from app.services.calendar_hub import build_ics
 
@@ -72,12 +73,13 @@ def _generate_feed_token(session: SessionDep) -> str:
             return token
 
 
-def _collect_feed_items(session: SessionDep, feed: CalendarFeed):
+def _collect_feed_items(session: SessionDep, feed: CalendarFeed, user: User):
     now = datetime.now(UTC)
     from_at = now - timedelta(days=FEED_LOOKBACK_DAYS)
     to_at = now + timedelta(days=FEED_LOOKAHEAD_DAYS)
     items = list_calendar_items(
         session=session,
+        user=user,
         from_at=from_at,
         to_at=to_at,
         include_completed=feed.include_completed,
@@ -135,7 +137,10 @@ def get_public_calendar_feed(
     if feed is None:
         raise HTTPException(status_code=404, detail="Calendar feed not found")
 
-    items = _collect_feed_items(session, feed)
+    # Feeds are created behind the owner-only gate, so a valid feed token always
+    # exposes the ADAMHUB_OWNER_EMAIL user's calendar (never any other tenant's).
+    owner = resolve_owner_user(session)
+    items = _collect_feed_items(session, feed, owner)
     ics_content = build_ics(items, calendar_name=feed.name)
     etag = hashlib.sha1(ics_content.encode("utf-8")).hexdigest()
     if if_none_match and if_none_match.strip('"') == etag:
