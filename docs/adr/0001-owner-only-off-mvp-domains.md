@@ -12,7 +12,7 @@ acting user via `CurrentOrOwnerUser` (a JWT -> that user, an `X-API-Key` -> the
 Owner), and cross-tenant access is a 404.
 
 The remaining domains (finances, calendar, tasks, habits, goals, notes, events,
-subscriptions, patrimony, video, linear, skill, calendar feeds) predate tenancy:
+subscriptions, patrimony, video, skill, calendar feeds) predate tenancy:
 their tables have **no** `user_id`. They were only guarded by `require_api_key`,
 which accepts a valid Bearer JWT too. The consequence: any registered SaaS user
 could present their JWT and read or write the Owner's personal data in these

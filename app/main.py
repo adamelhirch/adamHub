@@ -35,7 +35,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="AdamHUB Life API",
     version="0.1.0",
-    description="Unified API for life ops: tasks, finances, meals, pantry, groceries, Linear projects, and AI skill execution",
+    description="Unified API for life ops: tasks, finances, meals, pantry, groceries, and AI skill execution",
     lifespan=lifespan,
 )
 

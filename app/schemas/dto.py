@@ -2,7 +2,7 @@
 
 The DTO definitions previously gathered here now live in per-domain modules
 under ``app/schemas/`` (tasks, habits, finance, groceries, pantry,
-supermarket, meal_planning, video, fitness, goals, calendar, notes, linear,
+supermarket, meal_planning, video, fitness, goals, calendar, notes,
 skills, dashboard). This module only re-exports them so existing
 ``from app.schemas.dto import ...`` call sites keep working unchanged.
 """
@@ -62,7 +62,6 @@ from app.schemas.goals import (
 )
 from app.schemas.groceries import GroceryItemCreate, GroceryItemRead, GroceryItemUpdate
 from app.schemas.habits import HabitCreate, HabitLogCreate, HabitLogRead, HabitRead, HabitUpdate
-from app.schemas.linear import LinearIssueCreate, LinearIssueRead, LinearProjectRead, LinearSyncResult
 from app.schemas.meal_planning import (
     MealCookLogCreate,
     MealIngredientConsumptionRead,
@@ -161,10 +160,6 @@ __all__ = [
     "HabitLogRead",
     "HabitRead",
     "HabitUpdate",
-    "LinearIssueCreate",
-    "LinearIssueRead",
-    "LinearProjectRead",
-    "LinearSyncResult",
     "MealPlanCreate",
     "MealPlanConfirmCooked",
     "MealPlanConfirmResult",

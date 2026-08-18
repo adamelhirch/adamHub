@@ -649,24 +649,6 @@ def test_skill_smoke_note_create_list_get(client, auth_headers):
     assert fetched.json()["data"]["note"]["content"] == "Écrire un livre"
 
 
-def test_skill_smoke_linear_uses_cache_not_live(client, auth_headers):
-    projects = client.post(
-        "/api/v1/skill/execute",
-        headers=auth_headers,
-        json={"action": "linear.projects", "input": {"source": "cache"}},
-    )
-    assert projects.status_code == 200
-    assert projects.json()["data"]["projects"] == []
-
-    issues = client.post(
-        "/api/v1/skill/execute",
-        headers=auth_headers,
-        json={"action": "linear.issues", "input": {"source": "cache"}},
-    )
-    assert issues.status_code == 200
-    assert issues.json()["data"]["issues"] == []
-
-
 # ── B2: regression for bug #66 (invalid servings_override -> 400, never 500) ──
 
 

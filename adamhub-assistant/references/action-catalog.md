@@ -287,20 +287,6 @@ Request shape:
 - `subscription.projection` — Compute monthly and yearly subscription projection
   - `input_schema`: `currency`: string?
 
-## Linear
-
-- `linear.projects` — List Linear projects
-  - `input_schema`: `source`: cache|live?, `limit`: int?
-
-- `linear.issues` — List Linear issues
-  - `input_schema`: `project_id`: string?, `source`: cache|live?, `limit`: int?
-
-- `linear.issue_create` — Create a Linear issue
-  - `input_schema`: `title`: string, `description`: string?, `project_id`: string?, `team_id`: string?, `priority`: 0..4?, `assignee_id`: string?, `due_date`: YYYY-MM-DD?
-
-- `linear.sync` — Sync Linear projects/issues into local cache
-  - `input_schema`: `project_id`: string?
-
 ## Patrimony
 
 - `patrimony.overview` — Return patrimony overview with net worth, accounts, and savings goals

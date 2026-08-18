@@ -49,7 +49,7 @@ END_ACTION_CATALOG = "<!-- END GENERATED: action-catalog -->"
 
 # "As of" date shown next to the action count in the master SKILL.md. Bump
 # when the catalog changes and you want the doc to carry a fresh date.
-ACTION_COUNT_DATE = "2026-08-14"
+ACTION_COUNT_DATE = "2026-08-18"
 
 # Maps an adamhub-assistant/<domain>/SKILL.md folder to the ACTION_CATALOG
 # action-name prefixes it owns. Every catalog prefix must belong to exactly
@@ -64,7 +64,6 @@ DOMAIN_ACTION_PREFIXES = {
     "goals": ["goal"],
     "groceries": ["supermarket", "grocery"],
     "habits": ["habit"],
-    "linear": ["linear"],
     "notes": ["note"],
     "pantry": ["pantry"],
     "patrimony": ["patrimony"],
@@ -89,7 +88,6 @@ CATALOG_SECTIONS = [
     ("Goals", ["goal"]),
     ("Events", ["event"]),
     ("Subscriptions", ["subscription"]),
-    ("Linear", ["linear"]),
     ("Patrimony", ["patrimony"]),
     ("Pantry", ["pantry"]),
     ("Notes", ["note"]),
