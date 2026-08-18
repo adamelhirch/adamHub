@@ -1,15 +1,12 @@
-"""add nullable user_id to financetransaction/budget
+"""add nullable user_id to account/savingsgoal
 
-Pure additive schema change: scopes the finance domain tables to a user.
+Pure additive schema change: scopes the patrimony domain tables to a user.
 No data mutation — backfilling existing NULL rows is a separate operational step
 (see scripts/backfill_owner_tenant.py).
 
-Chains onto BOTH sibling tenant-scoping heads (q1e2d3c4b5a6 = account/savingsgoal,
-q8g2d4f6a1c3 = note), so after this migration lands the graph has a single head.
-
-Revision ID: q8f2a4c6e1d3
-Revises: q1e2d3c4b5a6, q8g2d4f6a1c3
-Create Date: 2026-08-18 12:00:00.000000
+Revision ID: q1e2d3c4b5a6
+Revises: p7g9b2c4e6d8
+Create Date: 2026-08-18 09:00:00.000000
 """
 
 from typing import Sequence, Union
@@ -19,15 +16,15 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "q8f2a4c6e1d3"
-down_revision: Union[str, Sequence[str], None] = ["q1e2d3c4b5a6", "q8g2d4f6a1c3"]
+revision: str = "q1e2d3c4b5a6"
+down_revision: Union[str, Sequence[str], None] = "p7g9b2c4e6d8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 _TABLES = [
-    ("financetransaction", "fk_financetransaction_user_id"),
-    ("budget", "fk_budget_user_id"),
+    ("account", "fk_account_user_id"),
+    ("savingsgoal", "fk_savingsgoal_user_id"),
 ]
 
 
