@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api._crud import apply_updates, create, delete, get_or_404, save
-from app.api.deps import SessionDep, owner_only_user
+from app.api._crud import apply_updates, create, delete, get_owned_or_404, save
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import CalendarSource, FitnessMeasurement, FitnessSession, FitnessSessionStatus
 from app.schemas import (
     FitnessExerciseIn,
@@ -26,7 +26,7 @@ from app.services.fitness import (
 )
 from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/fitness", tags=["fitness"], dependencies=[Depends(owner_only_user)])
+router = APIRouter(prefix="/fitness", tags=["fitness"])
 
 
 def _normalize_exercise_payload(values: list[FitnessExerciseIn | str] | None) -> list[dict[str, object]]:
@@ -34,21 +34,29 @@ def _normalize_exercise_payload(values: list[FitnessExerciseIn | str] | None) ->
 
 
 @router.get("", response_model=FitnessOverviewRead)
-def get_fitness_overview(session: SessionDep) -> FitnessOverviewRead:
-    return build_fitness_overview(session)
+def get_fitness_overview(session: SessionDep, user: CurrentOrOwnerUser) -> FitnessOverviewRead:
+    return build_fitness_overview(session, user_id=user.id)
 
 
 @router.get("/sessions", response_model=list[FitnessSessionRead])
 def list_fitness_sessions(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     limit: int = Query(default=100, ge=1, le=300),
 ) -> list[FitnessSessionRead]:
-    rows = session.exec(select(FitnessSession).order_by(FitnessSession.planned_at.desc()).limit(limit)).all()
+    rows = session.exec(
+        select(FitnessSession)
+        .where(FitnessSession.user_id == user.id)
+        .order_by(FitnessSession.planned_at.desc())
+        .limit(limit)
+    ).all()
     return [build_fitness_session_read(row) for row in rows]
 
 
 @router.post("/sessions", response_model=FitnessSessionRead)
-def create_fitness_session(payload: FitnessSessionCreate, session: SessionDep) -> FitnessSessionRead:
+def create_fitness_session(
+    payload: FitnessSessionCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> FitnessSessionRead:
     planned_at = _ensure_utc(payload.planned_at)
     try:
         validate_calendar_slot_free(
@@ -66,6 +74,7 @@ def create_fitness_session(payload: FitnessSessionCreate, session: SessionDep) -
         duration_minutes=payload.duration_minutes,
         exercises=_normalize_exercise_payload(payload.exercises),
         note=payload.note.strip() if payload.note else None,
+        user_id=user.id,
     )
     session.add(row)
     session.commit()
@@ -74,10 +83,10 @@ def create_fitness_session(payload: FitnessSessionCreate, session: SessionDep) -
 
 
 @router.patch("/sessions/{session_id}", response_model=FitnessSessionRead)
-def update_fitness_session(session_id: int, payload: FitnessSessionUpdate, session: SessionDep) -> FitnessSessionRead:
-    row = session.get(FitnessSession, session_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Fitness session not found")
+def update_fitness_session(
+    session_id: int, payload: FitnessSessionUpdate, session: SessionDep, user: CurrentOrOwnerUser
+) -> FitnessSessionRead:
+    row = get_owned_or_404(session, FitnessSession, session_id, user_id=user.id, detail="Fitness session not found")
 
     updates = payload.model_dump(exclude_unset=True)
     if "title" in updates and updates["title"] is not None:
@@ -123,11 +132,10 @@ def update_fitness_session(session_id: int, payload: FitnessSessionUpdate, sessi
 def complete_fitness_session(
     session_id: int,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     payload: FitnessSessionComplete | None = None,
 ) -> FitnessSessionRead:
-    row = session.get(FitnessSession, session_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Fitness session not found")
+    row = get_owned_or_404(session, FitnessSession, session_id, user_id=user.id, detail="Fitness session not found")
 
     row.status = FitnessSessionStatus.COMPLETED
     row.completed_at = datetime.now(timezone.utc)
@@ -149,8 +157,8 @@ def complete_fitness_session(
 
 
 @router.delete("/sessions/{session_id}")
-def delete_fitness_session(session_id: int, session: SessionDep) -> dict:
-    row = get_or_404(session, FitnessSession, session_id, detail="Fitness session not found")
+def delete_fitness_session(session_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    row = get_owned_or_404(session, FitnessSession, session_id, user_id=user.id, detail="Fitness session not found")
     delete(session, row)
     return {"ok": True, "deleted_id": session_id}
 
@@ -158,14 +166,22 @@ def delete_fitness_session(session_id: int, session: SessionDep) -> dict:
 @router.get("/measurements", response_model=list[FitnessMeasurementRead])
 def list_fitness_measurements(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     limit: int = Query(default=100, ge=1, le=300),
 ) -> list[FitnessMeasurementRead]:
-    rows = session.exec(select(FitnessMeasurement).order_by(FitnessMeasurement.recorded_at.desc()).limit(limit)).all()
+    rows = session.exec(
+        select(FitnessMeasurement)
+        .where(FitnessMeasurement.user_id == user.id)
+        .order_by(FitnessMeasurement.recorded_at.desc())
+        .limit(limit)
+    ).all()
     return [build_fitness_measurement_read(row) for row in rows]
 
 
 @router.post("/measurements", response_model=FitnessMeasurementRead)
-def create_fitness_measurement(payload: FitnessMeasurementCreate, session: SessionDep) -> FitnessMeasurementRead:
+def create_fitness_measurement(
+    payload: FitnessMeasurementCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> FitnessMeasurementRead:
     row = FitnessMeasurement(
         recorded_at=_ensure_utc(payload.recorded_at),
         body_weight_kg=payload.body_weight_kg,
@@ -174,6 +190,7 @@ def create_fitness_measurement(payload: FitnessMeasurementCreate, session: Sessi
         sleep_hours=payload.sleep_hours,
         steps=payload.steps,
         note=payload.note.strip() if payload.note else None,
+        user_id=user.id,
     )
     row = create(session, row)
     return build_fitness_measurement_read(row)
@@ -184,8 +201,11 @@ def update_fitness_measurement(
     measurement_id: int,
     payload: FitnessMeasurementUpdate,
     session: SessionDep,
+    user: CurrentOrOwnerUser,
 ) -> FitnessMeasurementRead:
-    row = get_or_404(session, FitnessMeasurement, measurement_id, detail="Fitness measurement not found")
+    row = get_owned_or_404(
+        session, FitnessMeasurement, measurement_id, user_id=user.id, detail="Fitness measurement not found"
+    )
 
     updates = payload.model_dump(exclude_unset=True)
     if "note" in updates and updates["note"] is not None:
@@ -199,7 +219,9 @@ def update_fitness_measurement(
 
 
 @router.delete("/measurements/{measurement_id}")
-def delete_fitness_measurement(measurement_id: int, session: SessionDep) -> dict:
-    row = get_or_404(session, FitnessMeasurement, measurement_id, detail="Fitness measurement not found")
+def delete_fitness_measurement(measurement_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    row = get_owned_or_404(
+        session, FitnessMeasurement, measurement_id, user_id=user.id, detail="Fitness measurement not found"
+    )
     delete(session, row)
     return {"ok": True, "deleted_id": measurement_id}

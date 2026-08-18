@@ -66,6 +66,20 @@ reaches `/goals` and sees only its own goals; cross-tenant goals (and their
 milestones) are 404. This ADR still governs the other off-MVP domains
 (tasks, events, habits, notes, subscriptions, …).
 
+## Superseded for fitness (2026-08-18)
+
+`fitness` (sessions + measurements) is now tenant-scoped (`user_id` on
+`fitnesssession` and `fitnessmeasurement`, additive migration
+`r2e4f6a8c1d3`, backfill via `scripts/backfill_owner_tenant.py`) and its
+router uses `CurrentOrOwnerUser` per route instead of the router-level
+`owner_only_user` gate. Creates auto-assign `user_id`, lists and the
+overview filter by it, and get/update/complete/delete routes 404 on another
+user's rows (no existence leak). The `fitness.*` skill handlers are scoped
+to the acting user the same way. A non-Owner JWT now reaches `/fitness` and
+sees only its own sessions and measurements; cross-tenant rows are 404.
+This ADR still governs the other off-MVP domains (tasks, events, habits,
+notes, subscriptions, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own

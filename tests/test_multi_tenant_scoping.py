@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlmodel import Session, select
 
@@ -6,6 +6,8 @@ from app.models import (
     Account,
     Budget,
     FinanceTransaction,
+    FitnessMeasurement,
+    FitnessSession,
     Goal,
     GoalMilestone,
     GroceryItem,
@@ -51,6 +53,30 @@ def _create_goal_for(client, headers, title="Apprendre le piano") -> int:
     return response.json()["id"]
 
 
+def _create_fitness_session_for(
+    client, headers, title="Séance fit", planned_at="2026-08-22T06:00:00Z", duration_minutes=45
+) -> int:
+    response = client.post(
+        "/api/v1/fitness/sessions",
+        headers=headers,
+        json={"title": title, "planned_at": planned_at, "duration_minutes": duration_minutes},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
+def _create_fitness_measurement_for(
+    client, headers, recorded_at="2026-08-22T06:30:00Z", body_weight_kg=80.0
+) -> int:
+    response = client.post(
+        "/api/v1/fitness/measurements",
+        headers=headers,
+        json={"recorded_at": recorded_at, "body_weight_kg": body_weight_kg},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
+
+
 # ── Create auto-scopes to the authenticated user; client can't override ──────
 
 def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_headers, owner_headers):
@@ -68,6 +94,8 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     meal_plan_id = meal_plan.json()["id"]
     note_id = _create_note_for(client, jwt_headers)
     goal_id = _create_goal_for(client, jwt_headers, title="Courir un 10 km")
+    fitness_session_id = _create_fitness_session_for(client, jwt_headers, title="Séance auto")
+    measurement_id = _create_fitness_measurement_for(client, jwt_headers)
 
     assert _db_user_id(test_engine, GroceryItem, grocery_id) == user["id"]
     assert _db_user_id(test_engine, PantryItem, pantry_id) == user["id"]
@@ -75,6 +103,8 @@ def test_creating_resources_auto_assigns_user_id(client, test_engine, jwt_header
     assert _db_user_id(test_engine, MealPlan, meal_plan_id) == user["id"]
     assert _db_user_id(test_engine, Note, note_id) == user["id"]
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
+    assert _db_user_id(test_engine, FitnessSession, fitness_session_id) == user["id"]
+    assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
 
 
 def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_headers):
@@ -117,6 +147,20 @@ def test_client_cannot_override_user_id_on_create(client, test_engine, jwt_heade
     ).json()["id"]
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
+    fitness_session_id = client.post(
+        "/api/v1/fitness/sessions",
+        headers=jwt_headers,
+        json={"title": "Séance", "planned_at": "2026-08-22T06:00:00Z", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, FitnessSession, fitness_session_id) == user["id"]
+
+    measurement_id = client.post(
+        "/api/v1/fitness/measurements",
+        headers=jwt_headers,
+        json={"recorded_at": "2026-08-22T06:30:00Z", "user_id": other["id"]},
+    ).json()["id"]
+    assert _db_user_id(test_engine, FitnessMeasurement, measurement_id) == user["id"]
+
 
 def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_headers):
     user = client.get("/api/v1/auth/me", headers=jwt_headers).json()
@@ -140,6 +184,15 @@ def test_client_cannot_reassign_user_id_on_update(client, test_engine, jwt_heade
     assert patched_goal.status_code == 200
     assert _db_user_id(test_engine, Goal, goal_id) == user["id"]
 
+    fitness_session_id = _create_fitness_session_for(client, jwt_headers, title="Séance")
+    patched_session = client.patch(
+        f"/api/v1/fitness/sessions/{fitness_session_id}",
+        headers=jwt_headers,
+        json={"note": "x", "user_id": other["id"]},
+    )
+    assert patched_session.status_code == 200
+    assert _db_user_id(test_engine, FitnessSession, fitness_session_id) == user["id"]
+
 
 # ── Cross-user access is 404 everywhere (no existence leak) ──────────────────
 
@@ -161,6 +214,8 @@ def _seed_resources_as_user_a(client, headers):
         json={"title": "Premiere etape"},
     )
     assert milestone.status_code == 200, milestone.text
+    fitness_session_id = _create_fitness_session_for(client, headers, title="Séance secrète")
+    measurement_id = _create_fitness_measurement_for(client, headers)
     return {
         "grocery": grocery_id,
         "pantry": pantry_id,
@@ -170,6 +225,8 @@ def _seed_resources_as_user_a(client, headers):
         "journal": journal_id,
         "goal": goal_id,
         "milestone": milestone.json()["id"],
+        "fitness_session": fitness_session_id,
+        "measurement": measurement_id,
     }
 
 
@@ -195,6 +252,8 @@ def test_user_cannot_read_another_users_resources(client, jwt_headers):
     assert client.get("/api/v1/notes", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/notes/journal", headers=user_b["headers"]).json() == []
     assert client.get("/api/v1/goals", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/fitness/sessions", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/fitness/measurements", headers=user_b["headers"]).json() == []
 
 
 def test_user_cannot_modify_another_users_resources(client, jwt_headers):
@@ -208,6 +267,15 @@ def test_user_cannot_modify_another_users_resources(client, jwt_headers):
     assert client.patch(f"/api/v1/meal-plans/{ids['meal_plan']}", headers=user_b["headers"], json={"note": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/notes/{ids['note']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
     assert client.patch(f"/api/v1/goals/{ids['goal']}", headers=user_b["headers"], json={"title": "Hacked"}).status_code == 404
+    assert client.patch(
+        f"/api/v1/fitness/sessions/{ids['fitness_session']}", headers=user_b["headers"], json={"note": "Hacked"}
+    ).status_code == 404
+    assert client.post(
+        f"/api/v1/fitness/sessions/{ids['fitness_session']}/complete", headers=user_b["headers"], json={}
+    ).status_code == 404
+    assert client.patch(
+        f"/api/v1/fitness/measurements/{ids['measurement']}", headers=user_b["headers"], json={"body_weight_kg": 1}
+    ).status_code == 404
     assert (
         client.patch(
             f"/api/v1/goals/{ids['goal']}/milestones/{ids['milestone']}",
@@ -236,6 +304,8 @@ def test_user_cannot_delete_or_act_on_another_users_resources(client, jwt_header
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/confirm-cooked", headers=user_b["headers"], json={}).status_code == 404
     assert client.post(f"/api/v1/meal-plans/{ids['meal_plan']}/unconfirm-cooked", headers=user_b["headers"]).status_code == 404
     assert client.post(f"/api/v1/goals/{ids['goal']}/milestones", headers=user_b["headers"], json={"title": "Intrusion"}).status_code == 404
+    assert client.delete(f"/api/v1/fitness/sessions/{ids['fitness_session']}", headers=user_b["headers"]).status_code == 404
+    assert client.delete(f"/api/v1/fitness/measurements/{ids['measurement']}", headers=user_b["headers"]).status_code == 404
 
 
 # ── Legacy API-key path resolves to the owner user ───────────────────────────
@@ -253,12 +323,16 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     meal_plan_id = meal_plan.json()["id"]
     note_id = _create_note_for(client, auth_headers, title="Note legacy")
     goal_id = _create_goal_for(client, auth_headers, title="Objectif legacy")
+    fitness_session_id = _create_fitness_session_for(client, auth_headers, title="Séance legacy")
+    measurement_id = _create_fitness_measurement_for(client, auth_headers)
 
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
     assert [i["id"] for i in client.get("/api/v1/meal-plans", headers=owner_headers).json()] == [meal_plan_id]
     assert [n["id"] for n in client.get("/api/v1/notes", headers=owner_headers).json()] == [note_id]
     assert [g["id"] for g in client.get("/api/v1/goals", headers=owner_headers).json()] == [goal_id]
+    assert [s["id"] for s in client.get("/api/v1/fitness/sessions", headers=owner_headers).json()] == [fitness_session_id]
+    assert [m["id"] for m in client.get("/api/v1/fitness/measurements", headers=owner_headers).json()] == [measurement_id]
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
@@ -266,6 +340,8 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     assert client.get("/api/v1/meal-plans", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/notes", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/goals", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/fitness/sessions", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/fitness/measurements", headers=stranger["headers"]).json() == []
 
 
 def test_legacy_api_key_requires_owner_email_config(client, test_engine, auth_headers, monkeypatch):
@@ -546,6 +622,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "goal": 1,
             "financetransaction": 0,
             "budget": 0,
+            "fitnessmeasurement": 0,
+            "fitnesssession": 0,
         }
         dry = backfill(session, owner_id, commit=False)
         assert dry["commit"] is False
@@ -560,6 +638,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "goal": 0,
             "financetransaction": 0,
             "budget": 0,
+            "fitnessmeasurement": 0,
+            "fitnesssession": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 2,
@@ -572,6 +652,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "goal": 1,
             "financetransaction": 0,
             "budget": 0,
+            "fitnessmeasurement": 0,
+            "fitnesssession": 0,
         }
 
     with Session(test_engine) as session:
@@ -588,6 +670,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "goal": 1,
             "financetransaction": 0,
             "budget": 0,
+            "fitnessmeasurement": 0,
+            "fitnesssession": 0,
         }
         assert count_null_rows(session) == {
             "groceryitem": 0,
@@ -600,6 +684,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "goal": 0,
             "financetransaction": 0,
             "budget": 0,
+            "fitnessmeasurement": 0,
+            "fitnesssession": 0,
         }
 
     # Idempotent: a second run reports zero NULL rows to claim.
@@ -616,6 +702,8 @@ def test_backfill_dry_run_vs_commit(client, test_engine, owner_id):
             "goal": 0,
             "financetransaction": 0,
             "budget": 0,
+            "fitnessmeasurement": 0,
+            "fitnesssession": 0,
         }
 
     # The claimed rows now belong to the owner and show up for the owner.
@@ -955,3 +1043,136 @@ def test_patrimony_backfill_claims_legacy_rows_to_owner(client, test_engine, own
     assert client.patch(
         f"/api/v1/patrimony/accounts/{legacy_account_id}", headers=stranger["headers"], json={"balance": 0}
     ).status_code == 404
+
+# ── Fitness ownership (user_id on sessions & measurements, t9) ────────────────
+
+def test_fitness_cross_tenant_is_404(client):
+    user_a = register_user(client, "fitness-a@adamelhirch.com")
+    user_b = register_user(client, "fitness-b@adamelhirch.com")
+    session_id = _create_fitness_session_for(client, user_a["headers"], title="Seance A")
+    measurement_id = _create_fitness_measurement_for(client, user_a["headers"])
+
+    # Lists only expose the caller's own rows.
+    assert client.get("/api/v1/fitness/sessions", headers=user_b["headers"]).json() == []
+    assert client.get("/api/v1/fitness/measurements", headers=user_b["headers"]).json() == []
+
+    # The overview only aggregates the caller's own rows.
+    overview = client.get("/api/v1/fitness", headers=user_b["headers"])
+    assert overview.status_code == 200, overview.text
+    body = overview.json()
+    assert body["stats"]["planned_sessions"] == 0
+    assert body["recent_sessions"] == []
+    assert body["measurements"] == []
+
+    # Reads/writes on another user's session or measurement are 404 (no existence leak).
+    assert client.patch(
+        f"/api/v1/fitness/sessions/{session_id}", headers=user_b["headers"], json={"note": "Hacked"}
+    ).status_code == 404
+    assert client.post(
+        f"/api/v1/fitness/sessions/{session_id}/complete", headers=user_b["headers"], json={}
+    ).status_code == 404
+    assert client.delete(f"/api/v1/fitness/sessions/{session_id}", headers=user_b["headers"]).status_code == 404
+    assert client.patch(
+        f"/api/v1/fitness/measurements/{measurement_id}", headers=user_b["headers"], json={"body_weight_kg": 1}
+    ).status_code == 404
+    assert client.delete(f"/api/v1/fitness/measurements/{measurement_id}", headers=user_b["headers"]).status_code == 404
+
+    # The tenant that owns the rows still reads, writes and deletes them.
+    assert client.patch(
+        f"/api/v1/fitness/sessions/{session_id}", headers=user_a["headers"], json={"note": "OK"}
+    ).status_code == 200
+    assert client.patch(
+        f"/api/v1/fitness/measurements/{measurement_id}", headers=user_a["headers"], json={"body_weight_kg": 82.0}
+    ).status_code == 200
+    assert client.delete(f"/api/v1/fitness/measurements/{measurement_id}", headers=user_a["headers"]).status_code == 200
+
+
+def test_fitness_skill_actions_are_user_scoped(client, test_engine):
+    # The skill HTTP gateway is still Owner-only (ADR-0001), so the handler
+    # seam is exercised directly — the same seam MCP dispatches through.
+    from app.models import User
+    from app.skill.actions import execute_action
+
+    owner = register_user(client, "skill-fitness-a@adamelhirch.com")
+    intruder = register_user(client, "skill-fitness-b@adamelhirch.com")
+
+    with Session(test_engine) as session:
+        owner_user = session.get(User, int(owner["user"]["id"]))
+        intruder_user = session.get(User, int(intruder["user"]["id"]))
+
+        created = execute_action(
+            "fitness.create_session",
+            {"title": "Séance A", "planned_at": "2026-08-22T06:00:00Z", "duration_minutes": 45},
+            session,
+            user=owner_user,
+        )
+        session_id = created["session"]["id"]
+
+        measurement = execute_action(
+            "fitness.add_measurement",
+            {"recorded_at": "2026-08-22T06:30:00Z", "body_weight_kg": 80.0},
+            session,
+            user=owner_user,
+        )
+        measurement_id = measurement["measurement"]["id"]
+
+        # The intruder never sees the owner's fitness data.
+        assert execute_action("fitness.list_sessions", {}, session, user=intruder_user)["sessions"] == []
+        assert execute_action("fitness.list_measurements", {}, session, user=intruder_user)["measurements"] == []
+        overview = execute_action("fitness.overview", {}, session, user=intruder_user)["overview"]
+        assert overview["stats"]["planned_sessions"] == 0
+        assert overview["recent_sessions"] == []
+        assert overview["measurements"] == []
+
+        # Direct operations on the other user's rows fail without leaking existence.
+        for action, payload in [
+            ("fitness.update_session", {"session_id": session_id, "title": "Hacked"}),
+            ("fitness.complete_session", {"session_id": session_id}),
+            ("fitness.delete_session", {"session_id": session_id}),
+            ("fitness.update_measurement", {"measurement_id": measurement_id, "body_weight_kg": 1}),
+            ("fitness.delete_measurement", {"measurement_id": measurement_id}),
+        ]:
+            try:
+                execute_action(action, payload, session, user=intruder_user)
+                raise AssertionError(f"{action} should have failed for the intruder")
+            except ValueError as exc:
+                assert "not found" in str(exc)
+
+        # The owner still fully operates on its session and measurement.
+        assert execute_action("fitness.list_sessions", {}, session, user=owner_user)["sessions"][0]["id"] == session_id
+        execute_action("fitness.update_session", {"session_id": session_id, "note": "Intense"}, session, user=owner_user)
+        execute_action("fitness.complete_session", {"session_id": session_id, "effort_rating": 8}, session, user=owner_user)
+        execute_action("fitness.delete_session", {"session_id": session_id}, session, user=owner_user)
+        execute_action("fitness.delete_measurement", {"measurement_id": measurement_id}, session, user=owner_user)
+
+
+def test_fitness_backfill_claims_legacy_rows_to_owner(client, test_engine, owner_id, auth_headers):
+    from scripts.backfill_owner_tenant import backfill
+
+    with Session(test_engine) as session:
+        session.add(
+            FitnessSession(title="Séance legacy", planned_at=datetime(2026, 8, 22, 6, tzinfo=timezone.utc), user_id=None)
+        )
+        session.add(
+            FitnessMeasurement(recorded_at=datetime(2026, 8, 22, 6, 30, tzinfo=timezone.utc), body_weight_kg=88.0, user_id=None)
+        )
+        session.commit()
+
+    # Pre-scoping NULL rows are invisible to everyone until the backfill claims them.
+    assert client.get("/api/v1/fitness/sessions", headers=auth_headers).json() == []
+    assert client.get("/api/v1/fitness/measurements", headers=auth_headers).json() == []
+
+    with Session(test_engine) as session:
+        result = backfill(session, owner_id, commit=True)
+    assert result["commit"] is True
+    assert result["updated"]["fitnesssession"] == 1
+    assert result["updated"]["fitnessmeasurement"] == 1
+
+    # After backfill the owner (legacy API-key path) sees and operates the rows.
+    assert len(client.get("/api/v1/fitness/sessions", headers=auth_headers).json()) == 1
+    assert len(client.get("/api/v1/fitness/measurements", headers=auth_headers).json()) == 1
+
+    # A non-owner JWT user still cannot see or touch them.
+    stranger = register_user(client, "fitness-backfill-stranger@adamelhirch.com")
+    assert client.get("/api/v1/fitness/sessions", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/fitness/measurements", headers=stranger["headers"]).json() == []
