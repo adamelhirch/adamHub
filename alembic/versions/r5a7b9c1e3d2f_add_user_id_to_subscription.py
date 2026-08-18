@@ -6,8 +6,12 @@ note/account/savingsgoal/goal/...). No data mutation — backfilling existing
 NULL rows is a separate operational step (see
 scripts/backfill_owner_tenant.py).
 
+Chains onto BOTH sibling tenant-scoping heads (q4e8e2f5a1d7 = goal,
+r5a8c1e4f7b2 = calendarevent), so after this migration lands the graph has
+a single head.
+
 Revision ID: r5a7b9c1e3d2f
-Revises: q4e8e2f5a1d7
+Revises: q4e8e2f5a1d7, r5a8c1e4f7b2
 Create Date: 2026-08-18 14:00:00.000000
 """
 
@@ -19,7 +23,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "r5a7b9c1e3d2f"
-down_revision: Union[str, Sequence[str], None] = "q4e8e2f5a1d7"
+down_revision: Union[str, Sequence[str], None] = ["q4e8e2f5a1d7", "r5a8c1e4f7b2"]
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
