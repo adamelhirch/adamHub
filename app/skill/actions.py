@@ -310,9 +310,16 @@ def _connection_is_operable(connection, user: User | None) -> bool:
     return _is_owner_user(user)
 
 
+def _get_owned_task(session, user_id: int, task_id: int) -> Task:
+    task = session.get(Task, task_id)
+    if not task or task.user_id != user_id:
+        raise ValueError("task_id not found")
+    return task
+
+
 def _handle_task_create(payload, session, *, user, now, user_id):
     data = TaskCreate.model_validate(payload)
-    task = Task(**data.model_dump())
+    task = Task(**data.model_dump(), user_id=user_id)
     validate_task_schedule_free(session, task)
     task = create(session, task)
     return {"task": task.model_dump(mode="json")}
@@ -321,7 +328,12 @@ def _handle_task_create(payload, session, *, user, now, user_id):
 def _handle_task_list(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=25, minimum=1, maximum=100)
     only_open = _as_bool(payload.get("only_open"), default=False)
-    statement = select(Task).order_by(Task.created_at.desc()).limit(limit)
+    statement = (
+        select(Task)
+        .where(Task.user_id == user_id)
+        .order_by(Task.created_at.desc())
+        .limit(limit)
+    )
 
     if payload.get("status"):
         statement = statement.where(Task.status == TaskStatus(payload["status"]))
@@ -334,9 +346,7 @@ def _handle_task_list(payload, session, *, user, now, user_id):
 
 def _handle_task_update(payload, session, *, user, now, user_id):
     task_id = _int_id(payload, "task_id")
-    task = session.get(Task, task_id)
-    if not task:
-        raise ValueError("task_id not found")
+    task = _get_owned_task(session, user_id, task_id)
 
     patch = TaskUpdate.model_validate({k: v for k, v in payload.items() if k != "task_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -356,9 +366,7 @@ def _handle_task_update(payload, session, *, user, now, user_id):
 
 def _handle_task_complete(payload, session, *, user, now, user_id):
     task_id = _int_id(payload, "task_id")
-    task = session.get(Task, task_id)
-    if not task:
-        raise ValueError("task_id not found")
+    task = _get_owned_task(session, user_id, task_id)
     task.status = TaskStatus.DONE
     task.updated_at = now
     task = save(session, task)
@@ -367,9 +375,7 @@ def _handle_task_complete(payload, session, *, user, now, user_id):
 
 def _handle_task_delete(payload, session, *, user, now, user_id):
     task_id = _int_id(payload, "task_id")
-    task = session.get(Task, task_id)
-    if not task:
-        raise ValueError("task_id not found")
+    task = _get_owned_task(session, user_id, task_id)
     delete(session, task)
     return {"ok": True, "deleted_id": task_id}
 

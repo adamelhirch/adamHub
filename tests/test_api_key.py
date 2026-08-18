@@ -50,10 +50,16 @@ def test_per_user_api_key_reaches_scoped_domains_but_not_owner_only_gate(client,
     raw_key = client.post("/api/v1/auth/api-key", headers=jwt_headers).json()["api_key"]
     key_headers = {"X-API-Key": raw_key}
 
-    # Tenant-scoped domains resolve the per-user key to its owner (finances was
-    # scoped in t1; tasks is still an unscoped Owner-only domain).
+    # Tenant-scoped domains resolve the per-user key to its owner (finances
+    # scoped in t1, tasks in t6, events in t7, subscriptions in t8, habits
+    # in t10)…
     assert client.get("/api/v1/finances/transactions", headers=key_headers).status_code == 200
-    assert client.get("/api/v1/tasks", headers=key_headers).status_code == 401
+    assert client.get("/api/v1/tasks", headers=key_headers).status_code == 200
+    assert client.get("/api/v1/events", headers=key_headers).status_code == 200
+    assert client.get("/api/v1/subscriptions", headers=key_headers).status_code == 200
+
+    # …while the still-unscoped owner-only domains keep rejecting it.
+    assert client.get("/api/v1/fitness/sessions", headers=key_headers).status_code == 401
 
 
 def test_per_user_api_key_is_scoped_to_its_owner(client, jwt_headers):

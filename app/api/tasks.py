@@ -1,20 +1,20 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api._crud import create, delete, get_or_404, save
-from app.api.deps import SessionDep, owner_only_user
-from app.models import CalendarSource, Task, TaskStatus
+from app.api._crud import create, delete, get_owned_or_404, save
+from app.api.deps import CurrentOrOwnerUser, SessionDep
+from app.models import Task, TaskStatus
 from app.schemas import TaskCreate, TaskRead, TaskUpdate
 from app.services.calendar_hub import apply_task_update, validate_task_schedule_free
 
-router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(owner_only_user)])
+router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.post("", response_model=TaskRead)
-def create_task(payload: TaskCreate, session: SessionDep) -> TaskRead:
-    task = Task(**payload.model_dump())
+def create_task(payload: TaskCreate, session: SessionDep, user: CurrentOrOwnerUser) -> TaskRead:
+    task = Task(**payload.model_dump(), user_id=user.id)
     try:
         validate_task_schedule_free(session, task)
     except ValueError as exc:
@@ -26,11 +26,17 @@ def create_task(payload: TaskCreate, session: SessionDep) -> TaskRead:
 @router.get("", response_model=list[TaskRead])
 def list_tasks(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     status: TaskStatus | None = None,
     only_open: bool = False,
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[TaskRead]:
-    statement = select(Task).order_by(Task.created_at.desc()).limit(limit)
+    statement = (
+        select(Task)
+        .where(Task.user_id == user.id)
+        .order_by(Task.created_at.desc())
+        .limit(limit)
+    )
     if status:
         statement = statement.where(Task.status == status)
     if only_open:
@@ -41,10 +47,10 @@ def list_tasks(
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
-def update_task(task_id: int, payload: TaskUpdate, session: SessionDep) -> TaskRead:
-    task = session.get(Task, task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+def update_task(
+    task_id: int, payload: TaskUpdate, session: SessionDep, user: CurrentOrOwnerUser
+) -> TaskRead:
+    task = get_owned_or_404(session, Task, task_id, user_id=user.id, detail="Task not found")
 
     updates = payload.model_dump(exclude_unset=True)
     apply_task_update(task, updates)
@@ -62,8 +68,8 @@ def update_task(task_id: int, payload: TaskUpdate, session: SessionDep) -> TaskR
 
 
 @router.post("/{task_id}/complete", response_model=TaskRead)
-def complete_task(task_id: int, session: SessionDep) -> TaskRead:
-    task = get_or_404(session, Task, task_id, detail="Task not found")
+def complete_task(task_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> TaskRead:
+    task = get_owned_or_404(session, Task, task_id, user_id=user.id, detail="Task not found")
 
     task.status = TaskStatus.DONE
     task.updated_at = datetime.now(timezone.utc)
@@ -72,7 +78,7 @@ def complete_task(task_id: int, session: SessionDep) -> TaskRead:
 
 
 @router.delete("/{task_id}")
-def delete_task(task_id: int, session: SessionDep) -> dict:
-    task = get_or_404(session, Task, task_id, detail="Task not found")
+def delete_task(task_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    task = get_owned_or_404(session, Task, task_id, user_id=user.id, detail="Task not found")
     delete(session, task)
     return {"ok": True}

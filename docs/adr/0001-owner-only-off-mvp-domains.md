@@ -100,8 +100,20 @@ per route instead of the router-level `owner_only_user` gate. Habit logs carry
 their own `user_id`; every log route/handler first resolves the parent habit
 with an ownership check. A non-Owner JWT now reaches `/habits` and sees only
 its own habits and logs; cross-tenant habits (and their logs) are 404. This
-ADR still governs the other off-MVP domains (tasks, events, notes,
-subscriptions, …).
+ADR still governs the other off-MVP domains (tasks, notes, subscriptions, …).
+
+## Superseded for tasks (2026-08-18)
+
+`tasks` is now tenant-scoped (`user_id` on `task`, additive migration
+`r3e5g7i9k2m4`, backfill via `scripts/backfill_owner_tenant.py`) and its
+router uses `CurrentOrOwnerUser` per route instead of the router-level
+`owner_only_user` gate. Creates auto-assign `user_id`, lists filter by it,
+and get/update/complete/delete routes 404 on another user's rows (no
+existence leak). The skill `task.*` actions are scoped to the acting user.
+Note: `app/services/calendar_hub.py` is intentionally untouched here — its
+calendar projection and slot validation still scan all tasks and are scoped
+to the acting user in a follow-up change that depends on this `user_id`. This
+ADR still governs the other off-MVP domains (notes, subscriptions, …).
 
 ## Consequences
 
