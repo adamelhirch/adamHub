@@ -33,6 +33,7 @@ def create_subscription(
             slot_start,
             slot_start + timedelta(minutes=30),
             source=CalendarSource.SUBSCRIPTION,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -126,6 +127,7 @@ def update_subscription(
             slot_start + timedelta(minutes=30),
             source=CalendarSource.SUBSCRIPTION,
             source_ref_id=sub.id,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

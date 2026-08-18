@@ -180,5 +180,5 @@ def delete_recipe(recipe_id: int, session: SessionDep, user: CurrentOrOwnerUser)
 
     session.delete(recipe)
     session.commit()
-    sync_generated_calendar_items(session)
+    sync_generated_calendar_items(session, user_id=user.id)
     return {"ok": True, "deleted_id": recipe_id}

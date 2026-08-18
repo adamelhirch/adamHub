@@ -22,6 +22,7 @@ def create_event(payload: EventCreate, session: SessionDep, user: CurrentOrOwner
             payload.start_at,
             payload.end_at,
             source=CalendarSource.EVENT,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -107,6 +108,7 @@ def update_event(event_id: int, payload: EventUpdate, session: SessionDep, user:
             event.end_at,
             source=CalendarSource.EVENT,
             source_ref_id=event.id,
+            user_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

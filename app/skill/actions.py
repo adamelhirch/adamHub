@@ -476,6 +476,7 @@ def _handle_fitness_create_session(payload, session, *, user, now, user_id):
         planned_at,
         planned_at + timedelta(minutes=data.duration_minutes),
         source=CalendarSource.FITNESS_SESSION,
+        user_id=user_id,
     )
     row = FitnessSession(
         title=data.title.strip(),
@@ -520,6 +521,7 @@ def _handle_fitness_update_session(payload, session, *, user, now, user_id):
         next_planned_at + timedelta(minutes=next_duration_minutes),
         source=CalendarSource.FITNESS_SESSION,
         source_ref_id=row.id,
+        user_id=user_id,
     )
 
     if "status" in updates and updates["status"] != FitnessSessionStatus.COMPLETED:
@@ -1257,15 +1259,23 @@ def _handle_meal_plan_unconfirm_cooked(payload, session, *, user, now, user_id):
     }
 
 
+def _get_owned_calendar_item(session, user_id: int, item_id: int) -> CalendarItem:
+    item = session.get(CalendarItem, item_id)
+    if not item or item.user_id != user_id:
+        raise ValueError("item_id not found")
+    return item
+
+
 def _handle_calendar_add_item(payload, session, *, user, now, user_id):
     data = CalendarItemCreate.model_validate(payload)
     if data.end_at <= data.start_at:
         raise ValueError("end_at must be after start_at")
-    validate_calendar_slot_free(session, data.start_at, data.end_at)
+    validate_calendar_slot_free(session, data.start_at, data.end_at, user_id=user_id)
     item = CalendarItem(
         **data.model_dump(),
         source=CalendarSource.MANUAL,
         generated=False,
+        user_id=user_id,
     )
     session.add(item)
     session.commit()
@@ -1274,9 +1284,14 @@ def _handle_calendar_add_item(payload, session, *, user, now, user_id):
 
 
 def _handle_calendar_list_items(payload, session, *, user, now, user_id):
-    sync_generated_calendar_items(session)
+    sync_generated_calendar_items(session, user_id=user_id)
     limit = _clamp_int(payload.get("limit"), default=500, minimum=1, maximum=2000)
-    statement = select(CalendarItem).order_by(CalendarItem.start_at.asc()).limit(limit)
+    statement = (
+        select(CalendarItem)
+        .where(CalendarItem.user_id == user_id)
+        .order_by(CalendarItem.start_at.asc())
+        .limit(limit)
+    )
     if payload.get("from_at"):
         statement = statement.where(CalendarItem.start_at >= _parse_datetime(payload.get("from_at"), "from_at"))
     if payload.get("to_at"):
@@ -1296,9 +1311,7 @@ def _handle_calendar_list_items(payload, session, *, user, now, user_id):
 
 def _handle_calendar_update_item(payload, session, *, user, now, user_id):
     item_id = _int_id(payload, "item_id")
-    item = session.get(CalendarItem, item_id)
-    if not item:
-        raise ValueError("item_id not found")
+    item = _get_owned_calendar_item(session, user_id, item_id)
     if item.generated:
         raise ValueError("Generated calendar items must be updated from their source module")
     patch = CalendarItemUpdate.model_validate({k: v for k, v in payload.items() if k != "item_id"})
@@ -1314,6 +1327,7 @@ def _handle_calendar_update_item(payload, session, *, user, now, user_id):
         item.start_at,
         item.end_at,
         ignore_calendar_item_id=item.id,
+        user_id=user_id,
     )
     item.updated_at = now
     session.add(item)
@@ -1324,9 +1338,7 @@ def _handle_calendar_update_item(payload, session, *, user, now, user_id):
 
 def _handle_calendar_delete_item(payload, session, *, user, now, user_id):
     item_id = _int_id(payload, "item_id")
-    item = session.get(CalendarItem, item_id)
-    if not item:
-        raise ValueError("item_id not found")
+    item = _get_owned_calendar_item(session, user_id, item_id)
     if item.generated:
         raise ValueError("Generated calendar items must be deleted from their source module")
     session.delete(item)
@@ -1335,12 +1347,20 @@ def _handle_calendar_delete_item(payload, session, *, user, now, user_id):
 
 
 def _handle_calendar_agenda(payload, session, *, user, now, user_id):
-    sync_generated_calendar_items(session)
+    sync_generated_calendar_items(session, user_id=user_id)
     day_value = _parse_date(payload.get("day"), "day") or now.date()
     day_start = datetime.combine(day_value, datetime.min.time()).replace(tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
     include_completed = _as_bool(payload.get("include_completed"), default=False)
-    statement = select(CalendarItem).where(CalendarItem.start_at >= day_start, CalendarItem.start_at < day_end).order_by(CalendarItem.start_at.asc())
+    statement = (
+        select(CalendarItem)
+        .where(
+            CalendarItem.user_id == user_id,
+            CalendarItem.start_at >= day_start,
+            CalendarItem.start_at < day_end,
+        )
+        .order_by(CalendarItem.start_at.asc())
+    )
     if not include_completed:
         statement = statement.where(CalendarItem.completed.is_(False))
     rows = session.exec(statement).all()
@@ -1348,22 +1368,20 @@ def _handle_calendar_agenda(payload, session, *, user, now, user_id):
 
 
 def _handle_calendar_sync(payload, session, *, user, now, user_id):
-    synced, removed, by_source = sync_generated_calendar_items(session)
+    synced, removed, by_source = sync_generated_calendar_items(session, user_id=user_id)
     return {"synced": synced, "removed": removed, "generated_by_source": by_source, "synced_at": now.isoformat()}
 
 
 def _handle_calendar_due_reminders(payload, session, *, user, now, user_id):
-    sync_generated_calendar_items(session)
+    sync_generated_calendar_items(session, user_id=user_id)
     within_minutes = _clamp_int(payload.get("within_minutes"), default=30, minimum=1, maximum=1440)
-    reminders = list_due_reminders(session, within_minutes=within_minutes)
+    reminders = list_due_reminders(session, within_minutes=within_minutes, user_id=user_id)
     return {"reminders": [entry.model_dump(mode="json") for entry in reminders]}
 
 
 def _handle_calendar_ack_reminder(payload, session, *, user, now, user_id):
     item_id = _int_id(payload, "item_id")
-    item = session.get(CalendarItem, item_id)
-    if not item:
-        raise ValueError("item_id not found")
+    item = _get_owned_calendar_item(session, user_id, item_id)
     item.last_notified_at = now
     item.updated_at = now
     session.add(item)
@@ -1614,6 +1632,7 @@ def _handle_event_create(payload, session, *, user, now, user_id):
         data.start_at,
         data.end_at,
         source=CalendarSource.EVENT,
+        user_id=user_id,
     )
     event = CalendarEvent(**data.model_dump(), user_id=user_id)
     session.add(event)
@@ -1675,6 +1694,7 @@ def _handle_event_update(payload, session, *, user, now, user_id):
         event.end_at,
         source=CalendarSource.EVENT,
         source_ref_id=event.id,
+        user_id=user_id,
     )
     event.updated_at = now
 
@@ -1699,6 +1719,7 @@ def _handle_subscription_create(payload, session, *, user, now, user_id):
         slot_start,
         slot_start + timedelta(minutes=30),
         source=CalendarSource.SUBSCRIPTION,
+        user_id=user_id,
     )
     subscription = Subscription(**data.model_dump(), user_id=user_id)
     session.add(subscription)
@@ -1752,6 +1773,7 @@ def _handle_subscription_update(payload, session, *, user, now, user_id):
         slot_start + timedelta(minutes=30),
         source=CalendarSource.SUBSCRIPTION,
         source_ref_id=subscription.id,
+        user_id=user_id,
     )
 
     for key, value in updates.items():
