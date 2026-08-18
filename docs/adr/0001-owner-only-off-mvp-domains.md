@@ -1,8 +1,16 @@
 # ADR-0001: Off-MVP domains stay Owner-only until they are tenant-scoped
 
-- Status: accepted
+- Status: **superseded** by [ADR-0002](0002-open-off-mvp-domains-to-saas-users.md) (2026-08-18)
 - Date: 2026-08-14
 - Issue: [#59](https://github.com/adamelhirch/adamHub/issues/59)
+
+> **Superseded (2026-08-18).** All eleven off-MVP domains listed below
+> (finances, calendar, tasks, habits, goals, events, fitness, subscriptions,
+> patrimony, notes, video — plus the calendar-feed surface) have been
+> tenant-scoped and now use `CurrentOrOwnerUser`; the owner-only gate of this
+> ADR no longer applies to them. See
+> [ADR-0002](0002-open-off-mvp-domains-to-saas-users.md). The historical
+> decision and its incremental supersession record are kept below unchanged.
 
 ## Context
 
