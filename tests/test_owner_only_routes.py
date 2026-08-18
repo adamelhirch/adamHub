@@ -6,14 +6,13 @@ from tests.conftest import register_user
 # belong to ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the
 # Owner's own JWT keep working. Finances was tenant-scoped (t1: user_id on
 # transactions/budgets) and moved to CurrentOrOwnerUser, so it is no longer
-# part of this gate.
+# part of this gate — same for habits (t10: user_id on habit/habitlog).
 
 def test_owner_only_route_rejects_non_owner_jwt(client, jwt_headers):
     saas = register_user(client, "saas-user@adamelhirch.com")
 
     assert client.get("/api/v1/tasks", headers=jwt_headers).status_code == 401
     assert client.get("/api/v1/events", headers=jwt_headers).status_code == 401
-    assert client.get("/api/v1/habits", headers=jwt_headers).status_code == 401
 
     # Write routes are gated the same way.
     assert (
@@ -31,6 +30,13 @@ def test_finances_router_accepts_any_authenticated_user(client, jwt_headers):
     # reaches it (and simply sees their own empty data).
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).status_code == 200
     assert client.get("/api/v1/finances/transactions", headers=jwt_headers).json() == []
+
+
+def test_habits_router_accepts_any_authenticated_user(client, jwt_headers):
+    # Tenant-scoped habits (t10) no longer gate on ownership either: a plain
+    # JWT user reaches /habits and sees their own empty data.
+    assert client.get("/api/v1/habits", headers=jwt_headers).status_code == 200
+    assert client.get("/api/v1/habits", headers=jwt_headers).json() == []
 
 
 def test_owner_only_route_accepts_api_key_and_owner_jwt(client, auth_headers, owner_headers):

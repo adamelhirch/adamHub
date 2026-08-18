@@ -66,6 +66,18 @@ reaches `/goals` and sees only its own goals; cross-tenant goals (and their
 milestones) are 404. This ADR still governs the other off-MVP domains
 (tasks, events, habits, notes, subscriptions, …).
 
+## Superseded for habits (2026-08-18)
+
+`habits` is now tenant-scoped (`user_id` on `habit` and `habitlog`, additive
+migration `r5a7c9e2b4d6f`, backfill via
+`scripts/backfill_owner_tenant.py`) and its router uses `CurrentOrOwnerUser`
+per route instead of the router-level `owner_only_user` gate. Habit logs carry
+their own `user_id`; every log route/handler first resolves the parent habit
+with an ownership check. A non-Owner JWT now reaches `/habits` and sees only
+its own habits and logs; cross-tenant habits (and their logs) are 404. This
+ADR still governs the other off-MVP domains (tasks, events, notes,
+subscriptions, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own
