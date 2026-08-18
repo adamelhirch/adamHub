@@ -1,19 +1,19 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api._crud import delete, get_or_404
-from app.api.deps import SessionDep, owner_only_user
+from app.api._crud import get_owned_or_404
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import CalendarEvent, CalendarSource, EventType
 from app.schemas import EventCreate, EventRead, EventUpdate
 from app.services.calendar_hub import validate_calendar_slot_free
 
-router = APIRouter(prefix="/events", tags=["events"], dependencies=[Depends(owner_only_user)])
+router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.post("", response_model=EventRead)
-def create_event(payload: EventCreate, session: SessionDep) -> EventRead:
+def create_event(payload: EventCreate, session: SessionDep, user: CurrentOrOwnerUser) -> EventRead:
     if payload.end_at <= payload.start_at:
         raise HTTPException(status_code=400, detail="end_at must be after start_at")
     try:
@@ -26,7 +26,7 @@ def create_event(payload: EventCreate, session: SessionDep) -> EventRead:
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    event = CalendarEvent(**payload.model_dump())
+    event = CalendarEvent(**payload.model_dump(), user_id=user.id)
     session.add(event)
     session.commit()
     session.refresh(event)
@@ -36,12 +36,18 @@ def create_event(payload: EventCreate, session: SessionDep) -> EventRead:
 @router.get("", response_model=list[EventRead])
 def list_events(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     from_at: datetime | None = None,
     to_at: datetime | None = None,
     type: EventType | None = None,
     limit: int = Query(default=200, ge=1, le=500),
 ) -> list[EventRead]:
-    statement = select(CalendarEvent).order_by(CalendarEvent.start_at.asc()).limit(limit)
+    statement = (
+        select(CalendarEvent)
+        .where(CalendarEvent.user_id == user.id)
+        .order_by(CalendarEvent.start_at.asc())
+        .limit(limit)
+    )
     if from_at:
         statement = statement.where(CalendarEvent.start_at >= from_at)
     if to_at:
@@ -56,6 +62,7 @@ def list_events(
 @router.get("/upcoming", response_model=list[EventRead])
 def list_upcoming_events(
     session: SessionDep,
+    user: CurrentOrOwnerUser,
     days: int = Query(default=7, ge=1, le=365),
     type: EventType | None = None,
 ) -> list[EventRead]:
@@ -63,7 +70,11 @@ def list_upcoming_events(
     until = now + timedelta(days=days)
     statement = (
         select(CalendarEvent)
-        .where(CalendarEvent.start_at >= now, CalendarEvent.start_at <= until)
+        .where(
+            CalendarEvent.user_id == user.id,
+            CalendarEvent.start_at >= now,
+            CalendarEvent.start_at <= until,
+        )
         .order_by(CalendarEvent.start_at.asc())
     )
     if type:
@@ -74,16 +85,14 @@ def list_upcoming_events(
 
 
 @router.get("/{event_id}", response_model=EventRead)
-def get_event(event_id: int, session: SessionDep) -> EventRead:
-    event = get_or_404(session, CalendarEvent, event_id, detail="Event not found")
+def get_event(event_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> EventRead:
+    event = get_owned_or_404(session, CalendarEvent, event_id, user_id=user.id, detail="Event not found")
     return EventRead.model_validate(event, from_attributes=True)
 
 
 @router.patch("/{event_id}", response_model=EventRead)
-def update_event(event_id: int, payload: EventUpdate, session: SessionDep) -> EventRead:
-    event = session.get(CalendarEvent, event_id)
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
+def update_event(event_id: int, payload: EventUpdate, session: SessionDep, user: CurrentOrOwnerUser) -> EventRead:
+    event = get_owned_or_404(session, CalendarEvent, event_id, user_id=user.id, detail="Event not found")
 
     updates = payload.model_dump(exclude_unset=True)
     for key, value in updates.items():
@@ -110,7 +119,8 @@ def update_event(event_id: int, payload: EventUpdate, session: SessionDep) -> Ev
 
 
 @router.delete("/{event_id}")
-def delete_event(event_id: int, session: SessionDep) -> dict:
-    event = get_or_404(session, CalendarEvent, event_id, detail="Event not found")
-    delete(session, event)
+def delete_event(event_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    event = get_owned_or_404(session, CalendarEvent, event_id, user_id=user.id, detail="Event not found")
+    session.delete(event)
+    session.commit()
     return {"ok": True, "deleted_id": event_id}
