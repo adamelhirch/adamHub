@@ -151,6 +151,23 @@ its system-wide sync/reminder pass. A non-Owner JWT now reaches `/calendar`
 and sees only its own items; cross-tenant items are 404. This ADR still
 governs the other off-MVP domains (notes, …).
 
+## Superseded for calendar feeds (2026-08-18)
+
+`calendar feeds` is now tenant-scoped: `user_id` on `calendarfeed` (additive
+migration `t2b4d6f8a1c3`, backfill via `scripts/backfill_owner_tenant.py`) and
+the private `/calendar/feeds` router uses `CurrentOrOwnerUser` per route
+instead of the router-level `owner_only_user` gate. Creates auto-assign the
+acting user, lists filter by it, and delete 404s on another user's feeds (no
+existence leak). The public token-authenticated `.ics` route is unchanged in
+shape but now resolves the feed's own `user_id`: a feed only ever exposes the
+calendar items of the user who owns it, never another tenant's (and never "all
+users"). Legacy pre-backfill feeds (`user_id = NULL`) keep working and resolve
+to the `ADAMHUB_OWNER_EMAIL` user — the same tenant the backfill claims them
+for. This supersedes the t11 note that "the public calendar feed stays
+Owner-only": the feed's token now scopes to its owner tenant instead of always
+to the Owner. A non-Owner JWT now reaches `/calendar/feeds` and sees only its
+own feeds. This ADR still governs the other off-MVP domains (skill, …).
+
 ## Consequences
 
 - A SaaS user can no longer reach the Owner's unscoped data; the Owner's own

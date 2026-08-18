@@ -4,12 +4,13 @@ import hashlib
 import secrets
 import unicodedata
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Header, HTTPException, Response
 from fastapi.responses import PlainTextResponse
 from sqlmodel import select
 
+from app.api._crud import get_owned_or_404
 from app.api.calendar import list_calendar_items
-from app.api.deps import SessionDep, owner_only_user
+from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.core.auth import resolve_owner_user
 from app.core.config import get_settings
 from app.models import CalendarFeed, CalendarSource, User
@@ -20,7 +21,6 @@ from app.services.calendar_hub import build_ics
 private_router = APIRouter(
     prefix="/calendar/feeds",
     tags=["calendar-feeds"],
-    dependencies=[Depends(owner_only_user)],
 )
 
 public_router = APIRouter(tags=["calendar-feeds-public"])
@@ -96,12 +96,15 @@ def _collect_feed_items(session: SessionDep, feed: CalendarFeed, user: User):
 
 
 @private_router.post("", response_model=CalendarFeedRead)
-def create_calendar_feed(payload: CalendarFeedCreate, session: SessionDep) -> CalendarFeedRead:
+def create_calendar_feed(
+    payload: CalendarFeedCreate, session: SessionDep, user: CurrentOrOwnerUser
+) -> CalendarFeedRead:
     feed = CalendarFeed(
         name=payload.name,
         token=_generate_feed_token(session),
         sources=[source.value for source in payload.sources],
         include_completed=payload.include_completed,
+        user_id=user.id,
     )
     session.add(feed)
     session.commit()
@@ -110,15 +113,19 @@ def create_calendar_feed(payload: CalendarFeedCreate, session: SessionDep) -> Ca
 
 
 @private_router.get("", response_model=list[CalendarFeedRead])
-def list_calendar_feeds(session: SessionDep) -> list[CalendarFeedRead]:
-    feeds = session.exec(select(CalendarFeed).order_by(CalendarFeed.created_at.desc())).all()
+def list_calendar_feeds(session: SessionDep, user: CurrentOrOwnerUser) -> list[CalendarFeedRead]:
+    feeds = session.exec(
+        select(CalendarFeed)
+        .where(CalendarFeed.user_id == user.id)
+        .order_by(CalendarFeed.created_at.desc())
+    ).all()
     return [_build_feed_read(feed) for feed in feeds if feed.active]
 
 
 @private_router.delete("/{feed_id}")
-def delete_calendar_feed(feed_id: int, session: SessionDep) -> dict:
-    feed = session.get(CalendarFeed, feed_id)
-    if not feed or not feed.active:
+def delete_calendar_feed(feed_id: int, session: SessionDep, user: CurrentOrOwnerUser) -> dict:
+    feed = get_owned_or_404(session, CalendarFeed, feed_id, user_id=user.id, detail="Calendar feed not found")
+    if not feed.active:
         raise HTTPException(status_code=404, detail="Calendar feed not found")
     session.delete(feed)
     session.commit()
@@ -137,9 +144,18 @@ def get_public_calendar_feed(
     if feed is None:
         raise HTTPException(status_code=404, detail="Calendar feed not found")
 
-    # Feeds are created behind the owner-only gate, so a valid feed token always
-    # exposes the ADAMHUB_OWNER_EMAIL user's calendar (never any other tenant's).
-    owner = resolve_owner_user(session)
+    # A feed never exposes "all users": the token resolves the feed, and the
+    # feed only ever exposes the calendar items of the user it was created for
+    # (its user_id). Legacy pre-backfill feeds (user_id = NULL) keep the
+    # historical behavior and resolve to the ADAMHUB_OWNER_EMAIL user — the
+    # same tenant the backfill would claim them for. Either way the owner is a
+    # single user, and _collect_feed_items scopes the read to that user.
+    if feed.user_id is not None:
+        owner = session.get(User, feed.user_id)
+        if owner is None:
+            raise HTTPException(status_code=404, detail="Calendar feed not found")
+    else:
+        owner = resolve_owner_user(session)
     items = _collect_feed_items(session, feed, owner)
     ics_content = build_ics(items, calendar_name=feed.name)
     etag = hashlib.sha1(ics_content.encode("utf-8")).hexdigest()
