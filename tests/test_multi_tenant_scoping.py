@@ -210,15 +210,18 @@ def test_legacy_api_key_scopes_to_owner_user(client, test_engine, auth_headers, 
     )
     assert meal_plan.status_code == 200, meal_plan.text
     meal_plan_id = meal_plan.json()["id"]
+    goal_id = _create_goal_for(client, auth_headers, title="Objectif legacy")
 
     # The owner (via JWT) sees everything the legacy key created.
     assert [i["id"] for i in client.get("/api/v1/groceries", headers=owner_headers).json()] == [grocery_id]
     assert [i["id"] for i in client.get("/api/v1/meal-plans", headers=owner_headers).json()] == [meal_plan_id]
+    assert [i["id"] for i in client.get("/api/v1/goals", headers=owner_headers).json()] == [goal_id]
 
     # A freshly-registered JWT user sees none of it.
     stranger = register_user(client, "stranger@adamelhirch.com")
     assert client.get("/api/v1/groceries", headers=stranger["headers"]).json() == []
     assert client.get("/api/v1/meal-plans", headers=stranger["headers"]).json() == []
+    assert client.get("/api/v1/goals", headers=stranger["headers"]).json() == []
 
 
 def test_legacy_api_key_requires_owner_email_config(client, test_engine, auth_headers, monkeypatch):
