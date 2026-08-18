@@ -380,6 +380,7 @@ class CalendarEvent(SQLModel, table=True):
 
 class Subscription(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     name: str
     category: str = "general"
     amount: float

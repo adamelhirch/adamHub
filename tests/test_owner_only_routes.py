@@ -45,6 +45,13 @@ def test_habits_router_accepts_any_authenticated_user(client, jwt_headers):
     assert client.get("/api/v1/habits", headers=jwt_headers).json() == []
 
 
+def test_subscriptions_router_accepts_any_authenticated_user(client, jwt_headers):
+    # Tenant-scoped subscriptions (t8) no longer gate on ownership either: a
+    # plain JWT user reaches /subscriptions and sees their own empty data.
+    assert client.get("/api/v1/subscriptions", headers=jwt_headers).status_code == 200
+    assert client.get("/api/v1/subscriptions", headers=jwt_headers).json() == []
+
+
 def test_owner_only_route_accepts_api_key_and_owner_jwt(client, auth_headers, owner_headers):
     assert client.get("/api/v1/finances/transactions", headers=auth_headers).status_code == 200
     assert client.get("/api/v1/tasks", headers=auth_headers).status_code == 200

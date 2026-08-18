@@ -3,9 +3,10 @@
 
 After the additive multi-tenant migrations (user_id on groceryitem/pantryitem/
 recipe/mealplan/note/account/savingsgoal/financetransaction/budget/goal/
-calendarevent/habit/habitlog), pre-existing rows have user_id = NULL and are
-invisible to everyone. This script claims them for the account whose email is
-given with --email (which must already exist — register it first via
+subscription/calendarevent/habit/habitlog), pre-existing rows have
+user_id = NULL and are invisible to everyone. This script claims them for
+the account whose email is given with --email (which must already exist —
+register it first via
 POST /auth/register).
 
 Default is a dry run that only prints how many NULL rows exist per table.
@@ -41,6 +42,7 @@ from app.models import (
     PantryItem,
     Recipe,
     SavingsGoal,
+    Subscription,
     User,
 )
 
@@ -55,6 +57,7 @@ BACKFILL_MODELS = [
     FinanceTransaction,
     Budget,
     Goal,
+    Subscription,
     CalendarEvent,
     Habit,
     HabitLog,
