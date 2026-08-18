@@ -1671,7 +1671,7 @@ def _handle_subscription_create(payload, session, *, user, now, user_id):
         slot_start + timedelta(minutes=30),
         source=CalendarSource.SUBSCRIPTION,
     )
-    subscription = Subscription(**data.model_dump())
+    subscription = Subscription(**data.model_dump(), user_id=user_id)
     session.add(subscription)
     session.commit()
     session.refresh(subscription)
@@ -1681,26 +1681,34 @@ def _handle_subscription_create(payload, session, *, user, now, user_id):
 def _handle_subscription_list(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
     active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = select(Subscription).order_by(Subscription.next_due_date.asc()).limit(limit)
+    statement = (
+        select(Subscription)
+        .where(Subscription.user_id == user_id)
+        .order_by(Subscription.next_due_date.asc())
+        .limit(limit)
+    )
     if active_only:
         statement = statement.where(Subscription.active.is_(True))
     subscriptions = session.exec(statement).all()
     return {"subscriptions": [item.model_dump(mode="json") for item in subscriptions]}
 
 
+def _get_owned_subscription(session, user_id: int, subscription_id: int) -> Subscription:
+    subscription = session.get(Subscription, subscription_id)
+    if not subscription or subscription.user_id != user_id:
+        raise ValueError("subscription_id not found")
+    return subscription
+
+
 def _handle_subscription_get(payload, session, *, user, now, user_id):
     subscription_id = _int_id(payload, "subscription_id")
-    subscription = session.get(Subscription, subscription_id)
-    if not subscription:
-        raise ValueError("subscription_id not found")
+    subscription = _get_owned_subscription(session, user_id, subscription_id)
     return {"subscription": subscription.model_dump(mode="json")}
 
 
 def _handle_subscription_update(payload, session, *, user, now, user_id):
     subscription_id = _int_id(payload, "subscription_id")
-    subscription = session.get(Subscription, subscription_id)
-    if not subscription:
-        raise ValueError("subscription_id not found")
+    subscription = _get_owned_subscription(session, user_id, subscription_id)
 
     patch = SubscriptionUpdate.model_validate({k: v for k, v in payload.items() if k != "subscription_id"})
     updates = patch.model_dump(exclude_unset=True)
@@ -1729,13 +1737,13 @@ def _handle_subscription_update(payload, session, *, user, now, user_id):
 
 def _handle_subscription_upcoming(payload, session, *, user, now, user_id):
     days = _clamp_int(payload.get("days"), default=30, minimum=1, maximum=365)
-    subscriptions = list_upcoming_subscriptions(session, days=days)
+    subscriptions = list_upcoming_subscriptions(session, days=days, user_id=user_id)
     return {"subscriptions": [item.model_dump(mode="json") for item in subscriptions]}
 
 
 def _handle_subscription_projection(payload, session, *, user, now, user_id):
     currency = payload.get("currency", "EUR")
-    projection = build_subscription_projection(session, currency=currency)
+    projection = build_subscription_projection(session, currency=currency, user_id=user_id)
     return {"projection": projection.model_dump(mode="json")}
 
 
