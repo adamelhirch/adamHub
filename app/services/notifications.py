@@ -27,6 +27,7 @@ async def send_push_notification(
     click: str | None = None,
     icon: str | None = None,
     actions: list[dict] | None = None,
+    topic: str | None = None,
 ) -> bool:
     """
     Sends a push notification via NTFY.
@@ -35,17 +36,20 @@ async def send_push_notification(
     click: URL to open when the notification is clicked.
     icon: URL to an image to use as the icon.
     actions: List of dictionaries defining interactive buttons.
+    topic: per-user ntfy topic. Falls back to the shared ADAMHUB_NTFY_TOPIC
+    (the legacy single-topic behaviour) when not given.
     """
     settings = get_settings()
 
-    if not settings.ntfy_topic:
-        logger.warning("Notification skipped: ADAMHUB_NTFY_TOPIC is not configured.")
+    resolved_topic = (topic or "").strip() or settings.ntfy_topic
+    if not resolved_topic:
+        logger.warning("Notification skipped: no ntfy topic configured (ADAMHUB_NTFY_TOPIC is not set).")
         return False
 
     url = settings.ntfy_server.rstrip("/")
 
     payload = {
-        "topic": settings.ntfy_topic,
+        "topic": resolved_topic,
         "message": message,
         "title": title,
         "priority": priority,
@@ -64,7 +68,7 @@ async def send_push_notification(
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
-            logger.info("Push notification sent to topic %s: %s", settings.ntfy_topic, title)
+            logger.info("Push notification sent to topic %s: %s", resolved_topic, title)
             return True
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to send push notification: %s", exc)

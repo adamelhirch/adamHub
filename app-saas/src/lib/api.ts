@@ -39,6 +39,21 @@ export function revokeApiKey(): Promise<void> {
   return request<void>("/auth/api-key", { method: "DELETE" });
 }
 
+export interface NtfyTopicRead {
+  ntfy_topic: string | null;
+}
+
+export function getNtfyTopic(): Promise<NtfyTopicRead> {
+  return request<NtfyTopicRead>("/auth/notifications");
+}
+
+export function setNtfyTopic(ntfy_topic: string | null): Promise<NtfyTopicRead> {
+  return request<NtfyTopicRead>("/auth/notifications", {
+    method: "PUT",
+    body: { ntfy_topic },
+  });
+}
+
 export interface AuthResponse {
   token: string;
   user: AuthUser;

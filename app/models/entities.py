@@ -529,6 +529,9 @@ class User(SQLModel, table=True):
     api_key_encrypted: str | None = None
     api_key_hash: str | None = Field(default=None, index=True, unique=True)
     api_key_created_at: datetime | None = None
+    # Per-user ntfy push topic. When unset, notification jobs fall back to the
+    # shared ADAMHUB_NTFY_TOPIC so the legacy single-topic behaviour is preserved.
+    ntfy_topic: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

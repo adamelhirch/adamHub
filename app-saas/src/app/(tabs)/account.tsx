@@ -4,14 +4,18 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
+import { Field } from "@/components/field";
+import { PrimaryButton } from "@/components/primary-button";
 import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
 import {
   API_URL,
   generateApiKey,
   getApiKey,
+  getNtfyTopic,
   logout,
   revokeApiKey,
+  setNtfyTopic,
   type AuthUser,
 } from "@/lib/api";
 import { me } from "@/lib/auth";
@@ -38,6 +42,10 @@ export default function AccountScreen() {
   const [keyActionLoading, setKeyActionLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const [ntfyTopic, setNtfyTopicValue] = useState("");
+  const [ntfyLoading, setNtfyLoading] = useState(true);
+  const [ntfySaving, setNtfySaving] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
@@ -45,12 +53,18 @@ export default function AccountScreen() {
       async function load() {
         setLoading(true);
         setKeyLoading(true);
+        setNtfyLoading(true);
         setError(null);
         try {
-          const [userData, keyData] = await Promise.all([me(), getApiKey()]);
+          const [userData, keyData, ntfyData] = await Promise.all([
+            me(),
+            getApiKey(),
+            getNtfyTopic(),
+          ]);
           if (!cancelled) {
             setUser(userData);
             setApiKey(keyData.api_key);
+            setNtfyTopicValue(ntfyData.ntfy_topic ?? "");
           }
         } catch (err) {
           if (!cancelled) {
@@ -60,6 +74,7 @@ export default function AccountScreen() {
           if (!cancelled) {
             setLoading(false);
             setKeyLoading(false);
+            setNtfyLoading(false);
           }
         }
       }
@@ -135,6 +150,35 @@ export default function AccountScreen() {
               .finally(() => setKeyActionLoading(false));
           },
         },
+      ],
+    );
+  }
+
+  async function handleSaveNtfyTopic() {
+    if (ntfySaving) return;
+    setNtfySaving(true);
+    setError(null);
+    const next = ntfyTopic.trim();
+    try {
+      const data = await setNtfyTopic(next.length > 0 ? next : null);
+      setNtfyTopicValue(data.ntfy_topic ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Une erreur est survenue");
+    } finally {
+      setNtfySaving(false);
+    }
+  }
+
+  function confirmSaveNtfyTopic() {
+    const hasValue = ntfyTopic.trim().length > 0;
+    Alert.alert(
+      hasValue ? "Enregistrer le topic ?" : "Effacer le topic ?",
+      hasValue
+        ? "Tes rappels calendrier seront envoyés sur ce topic ntfy à la place du topic global."
+        : "Tes rappels calendrier repartiront sur le topic global configuré sur le serveur.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Enregistrer", onPress: () => void handleSaveNtfyTopic() },
       ],
     );
   }
@@ -226,6 +270,38 @@ export default function AccountScreen() {
                 Génère une clé pour connecter un assistant IA (via MCP) à tes courses, recettes, garde-manger et
                 plannings repas.
               </Text>
+            )}
+          </View>
+
+          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4">
+            <View className="mb-3 flex-row items-center justify-between">
+              <Text className="text-sm font-semibold text-slate-900">Notifications push (ntfy)</Text>
+            </View>
+
+            {ntfyLoading ? (
+              <View className="items-center py-4">
+                <ActivityIndicator color="#10b981" />
+              </View>
+            ) : (
+              <>
+                <Field
+                  label="Topic ntfy"
+                  value={ntfyTopic}
+                  onChangeText={setNtfyTopicValue}
+                  placeholder="ex. : mon-topic-personnel"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <Text className="mb-3 text-xs text-slate-500">
+                  Tes rappels calendrier seront envoyés sur ce topic ntfy. Laisse vide pour revenir au topic
+                  global configuré sur le serveur.
+                </Text>
+                <PrimaryButton
+                  label="Enregistrer"
+                  onPress={confirmSaveNtfyTopic}
+                  loading={ntfySaving}
+                />
+              </>
             )}
           </View>
 
