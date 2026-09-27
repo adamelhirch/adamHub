@@ -62,7 +62,26 @@ async function loadSettings() {
 
 async function findHubTabs() {
   const tabs = await chrome.tabs.query({});
-  return tabs.filter((tab) => tab && matchesFrontend(tab.url, frontendUrl));
+  const exact = tabs.filter((tab) => tab && tab.url && matchesFrontend(tab.url, frontendUrl));
+  if (exact.length > 0) return exact;
+
+  // Fallback for local development: if configured frontendUrl is on localhost or 127.0.0.1,
+  // also look for open tabs on the other common dev port (5173 <-> 5174)
+  try {
+    const parsed = new URL(frontendUrl);
+    if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") {
+      const altPort = parsed.port === "5174" ? "5173" : parsed.port === "5173" ? "5174" : null;
+      if (altPort) {
+        const altUrl = `${parsed.protocol}//${parsed.hostname}:${altPort}`;
+        const fallback = tabs.filter((tab) => tab && tab.url && matchesFrontend(tab.url, altUrl));
+        if (fallback.length > 0) {
+          frontendUrl = altUrl;
+          return fallback;
+        }
+      }
+    }
+  } catch {}
+  return [];
 }
 
 async function resolveToken() {
@@ -92,22 +111,25 @@ async function fetchAccount(token) {
 }
 
 async function refreshAccountBadge() {
-  const token = await resolveToken();
-  if (!token) {
-    accountInfo.classList.add("hidden");
-    syncPanel.classList.add("hidden");
-    showAuthPrompt(true);
-    return false;
-  }
-  const account = await fetchAccount(token);
-  if (!account) {
-    accountInfo.classList.add("hidden");
-    syncPanel.classList.add("hidden");
-    showAuthPrompt(true);
+  let token = await resolveToken();
+  let account = token ? await fetchAccount(token) : null;
+
+  if (token && !account) {
+    // Stale or expired token in cache: clear it and re-scan open AdamHUB tabs immediately
     await auth.clearToken();
+    token = await resolveToken();
+    if (token) {
+      account = await fetchAccount(token);
+    }
+  }
+
+  if (!token || !account) {
+    accountInfo.classList.add("hidden");
+    syncPanel.classList.add("hidden");
+    showAuthPrompt(true);
     return false;
   }
-  accountBadge.textContent = account.display_name;
+  accountBadge.textContent = account.display_name || account.email;
   accountInfo.classList.remove("hidden");
   syncPanel.classList.remove("hidden");
   showAuthPrompt(false);
@@ -209,7 +231,19 @@ async function handleSwitchAccount() {
 function bindEventListeners() {
   openHubBtn.addEventListener("click", async () => {
     try {
-      await chrome.tabs.create({ url: frontendUrl });
+      const hubTabs = await findHubTabs();
+      if (hubTabs.length > 0 && hubTabs[0]?.id != null) {
+        await chrome.tabs.update(hubTabs[0].id, { active: true });
+        if (hubTabs[0].windowId != null) {
+          await chrome.windows.update(hubTabs[0].windowId, { focused: true });
+        }
+        return;
+      }
+      let urlToOpen = frontendUrl;
+      if (urlToOpen.includes(":5174")) {
+        urlToOpen = urlToOpen.replace(":5174", ":5173");
+      }
+      await chrome.tabs.create({ url: urlToOpen });
     } catch (err) {
       showStatus("error", `Impossible d'ouvrir AdamHUB : ${err.message ?? err}`);
     }

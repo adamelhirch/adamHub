@@ -17,11 +17,13 @@ from app.api.recipes import router as recipes_router
 from app.api.skill import router as skill_router
 from app.api.subscriptions import router as subscriptions_router
 from app.api.tasks import router as tasks_router
+from app.api.assistant import router as assistant_router
 from app.api.video import router as video_router
 from app.api.endpoints.supermarket import router as supermarket_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
+api_router.include_router(assistant_router)
 api_router.include_router(tasks_router)
 api_router.include_router(finances_router)
 api_router.include_router(groceries_router)

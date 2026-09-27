@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.calendar_feeds import public_router as public_calendar_feeds_router
@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.scheduler import setup_scheduler, shutdown_scheduler
 from app.mcp.server import build_mcp_app, mcp_server
+from app.services.calendar_hub import CalendarConflictError
 
 settings = get_settings()
 
@@ -52,6 +53,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(CalendarConflictError)
+def calendar_conflict_error_handler(request: Request, exc: CalendarConflictError):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": str(exc),
+            "conflict": True,
+            "colliding_items": exc.colliding_items,
+            "suggested_slots": exc.suggested_slots,
+        },
+    )
 
 
 @app.get("/health")

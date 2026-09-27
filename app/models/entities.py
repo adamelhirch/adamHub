@@ -207,6 +207,7 @@ class GroceryItem(SQLModel, table=True):
     price_text: str | None = None
     product_url: str | None = None
     checked: bool = False
+    in_cart: bool = Field(default=False, index=True)
     priority: int = 3
     note: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -421,6 +422,19 @@ class PantryItem(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class OpenFoodFactsCache(SQLModel, table=True):
+    barcode: str = Field(primary_key=True, max_length=64)
+    raw_payload: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    product_name: str | None = None
+    brand: str | None = None
+    quantity_text: str | None = None
+    categories: str | None = None
+    image_url: str | None = None
+    nutriscore: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+
+
 class Note(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
@@ -539,6 +553,34 @@ class User(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class UserProfile(SQLModel, table=True):
+    """Long-term context and preferences captured during onboarding or settings."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True, unique=True)
+    dietary_preferences: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    fitness_goals: str = Field(default="", max_length=500)
+    lifestyle_notes: str = Field(default="", max_length=1000)
+    ai_tone: str = Field(default="direct", max_length=50)
+    onboarding_completed: bool = Field(default=False, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class UserMemory(SQLModel, table=True):
+    """Discrete, persistent user facts extracted autonomously from conversations."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    category: str = Field(default="lifestyle", index=True, max_length=50)
+    fact: str = Field(max_length=1000)
+    confidence: float = Field(default=1.0)
+    source: str = Field(default="conversation", max_length=50)
+    is_active: bool = Field(default=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class SupermarketConnection(SQLModel, table=True):
     """A user-owned cookie set for a given supermarket store.
 
@@ -643,3 +685,75 @@ class SavingsGoal(SQLModel, table=True):
     completed: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class UserStorePreference(SQLModel, table=True):
+    __table_args__ = (
+        UniqueConstraint("user_id", "store", name="uq_user_store_preference"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    store: SupermarketStore = Field(index=True)
+    external_store_id: str
+    store_label: str
+    location_label: str | None = None
+    pickup_type: str = Field(default="quai", max_length=32)
+    optimization_strategy: str = Field(default="mdd", max_length=32)
+    channel: str | None = None
+    raw_context: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GroceryToCartJob(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    store: SupermarketStore = Field(index=True)
+    external_store_id: str
+    status: str = Field(default="draft", index=True, max_length=32)
+    optimization_strategy: str = Field(default="mdd", max_length=32)
+    items_count: int = 0
+    matched_count: int = 0
+    substitutes_count: int = 0
+    unmatched_count: int = 0
+    estimated_total_cents: int = 0
+    error_message: str | None = None
+    synced_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MatchedCartItem(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    job_id: int = Field(foreign_key="grocerytocartjob.id", index=True)
+    grocery_item_id: int | None = Field(default=None, foreign_key="groceryitem.id", index=True)
+    cache_id: int | None = Field(default=None, foreign_key="supermarketsearchcache.id", index=True)
+    external_id: str | None = None
+    name: str
+    brand: str | None = None
+    packaging: str | None = None
+    image_url: str | None = None
+    product_url: str | None = None
+    quantity: float = 1.0
+    unit_price_cents: int = 0
+    total_price_cents: int = 0
+    match_type: str = Field(default="mdd", max_length=32)
+    status: str = Field(default="staged", max_length=32)
+    custom_note: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class SubstituteProposal(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    matched_item_id: int = Field(foreign_key="matchedcartitem.id", index=True)
+    alternative_cache_id: int = Field(foreign_key="supermarketsearchcache.id", index=True)
+    alternative_name: str
+    alternative_brand: str | None = None
+    alternative_unit_price_cents: int = 0
+    price_difference_cents: int = 0
+    reason: str
+    status: str = Field(default="pending", max_length=32)
+    created_at: datetime = Field(default_factory=utcnow)

@@ -69,3 +69,20 @@ class PantryOverview(BaseModel):
     total_items: int
     low_stock_items: int
     expiring_within_7_days: int
+
+
+class OpenFoodFactsProductDraft(BaseModel):
+    barcode: str
+    found: bool
+    raw_name: str | None = None
+    brand: str | None = None
+    suggested_name: str
+    quantity: float = 1.0
+    unit: str = "item"
+    category: str | None = None
+    image_url: str | None = None
+    nutriscore: str | None = None
+    packaging: str | None = None
+    location: str = "Placard"
+    missing_fields: list[str] = Field(default_factory=list)
+

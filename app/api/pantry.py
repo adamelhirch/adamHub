@@ -7,6 +7,7 @@ from app.api._crud import apply_updates, create, delete, get_owned_or_404, save
 from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import GroceryPantrySync, PantryItem
 from app.schemas import (
+    OpenFoodFactsProductDraft,
     PantryConsume,
     PantryItemCreate,
     PantryItemRead,
@@ -15,6 +16,7 @@ from app.schemas import (
 )
 from app.services.life import build_pantry_overview
 from app.services.grocery_pantry import resolve_store_metadata
+from app.services.openfoodfacts import lookup_openfoodfacts_barcode
 
 router = APIRouter(prefix="/pantry", tags=["pantry"])
 
@@ -108,3 +110,11 @@ def pantry_overview(
     days: int = Query(default=7, ge=1, le=365),
 ) -> PantryOverview:
     return build_pantry_overview(session, days=days, user_id=user.id)
+
+
+@router.get("/barcode/{barcode}", response_model=OpenFoodFactsProductDraft)
+async def get_product_by_barcode(
+    barcode: str, session: SessionDep, user: CurrentOrOwnerUser
+) -> OpenFoodFactsProductDraft:
+    return await lookup_openfoodfacts_barcode(barcode, session=session)
+

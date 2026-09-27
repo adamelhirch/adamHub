@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     proxies_file: str = "data/proxies.txt"
     proxy_cooldown_seconds: int = 600
 
+    # OpenRouter / AI Assistant configuration
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    ai_model: str = "google/gemini-2.0-flash-001"
+    memory_extractor_model: str = "google/gemini-2.0-flash-001"
+
 
 def validate_security_config(settings: Settings) -> None:
     """Refuse startup when secrets/CORS fall back to insecure defaults.
@@ -118,6 +124,12 @@ def validate_security_config(settings: Settings) -> None:
         problems.append(
             "ADAMHUB_ALLOW_ORIGINS='*' is only allowed in development/test. "
             "Set it to the deployed frontend origin (e.g. https://hub.adamelhirch.com)."
+        )
+
+    if settings.db_url.startswith("sqlite") and not is_dev_or_test():
+        problems.append(
+            "ADAMHUB_DB_URL specifies SQLite, which is not permitted in production. "
+            "Configure a valid PostgreSQL connection string (postgresql+psycopg://...)."
         )
 
     if problems:

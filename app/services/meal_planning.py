@@ -22,7 +22,7 @@ from app.services.cook import (
     compute_recipe_missing_ingredients,
 )
 from app.services.store_catalog import resolve_store_fields
-from app.services.units import normalize_name
+from app.services.units import canonical_ingredient, from_base, normalize_name, to_base
 
 
 def validate_meal_plan_slot_free(
@@ -66,28 +66,37 @@ def add_missing_to_grocery(
     existing_unchecked = session.exec(existing_statement).all()
     indexed: dict[tuple[str, str], GroceryItem] = {}
     for item in existing_unchecked:
-        indexed[(normalize_name(item.name), (item.unit or "item").strip().lower())] = item
+        _, item_base_unit = to_base(1.0, item.unit or "item")
+        indexed[(normalize_name(item.name), item_base_unit)] = item
 
     added = 0
     now = datetime.now(timezone.utc)
     for ing in missing:
-        key = (normalize_name(ing.name), (ing.unit or "item").strip().lower())
+        canon_name, canon_unit, canon_note = canonical_ingredient(ing.name, ing.unit, None)
+        ing_qty_base, ing_base_unit = to_base(ing.missing_quantity or 0.0, canon_unit)
+        key = (normalize_name(canon_name), ing_base_unit)
         current = indexed.get(key)
         if current:
-            current.quantity = round((current.quantity or 0.0) + (ing.missing_quantity or 0.0), 3)
+            curr_qty_base, _ = to_base(current.quantity or 0.0, current.unit or "item")
+            total_base = curr_qty_base + ing_qty_base
+            current.quantity = round(from_base(total_base, current.unit or "item"), 3)
             if note_prefix:
                 base_note = current.note or ""
-                marker = f"{note_prefix}: {ing.name}"
+                marker = f"{note_prefix}: {canon_name}"
                 if marker not in base_note:
                     current.note = f"{base_note}\n{marker}".strip()
             current.updated_at = now
             session.add(current)
             continue
 
+        item_note = f"{note_prefix}: {canon_name}" if note_prefix else None
+        if canon_note:
+            item_note = f"{item_note} ({canon_note})" if item_note else canon_note
+
         created = GroceryItem(
-            name=ing.name,
+            name=canon_name,
             quantity=max(0.0, ing.missing_quantity),
-            unit=ing.unit,
+            unit=canon_unit,
             category=ing.category or "meal-plan",
             image_url=ing.image_url,
             store_label=ing.store_label,
@@ -97,7 +106,7 @@ def add_missing_to_grocery(
             product_url=ing.product_url,
             checked=False,
             priority=2,
-            note=f"{note_prefix}: {ing.name}" if note_prefix else None,
+            note=item_note,
             user_id=user_id,
         )
         session.add(created)
@@ -291,11 +300,14 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     """
     if isinstance(ingredient_in, dict):
         ingredient_in = RecipeIngredientIn.model_validate(ingredient_in)
+    canon_name, canon_unit, canon_note = canonical_ingredient(
+        ingredient_in.name, ingredient_in.unit, ingredient_in.note
+    )
     fields: dict = {
-        "name": ingredient_in.name,
+        "name": canon_name,
         "quantity": ingredient_in.quantity,
-        "unit": ingredient_in.unit,
-        "note": ingredient_in.note,
+        "unit": canon_unit,
+        "note": canon_note,
         "category": ingredient_in.category,
         "cache_id": None,
         "store": None,

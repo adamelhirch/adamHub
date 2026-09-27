@@ -218,3 +218,35 @@ class MealPlanUnconfirmResult(BaseModel):
     previously_confirmed_at: datetime | None
     note: str | None
     pantry_restore: list[MealIngredientRestoreRead]
+
+
+class RecipeAddToGroceriesRequest(BaseModel):
+    ingredient_ids: list[int] | None = None
+    servings_override: int | None = Field(default=None, ge=1, le=100)
+    missing_only: bool = False
+
+
+class RecipeAddToGroceriesResult(BaseModel):
+    recipe_id: int
+    added_count: int
+    items: list[dict] = Field(default_factory=list)
+
+
+class CalendarConflictDetail(BaseModel):
+    title: str
+    start_at: datetime
+    end_at: datetime
+    category: str
+
+
+class AlternativeSlot(BaseModel):
+    start_at: datetime
+    end_at: datetime
+    label: str
+
+
+class MealPlanConflictResponse(BaseModel):
+    detail: str
+    conflict: bool = True
+    colliding_items: list[CalendarConflictDetail] = Field(default_factory=list)
+    suggested_slots: list[AlternativeSlot] = Field(default_factory=list)

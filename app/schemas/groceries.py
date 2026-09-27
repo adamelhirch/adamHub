@@ -54,6 +54,7 @@ class GroceryItemRead(BaseModel):
     price_text: str | None
     product_url: str | None
     checked: bool
+    in_cart: bool = False
     priority: int
     note: str | None
     created_at: datetime

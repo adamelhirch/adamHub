@@ -378,8 +378,13 @@ def project_persisted_generated_calendar_items(
     for plan in meal_plans:
         start_at = _utc(plan.planned_at)
         slot_label = plan.slot.value if plan.slot else start_at.strftime("%H:%M")
-        end_at = start_at + timedelta(minutes=75)
         recipe = recipes_by_id.get(plan.recipe_id)
+        duration_min = (
+            ((recipe.prep_minutes or 0) + (recipe.cook_minutes or 0))
+            if recipe and ((recipe.prep_minutes or 0) + (recipe.cook_minutes or 0)) > 0
+            else 45
+        )
+        end_at = start_at + timedelta(minutes=duration_min)
         recipe_name = recipe.name if recipe else f"Recipe #{plan.recipe_id}"
         confirmation = cooked_by_plan.get(plan.id)
         cooked_at = confirmation.confirmed_at if confirmation else None
@@ -568,20 +573,39 @@ def project_generated_calendar_items(
     return projected
 
 
-def validate_calendar_slot_free(
+class CalendarConflictError(ValueError):
+    """Raised when a requested calendar slot collides with existing items."""
+
+    def __init__(
+        self,
+        message: str,
+        colliding_items: list[dict],
+        suggested_slots: list[dict],
+    ) -> None:
+        super().__init__(message)
+        self.colliding_items = colliding_items
+        self.suggested_slots = suggested_slots
+        self.conflict_payload = {
+            "conflict": True,
+            "message": message,
+            "colliding_items": colliding_items,
+            "suggested_slots": suggested_slots,
+        }
+
+
+def find_slot_collisions(
     session: Session,
-    start_at: datetime,
-    end_at: datetime,
+    start: datetime,
+    end: datetime,
     *,
     source: CalendarSource | None = None,
     source_ref_id: int | None = None,
     ignore_calendar_item_id: int | None = None,
     user_id: int | None = None,
-) -> None:
-    start = _as_utc(start_at)
-    end = _as_utc(end_at)
-    if end <= start:
-        raise ValueError("end_at must be after start_at")
+) -> list[dict]:
+    start_utc = _as_utc(start)
+    end_utc = _as_utc(end)
+    colliding: list[dict] = []
 
     manual_statement = select(CalendarItem).where(CalendarItem.generated.is_(False))
     if user_id is not None:
@@ -592,13 +616,20 @@ def validate_calendar_slot_free(
             continue
         item_start = _as_utc(item.start_at)
         item_end = _as_utc(item.end_at)
-        if _intervals_overlap(start, end, item_start, item_end):
-            raise ValueError(f"Calendar slot overlaps with existing manual item: {item.title}")
+        if _intervals_overlap(start_utc, end_utc, item_start, item_end):
+            colliding.append({
+                "title": item.title,
+                "start_at": item_start.isoformat(),
+                "end_at": item_end.isoformat(),
+                "category": item.category.value if hasattr(item.category, "value") else str(item.category),
+                "source": "manual",
+                "message": f"Calendar slot overlaps with existing manual item: {item.title}",
+            })
 
     for row in project_generated_calendar_items(
         session,
-        from_at=start - timedelta(days=1),
-        to_at=end + timedelta(days=1),
+        from_at=start_utc - timedelta(days=1),
+        to_at=end_utc + timedelta(days=1),
         user_id=user_id,
     ):
         if (
@@ -610,8 +641,150 @@ def validate_calendar_slot_free(
             continue
         item_start = _as_utc(row["start_at"])
         item_end = _as_utc(row["end_at"])
-        if _intervals_overlap(start, end, item_start, item_end):
-            raise ValueError(f"Calendar slot overlaps with generated item: {row['title']}")
+        if _intervals_overlap(start_utc, end_utc, item_start, item_end):
+            cat_val = row.get("category", "general")
+            cat_str = cat_val.value if hasattr(cat_val, "value") else str(cat_val)
+            colliding.append({
+                "title": row.get("title", "Sans titre"),
+                "start_at": item_start.isoformat(),
+                "end_at": item_end.isoformat(),
+                "category": cat_str,
+                "source": row.get("source", "generated"),
+                "message": f"Calendar slot overlaps with generated item: {row['title']}",
+            })
+
+    return colliding
+
+
+def detect_calendar_conflicts_and_alternatives(
+    session: Session,
+    start_at: datetime,
+    end_at: datetime,
+    *,
+    source: CalendarSource | None = None,
+    source_ref_id: int | None = None,
+    ignore_calendar_item_id: int | None = None,
+    user_id: int | None = None,
+    max_suggestions: int = 2,
+) -> dict:
+    start = _as_utc(start_at)
+    end = _as_utc(end_at)
+    if end <= start:
+        raise ValueError("end_at must be after start_at")
+
+    duration = end - start
+    colliding = find_slot_collisions(
+        session,
+        start,
+        end,
+        source=source,
+        source_ref_id=source_ref_id,
+        ignore_calendar_item_id=ignore_calendar_item_id,
+        user_id=user_id,
+    )
+
+    if not colliding:
+        return {
+            "conflict": False,
+            "colliding_items": [],
+            "suggested_slots": [],
+        }
+
+    suggested_slots: list[dict] = []
+    seen_slots: set[tuple[datetime, datetime]] = set()
+
+    def try_candidate(cand_start: datetime, cand_end: datetime, label: str) -> bool:
+        cand_tuple = (cand_start, cand_end)
+        if cand_tuple in seen_slots:
+            return False
+        seen_slots.add(cand_tuple)
+
+        cand_collisions = find_slot_collisions(
+            session,
+            cand_start,
+            cand_end,
+            source=source,
+            source_ref_id=source_ref_id,
+            ignore_calendar_item_id=ignore_calendar_item_id,
+            user_id=user_id,
+        )
+        if not cand_collisions:
+            suggested_slots.append({
+                "start_at": cand_start.isoformat(),
+                "end_at": cand_end.isoformat(),
+                "label": label,
+            })
+            return True
+        return False
+
+    # Candidate A: Immediately after latest collision
+    max_collision_end = max(_as_utc(datetime.fromisoformat(c["end_at"])) for c in colliding)
+    day_end = datetime.combine(start.date(), time(22, 0)).replace(tzinfo=UTC)
+    cand = max_collision_end
+    while cand + duration <= day_end and len(suggested_slots) < max_suggestions:
+        try_candidate(cand, cand + duration, f"Le même jour à {cand.strftime('%H:%M')}")
+        cand += timedelta(minutes=30)
+
+    # Candidate B: Before earliest collision on target day
+    min_collision_start = min(_as_utc(datetime.fromisoformat(c["start_at"])) for c in colliding)
+    day_start = datetime.combine(start.date(), time(8, 0)).replace(tzinfo=UTC)
+    cand = min_collision_start - duration
+    while cand >= day_start and len(suggested_slots) < max_suggestions:
+        try_candidate(cand, cand + duration, f"Plus tôt dans la journée à {cand.strftime('%H:%M')}")
+        cand -= timedelta(minutes=30)
+
+    # Candidate C: Other gaps on the same day
+    cand = day_start
+    while cand + duration <= day_end and len(suggested_slots) < max_suggestions:
+        try_candidate(cand, cand + duration, f"Créneau disponible à {cand.strftime('%H:%M')}")
+        cand += timedelta(minutes=30)
+
+    # Candidate D: Next day morning (09:00, 10:00, 14:00, 15:00 UTC)
+    next_day = start.date() + timedelta(days=1)
+    for next_hour in [9, 10, 11, 14, 15, 16]:
+        if len(suggested_slots) >= max_suggestions:
+            break
+        cand_start = datetime.combine(next_day, time(next_hour, 0)).replace(tzinfo=UTC)
+        try_candidate(
+            cand_start,
+            cand_start + duration,
+            f"Le lendemain ({cand_start.strftime('%d/%m')}) à {cand_start.strftime('%H:%M')}",
+        )
+
+    first_msg = colliding[0].get("message") or f"Calendar slot overlaps with existing item: {colliding[0]['title']}"
+    return {
+        "conflict": True,
+        "message": first_msg,
+        "colliding_items": colliding,
+        "suggested_slots": suggested_slots,
+    }
+
+
+def validate_calendar_slot_free(
+    session: Session,
+    start_at: datetime,
+    end_at: datetime,
+    *,
+    source: CalendarSource | None = None,
+    source_ref_id: int | None = None,
+    ignore_calendar_item_id: int | None = None,
+    user_id: int | None = None,
+) -> None:
+    res = detect_calendar_conflicts_and_alternatives(
+        session,
+        start_at,
+        end_at,
+        source=source,
+        source_ref_id=source_ref_id,
+        ignore_calendar_item_id=ignore_calendar_item_id,
+        user_id=user_id,
+    )
+    if res["conflict"]:
+        raise CalendarConflictError(
+            res["message"],
+            res["colliding_items"],
+            res["suggested_slots"],
+        )
 
 
 def apply_task_update(task: Task, updates: dict) -> dict:

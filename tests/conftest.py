@@ -43,15 +43,32 @@ def disable_app_lifespan_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
     # instance" — tests that need the MCP layer call its handlers directly
     # (tests/test_mcp_server.py) rather than through the live session manager.
     monkeypatch.setattr(mcp_server.session_manager, "run", _noop_session_manager_run)
+    # Ensure automated tests do not rely on live external OpenRouter rate limits
+    monkeypatch.setenv("ADAMHUB_OPENROUTER_API_KEY", "")
+    get_settings.cache_clear()
 
 
 @pytest.fixture()
 def test_engine(tmp_path):
-    db_path = tmp_path / "adamhub-test.db"
-    engine = create_engine(
-        f"sqlite:///{db_path}",
-        connect_args={"check_same_thread": False},
-    )
+    pg_url = os.environ.get("ADAMHUB_TEST_DB_URL")
+    if pg_url:
+        try:
+            engine = create_engine(pg_url, pool_pre_ping=True)
+            with engine.connect():
+                pass
+        except Exception:
+            db_path = tmp_path / "adamhub-test.db"
+            engine = create_engine(
+                f"sqlite:///{db_path}",
+                connect_args={"check_same_thread": False},
+            )
+    else:
+        db_path = tmp_path / "adamhub-test.db"
+        engine = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False},
+        )
+
     SQLModel.metadata.create_all(engine)
     try:
         yield engine

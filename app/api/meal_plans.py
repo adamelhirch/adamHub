@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app.api._crud import get_owned_or_404
 from app.api.deps import CurrentOrOwnerUser, SessionDep
-from app.models import MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
+from app.models import CalendarSource, MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
 from app.schemas import (
     MealCookLogCreate,
     MealPlanConfirmCooked,
@@ -14,6 +14,10 @@ from app.schemas import (
     MealPlanRead,
     MealPlanUnconfirmResult,
     MealPlanUpdate,
+)
+from app.services.calendar_hub import (
+    CalendarConflictError,
+    detect_calendar_conflicts_and_alternatives,
 )
 from app.services.cook import (
     confirm_meal_plan_cooked,
@@ -62,7 +66,7 @@ def _get_owned_recipe(session, recipe_id: int, user_id: int) -> Recipe:
 def create_meal_plan(
     payload: MealPlanCreate, session: SessionDep, user: CurrentOrOwnerUser
 ) -> MealPlanRead:
-    _get_owned_recipe(session, payload.recipe_id, user.id)
+    recipe = _get_owned_recipe(session, payload.recipe_id, user.id)
 
     planned_at = _resolve_planned_at(payload)
     planned_for = payload.planned_for or planned_at.date()
@@ -75,6 +79,24 @@ def create_meal_plan(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    duration_min = (recipe.prep_minutes or 0) + (recipe.cook_minutes or 0)
+    if duration_min <= 0:
+        duration_min = 45
+    end_at = planned_at + timedelta(minutes=duration_min)
+
+    conflict_info = detect_calendar_conflicts_and_alternatives(
+        session,
+        planned_at,
+        end_at,
+        user_id=user.id,
+    )
+    if conflict_info["conflict"]:
+        raise CalendarConflictError(
+            conflict_info["message"],
+            conflict_info["colliding_items"],
+            conflict_info["suggested_slots"],
+        )
 
     meal_plan = MealPlan(
         **payload.model_dump(exclude={"planned_at"}), planned_at=planned_at, user_id=user.id
@@ -151,6 +173,30 @@ def update_meal_plan(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    target_recipe_id = updates.get("recipe_id", meal_plan.recipe_id)
+    target_recipe = session.get(Recipe, target_recipe_id)
+    duration_min = (
+        ((target_recipe.prep_minutes or 0) + (target_recipe.cook_minutes or 0))
+        if target_recipe and ((target_recipe.prep_minutes or 0) + (target_recipe.cook_minutes or 0)) > 0
+        else 45
+    )
+    next_end_at = next_planned_at + timedelta(minutes=duration_min)
+
+    conflict_info = detect_calendar_conflicts_and_alternatives(
+        session,
+        next_planned_at,
+        next_end_at,
+        source=CalendarSource.MEAL_PLAN,
+        source_ref_id=meal_plan.id,
+        user_id=user.id,
+    )
+    if conflict_info["conflict"]:
+        raise CalendarConflictError(
+            conflict_info["message"],
+            conflict_info["colliding_items"],
+            conflict_info["suggested_slots"],
+        )
 
     reset_cook_confirmation = (
         ("planned_at" in updates and updates.get("planned_at") != meal_plan.planned_at)
