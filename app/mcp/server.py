@@ -44,8 +44,6 @@ from app.skill.actions import ACTION_CATALOG, execute_action
 # gates in app/api/router.py's includes.
 MVP_ACTION_PREFIXES = {
     "grocery", "recipe", "pantry", "meal_plan", "supermarket",
-    "task", "finance", "calendar", "habit", "goal", "event",
-    "fitness", "subscription", "patrimony", "note", "video",
 }
 
 _ACTION_BY_NAME = {entry["action"]: entry for entry in ACTION_CATALOG}

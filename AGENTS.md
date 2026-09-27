@@ -10,6 +10,5 @@ Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root (not yet crea
 
 ## Commands
 
-- Backend tests: `uv run --extra dev pytest` — the `dev` extra pulls in pytest; `uv run pytest` alone fails. Expected ~90 passed / 1 skipped (skip = postgres smoke).
-- Web: `cd web && npm run build` (lint: `npm run lint`).
+- Backend tests: `uv run --extra dev pytest` — Expected ~350 passed / 1 skipped (skip = postgres smoke).
 - App SaaS: `cd app-saas && npm run typecheck && npm run lint`.

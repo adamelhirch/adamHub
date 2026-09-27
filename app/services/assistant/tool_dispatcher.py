@@ -3,16 +3,11 @@ from sqlmodel import Session
 
 from app.models.entities import User
 from app.mcp.server import _informal_schema_to_json_schema
-from app.services.calendar_hub import CalendarConflictError
+from app.services.meal_planning import CalendarConflictError
 from app.skill.actions import ACTION_CATALOG, execute_action
 
 # Whitelist of actions exposed to the conversational assistant for safe execution
 ASSISTANT_ALLOWED_ACTIONS = {
-    # Tasks
-    "task.create",
-    "task.list",
-    "task.update",
-    "task.complete",
     # Groceries
     "grocery.add_item",
     "grocery.list_items",
@@ -47,15 +42,6 @@ ASSISTANT_ALLOWED_ACTIONS = {
     "supermarket.clear_cart",
     "supermarket.list_stores",
     "supermarket.list_connections",
-    # Fitness
-    "fitness.create_session",
-    "fitness.list_sessions",
-    "fitness.complete_session",
-    # Calendar
-    "calendar.add_item",
-    "calendar.check_availability",
-    "calendar.list_items",
-    "calendar.agenda",
 }
 
 

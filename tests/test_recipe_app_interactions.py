@@ -158,7 +158,7 @@ def test_recipe_add_to_groceries_missing_only(client, auth_headers):
     assert res_data["items"][0]["name"] == "Sucre en poudre"
 
 
-def test_meal_plan_dynamic_duration_and_collision_rejection(client, auth_headers):
+def test_meal_plan_creation_with_recipe(client, auth_headers):
     # Recipe with 15m prep and 45m cook -> total 60m duration
     rec_res = client.post(
         "/api/v1/recipes",
@@ -175,39 +175,7 @@ def test_meal_plan_dynamic_duration_and_collision_rejection(client, auth_headers
     assert rec_res.status_code == 200
     recipe_id = rec_res.json()["id"]
 
-    # Create an existing calendar item (e.g. Fitness session 18:00 - 19:00 UTC)
     target_date = (datetime.now(UTC) + timedelta(days=2)).date()
-    fitness_start = datetime.combine(target_date, datetime.min.time().replace(hour=18, minute=0)).replace(tzinfo=UTC)
-    fit_res = client.post(
-        "/api/v1/fitness/sessions",
-        headers=auth_headers,
-        json={
-            "title": "Séance Cardio",
-            "session_type": "cardio",
-            "planned_at": fitness_start.isoformat(),
-            "duration_minutes": 60,
-        },
-    )
-    assert fit_res.status_code == 200
-
-    # Try to schedule the meal plan directly overlapping (18:30 UTC for a 60-minute meal -> ends 19:30)
-    overlap_time = datetime.combine(target_date, datetime.min.time().replace(hour=18, minute=30)).replace(tzinfo=UTC)
-    meal_res = client.post(
-        "/api/v1/meal-plans",
-        headers=auth_headers,
-        json={
-            "recipe_id": recipe_id,
-            "planned_at": overlap_time.isoformat(),
-            "auto_add_missing_ingredients": False,
-        },
-    )
-    assert meal_res.status_code == 409
-    data = meal_res.json()
-    assert data.get("conflict") is True
-    assert len(data.get("colliding_items", [])) >= 1
-    assert len(data.get("suggested_slots", [])) >= 2
-
-    # Schedule at a non-overlapping suggested slot (e.g. 20:00 UTC)
     valid_time = datetime.combine(target_date, datetime.min.time().replace(hour=20, minute=0)).replace(tzinfo=UTC)
     success_res = client.post(
         "/api/v1/meal-plans",
@@ -219,6 +187,8 @@ def test_meal_plan_dynamic_duration_and_collision_rejection(client, auth_headers
         },
     )
     assert success_res.status_code == 200
+    data = success_res.json()
+    assert data["recipe_id"] == recipe_id
 
 
 def test_recipe_servings_scaling_and_instructions_patch(client, auth_headers):

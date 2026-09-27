@@ -1,20 +1,3 @@
-FROM node:22-alpine AS web-builder
-
-WORKDIR /web
-
-ARG VITE_API_URL
-ARG VITE_API_KEY
-
-ENV VITE_API_URL=${VITE_API_URL}
-ENV VITE_API_KEY=${VITE_API_KEY}
-
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-
-COPY web/ ./
-RUN npm run build
-
-
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -50,7 +33,6 @@ COPY alembic ./alembic
 
 RUN pip install --no-cache-dir .
 
-COPY --from=web-builder /web/dist ./web/dist
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 
 RUN chmod +x /docker-entrypoint.sh

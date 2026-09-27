@@ -212,3 +212,56 @@ export function deleteCartJob(id: number): Promise<void> {
   });
 }
 
+// ── Supermarket Connections (Web In-App Login & Sync) ────────────────────────
+
+export interface SupermarketConnectionRead {
+  id: number;
+  store: SupermarketStore;
+  label: string;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+  cookies_count: number;
+}
+
+export interface SupermarketConnectionImportPayload {
+  store: SupermarketStore;
+  label: string;
+  cookies: { name: string; value: string; domain?: string; path?: string }[];
+  credentials?: { username: string; password: string };
+  activate?: boolean;
+  connection_id?: number;
+  customer_uuid?: string;
+}
+
+export function listSupermarketConnections(store?: SupermarketStore): Promise<SupermarketConnectionRead[]> {
+  const qs = store ? `?store=${store}` : "";
+  return request<SupermarketConnectionRead[]>(`/supermarket/connections${qs}`);
+}
+
+export function importSupermarketConnection(
+  payload: SupermarketConnectionImportPayload,
+): Promise<SupermarketConnectionRead> {
+  return request<SupermarketConnectionRead>("/supermarket/connections/import", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export function activateSupermarketConnection(
+  connectionId: number,
+): Promise<SupermarketConnectionRead> {
+  return request<SupermarketConnectionRead>(`/supermarket/connections/${connectionId}/activate`, {
+    method: "PUT",
+  });
+}
+
+export function deleteSupermarketConnection(
+  connectionId: number,
+): Promise<SupermarketConnectionRead> {
+  return request<SupermarketConnectionRead>(`/supermarket/connections/${connectionId}`, {
+    method: "DELETE",
+  });
+}
+

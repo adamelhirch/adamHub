@@ -265,191 +265,33 @@ export function createMealPlan(payload: MealPlanCreateInput): Promise<MealPlanRe
 }
 
 // ---------------------------------------------------------------------------
-// Tasks API
+// Pantry Overview & Barcode Lookup API
 // ---------------------------------------------------------------------------
 
-export type TaskStatus = "todo" | "in_progress" | "done" | "cancelled";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
-
-export interface TaskRead {
-  id: number;
-  title: string;
-  description: string | null;
-  status: TaskStatus;
-  priority: TaskPriority;
-  due_at: string | null;
-  estimated_minutes: number | null;
-  created_at: string;
-  updated_at: string;
+export interface PantryOverview {
+  total_items: number;
+  low_stock_items: number;
+  expiring_soon_items: number;
+  expired_items: number;
+  categories: Record<string, number>;
 }
 
-export function listTasks(params: { only_open?: boolean; status?: TaskStatus; limit?: number } = {}): Promise<TaskRead[]> {
-  const query = new URLSearchParams();
-  if (params.only_open !== undefined) query.set("only_open", String(params.only_open));
-  if (params.status) query.set("status", params.status);
-  if (params.limit) query.set("limit", String(params.limit));
-  const qs = query.toString();
-  return request<TaskRead[]>(`/tasks${qs ? `?${qs}` : ""}`);
+export function getPantryOverview(days = 7): Promise<PantryOverview> {
+  return request<PantryOverview>(`/pantry/overview?days=${days}`);
 }
 
-export function createTask(payload: {
-  title: string;
-  description?: string;
-  priority?: TaskPriority;
-  due_at?: string;
-}): Promise<TaskRead> {
-  return request<TaskRead>("/tasks", { method: "POST", body: payload });
-}
-
-export function updateTask(
-  id: number,
-  payload: { status?: TaskStatus; title?: string; priority?: TaskPriority; description?: string },
-): Promise<TaskRead> {
-  return request<TaskRead>(`/tasks/${id}`, { method: "PATCH", body: payload });
-}
-
-export function completeTask(id: number): Promise<TaskRead> {
-  return request<TaskRead>(`/tasks/${id}/complete`, { method: "POST" });
-}
-
-export function deleteTask(id: number): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>(`/tasks/${id}`, { method: "DELETE" });
-}
-
-// ---------------------------------------------------------------------------
-// Calendar API
-// ---------------------------------------------------------------------------
-
-export interface CalendarItemRead {
-  id: number;
-  title: string;
-  description: string | null;
-  start_at: string;
-  end_at: string;
-  all_day: boolean;
-  category: string;
-  source: string;
-  completed: boolean;
-  notification_enabled: boolean;
-}
-
-export function listCalendarAgenda(day?: string, includeCompleted = true): Promise<CalendarItemRead[]> {
-  const query = new URLSearchParams();
-  if (day) query.set("day", day);
-  query.set("include_completed", String(includeCompleted));
-  const qs = query.toString();
-  return request<CalendarItemRead[]>(`/calendar/agenda${qs ? `?${qs}` : ""}`);
-}
-
-export function listCalendarItems(params: { from_at?: string; to_at?: string; limit?: number } = {}): Promise<CalendarItemRead[]> {
-  const query = new URLSearchParams();
-  if (params.from_at) query.set("from_at", params.from_at);
-  if (params.to_at) query.set("to_at", params.to_at);
-  if (params.limit) query.set("limit", String(params.limit));
-  const qs = query.toString();
-  return request<CalendarItemRead[]>(`/calendar/items${qs ? `?${qs}` : ""}`);
-}
-
-// ---------------------------------------------------------------------------
-// Fitness API
-// ---------------------------------------------------------------------------
-
-export interface FitnessSessionExercise {
+export interface BarcodeLookupResult {
+  barcode: string;
   name: string;
-  sets?: number;
-  reps?: number;
-  weight_kg?: number;
-  duration_seconds?: number;
+  brand?: string | null;
+  quantity?: number;
+  unit?: string;
+  category?: string | null;
+  image_url?: string | null;
+  found: boolean;
 }
 
-export interface FitnessSessionRead {
-  id: number;
-  title: string;
-  session_type: string;
-  planned_at: string;
-  started_at: string | null;
-  ended_at: string | null;
-  duration_minutes: number;
-  status: "planned" | "in_progress" | "completed" | "skipped";
-  notes: string | null;
-  exercises: FitnessSessionExercise[];
-}
-
-export interface FitnessOverviewStats {
-  planned_sessions: number;
-  upcoming_sessions: number;
-  completed_sessions_30d: number;
-  completion_rate_30d: number;
-  avg_duration_minutes: number | null;
-  latest_body_weight_kg: number | null;
-}
-
-export interface FitnessOverviewRead {
-  stats: FitnessOverviewStats;
-  upcoming_sessions: FitnessSessionRead[];
-  recent_sessions: FitnessSessionRead[];
-}
-
-export function getFitnessOverview(): Promise<FitnessOverviewRead> {
-  return request<FitnessOverviewRead>("/fitness");
-}
-
-export function listFitnessSessions(limit = 50): Promise<FitnessSessionRead[]> {
-  return request<FitnessSessionRead[]>(`/fitness/sessions?limit=${limit}`);
-}
-
-export function createFitnessSession(payload: {
-  title: string;
-  planned_at: string;
-  duration_minutes?: number;
-  session_type?: string;
-  notes?: string;
-}): Promise<FitnessSessionRead> {
-  return request<FitnessSessionRead>("/fitness/sessions", { method: "POST", body: payload });
-}
-
-// ---------------------------------------------------------------------------
-// Finances & Subscriptions API
-// ---------------------------------------------------------------------------
-
-export interface FinanceTransactionRead {
-  id: number;
-  amount: number;
-  label: string;
-  category: string;
-  kind: "expense" | "income";
-  occurred_at: string;
-  notes: string | null;
-}
-
-export interface FinanceMonthSummary {
-  year: number;
-  month: number;
-  income: number;
-  expense: number;
-  net: number;
-  expense_by_category: Record<string, number>;
-}
-
-export function getFinanceSummary(year: number, month: number): Promise<FinanceMonthSummary> {
-  return request<FinanceMonthSummary>(`/finances/summary?year=${year}&month=${month}`);
-}
-
-export function listFinanceTransactions(limit = 50): Promise<FinanceTransactionRead[]> {
-  return request<FinanceTransactionRead[]>(`/finances/transactions?limit=${limit}`);
-}
-
-export interface SubscriptionRead {
-  id: number;
-  name: string;
-  amount: number;
-  frequency: "monthly" | "yearly" | "weekly";
-  category: string;
-  next_due_date: string;
-  active: boolean;
-}
-
-export function listSubscriptions(): Promise<SubscriptionRead[]> {
-  return request<SubscriptionRead[]>("/subscriptions");
+export function lookupBarcode(barcode: string): Promise<BarcodeLookupResult> {
+  return request<BarcodeLookupResult>(`/pantry/lookup-barcode/${encodeURIComponent(barcode)}`);
 }
 

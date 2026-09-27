@@ -6,8 +6,6 @@ from sqlmodel import Session, select
 from app.api._crud import get_owned_or_404
 from app.api.deps import CurrentOrOwnerUser, SessionDep
 from app.models import (
-    CalendarItem,
-    CalendarSource,
     GroceryItem,
     MealPlan,
     MealPlanCookConfirmation,
@@ -24,14 +22,12 @@ from app.schemas import (
     RecipeUncookResult,
     RecipeUpdate,
 )
-from app.services.calendar_hub import sync_generated_calendar_items
 from app.services.cook import (
     compute_recipe_missing_ingredients,
     confirm_recipe_cooked as confirm_recipe_cooked_service,
     unconfirm_recipe_cooked as unconfirm_recipe_cooked_service,
 )
-from app.services.life import build_recipe_read
-from app.services.meal_planning import resolve_recipe_ingredient_fields
+from app.services.meal_planning import build_recipe_read, resolve_recipe_ingredient_fields
 from app.services.units import normalize_name
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
@@ -291,16 +287,8 @@ def delete_recipe(recipe_id: int, session: SessionDep, user: CurrentOrOwnerUser)
             session.delete(confirmation)
     session.flush()
 
-    # 2. Cleanly delete generated calendar items referencing these meal plans
+    # 2. Cleanly delete meal plans referencing this recipe
     for meal_plan in meal_plans:
-        cal_items = session.exec(
-            select(CalendarItem).where(
-                CalendarItem.source_ref_id == meal_plan.id,
-                CalendarItem.source == CalendarSource.MEAL_PLAN,
-            )
-        ).all()
-        for ci in cal_items:
-            session.delete(ci)
         session.delete(meal_plan)
     session.flush()
 
@@ -313,7 +301,5 @@ def delete_recipe(recipe_id: int, session: SessionDep, user: CurrentOrOwnerUser)
     # 4. Atomically delete the recipe itself in the same transaction
     session.delete(recipe)
     session.commit()
-
-    sync_generated_calendar_items(session, user_id=user.id)
     return {"ok": True, "deleted_id": recipe_id}
 

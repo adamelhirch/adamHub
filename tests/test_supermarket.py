@@ -346,7 +346,7 @@ def test_supermarket_search_and_mapping_endpoints(client, auth_headers, monkeypa
             }
         ]
 
-    monkeypatch.setattr("app.api.endpoints.supermarket.fetch_search_results", fake_fetch_search_results)
+    monkeypatch.setattr("app.api.supermarket.fetch_search_results", fake_fetch_search_results)
 
     recipe = client.post(
         "/api/v1/recipes",

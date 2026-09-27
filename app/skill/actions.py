@@ -2,102 +2,39 @@ import asyncio
 import concurrent.futures
 from datetime import date, datetime, time, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlmodel import select
 
 from app.api._crud import apply_updates, create, delete, save
 from app.models import (
-    Account,
-    Budget,
-    CalendarCategory,
-    CalendarEvent,
-    CalendarItem,
-    CalendarSource,
-    EventType,
-    FinanceTransaction,
-    FitnessMeasurement,
-    FitnessSession,
-    FitnessSessionStatus,
-    Goal,
-    GoalMilestone,
-    GoalStatus,
     GroceryItem,
     GroceryPantrySync,
-    Habit,
-    HabitFrequency,
-    HabitLog,
     MealPlan,
     MealPlanCookConfirmation,
     MealSlot,
-    Note,
-    NoteKind,
     PantryItem,
     Recipe,
     RecipeIngredient,
-    SavingsGoal,
-    Subscription,
-    SubscriptionInterval,
     SupermarketCart,
     SupermarketCartItem,
     SupermarketConnection,
     SupermarketSearchCache,
     SupermarketStore,
-    Task,
-    TaskStatus,
-    TransactionKind,
     User,
 )
 from app.schemas import (
-    AccountCreate,
-    AccountRead,
-    AccountUpdate,
-    BudgetCreate,
-    CalendarItemCreate,
-    CalendarItemUpdate,
-    EventCreate,
-    EventUpdate,
-    FinanceTransactionCreate,
-    FitnessMeasurementCreate,
-    FitnessMeasurementUpdate,
-    FitnessSessionComplete,
-    FitnessSessionCreate,
-    FitnessSessionUpdate,
-    GoalCreate,
-    GoalMilestoneCreate,
-    GoalMilestoneUpdate,
-    GoalUpdate,
+    CreateCartJobPayload,
     GroceryItemCreate,
     GroceryItemUpdate,
-    HabitCreate,
-    HabitUpdate,
     MealPlanCreate,
     MealPlanUpdate,
-    NoteCreate,
-    NoteUpdate,
     PantryItemCreate,
     PantryItemUpdate,
-    SavingsGoalCreate,
-    SavingsGoalRead,
-    SavingsGoalUpdate,
     RecipeCreate,
     RecipeUpdate,
-    SubscriptionCreate,
-    SubscriptionUpdate,
-    TaskCreate,
-    TaskUpdate,
-)
-from app.schemas.dto import (
-    _normalize_schedule_times,
-    _normalize_schedule_weekdays,
-)
-from app.services.life import (
-    build_dashboard_overview,
-    build_month_summary,
-    build_pantry_overview,
-    build_recipe_read,
-    build_subscription_projection,
-    list_upcoming_events,
-    list_upcoming_subscriptions,
-    update_habit_streak,
+    SupermarketCartItemRead,
+    SupermarketCartRead,
+    UserStorePreferenceUpdate,
 )
 from app.services.cook import (
     confirm_meal_plan_cooked,
@@ -109,29 +46,16 @@ from app.services.cook import (
 from app.services.meal_planning import (
     build_meal_plan_read,
     build_meal_plan_reads,
+    build_recipe_read,
     resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
     validate_meal_plan_slot_free,
     visible_meal_plans,
 )
-from app.services.calendar_hub import (
-    apply_task_update,
-    build_calendar_item_read,
-    detect_calendar_conflicts_and_alternatives,
-    list_due_reminders,
-    sync_generated_calendar_items,
-    validate_habit_schedule_free,
-    validate_task_schedule_free,
-    validate_calendar_slot_free,
+from app.services.grocery_pantry import (
+    build_pantry_overview,
+    sync_checked_grocery_item_to_pantry,
 )
-from app.services.fitness import (
-    _ensure_utc,
-    build_fitness_measurement_read,
-    build_fitness_overview,
-    build_fitness_session_read,
-    coerce_fitness_exercises,
-)
-from app.services.grocery_pantry import sync_checked_grocery_item_to_pantry
 from app.services.openfoodfacts import lookup_openfoodfacts_barcode
 from app.services.connections import (
     activate_connection as activate_supermarket_connection,
@@ -155,15 +79,7 @@ from app.services.scrapers.auchan import (
     load_auchan_cookies,
     select_auchan_store,
 )
-from app.services.video_intake import extract_video_source
-from fastapi import HTTPException
 from app.services import cart, cart_mirror
-from app.schemas.supermarket import (
-    CreateCartJobPayload,
-    SupermarketCartItemRead,
-    SupermarketCartRead,
-    UserStorePreferenceUpdate,
-)
 from app.services.supermarket.cart_job_service import CartJobService
 from app.services.supermarket.store_locator import SupermarketStoreLocator
 
@@ -201,13 +117,7 @@ def _clamp_int(value, default: int, minimum: int, maximum: int) -> int:
 
 
 def _int_id(payload: dict, field: str) -> int:
-    """Parse a scalar record id from a skill payload, raising ValueError on any
-    malformed input (missing, boolean, non-numeric string, or non-scalar JSON).
-
-    Unlike raw ``int(payload.get(field, 0))`` — which leaks a TypeError on a
-    list/dict value — this never raises outside ValueError, so skill_execute
-    converts every parsing failure into a clean 400.
-    """
+    """Parse a scalar record id from a skill payload, raising ValueError on malformed input."""
     value = payload.get(field)
     if value is None:
         raise ValueError(f"{field} is required")
@@ -262,16 +172,20 @@ def _parse_date(value, field_name: str) -> date | None:
     raise ValueError(f"{field_name} must be in YYYY-MM-DD format")
 
 
+def _opt_float(value):
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 _SLOT_DEFAULT_TIME: dict[str, time] = {
     "breakfast": time(hour=8, minute=0),
     "lunch": time(hour=12, minute=30),
     "dinner": time(hour=19, minute=30),
 }
-
-
-def _subscription_slot_start(day: date) -> datetime:
-    """Mirror of app/api/subscriptions.py — subscriptions own the 9:00 slot."""
-    return datetime.combine(day, time(hour=9, minute=0)).replace(tzinfo=timezone.utc)
 
 
 def _resolve_meal_planned_at(payload: dict, current: datetime | None = None) -> datetime:
@@ -290,17 +204,6 @@ def _resolve_meal_planned_at(payload: dict, current: datetime | None = None) -> 
     return datetime.now(timezone.utc)
 
 
-def _build_account_read_payload(account: Account) -> dict:
-    return AccountRead.model_validate(account, from_attributes=True).model_dump(mode="json")
-
-
-def _build_savings_goal_read_payload(goal: SavingsGoal, accounts_by_id: dict[int, Account]) -> dict:
-    read = SavingsGoalRead.model_validate(goal, from_attributes=True)
-    if goal.account_id and goal.account_id in accounts_by_id:
-        read.current_amount = accounts_by_id[goal.account_id].balance
-    return read.model_dump(mode="json")
-
-
 def _get_owned_recipe(session, recipe_id: int, user_id: int) -> Recipe:
     recipe = session.get(Recipe, recipe_id)
     if not recipe or recipe.user_id != user_id:
@@ -313,13 +216,6 @@ def _get_owned_meal_plan(session, meal_plan_id: int, user_id: int) -> MealPlan:
     if not plan or plan.user_id != user_id:
         raise ValueError("meal_plan_id not found")
     return plan
-
-
-def _get_owned_note(session, note_id: int, user_id: int) -> Note:
-    note = session.get(Note, note_id)
-    if not note or note.user_id != user_id:
-        raise ValueError("note_id not found")
-    return note
 
 
 def _is_owner_user(user: User | None) -> bool:
@@ -342,340 +238,7 @@ def _connection_is_operable(connection, user: User | None) -> bool:
     return _is_owner_user(user)
 
 
-def _get_owned_task(session, user_id: int, task_id: int) -> Task:
-    task = session.get(Task, task_id)
-    if not task or task.user_id != user_id:
-        raise ValueError("task_id not found")
-    return task
-
-
-def _handle_task_create(payload, session, *, user, now, user_id):
-    data = TaskCreate.model_validate(payload)
-    task = Task(**data.model_dump(), user_id=user_id)
-    validate_task_schedule_free(session, task)
-    task = create(session, task)
-    return {"task": task.model_dump(mode="json")}
-
-
-def _handle_task_list(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=25, minimum=1, maximum=100)
-    only_open = _as_bool(payload.get("only_open"), default=False)
-    statement = (
-        select(Task)
-        .where(Task.user_id == user_id)
-        .order_by(Task.created_at.desc())
-        .limit(limit)
-    )
-
-    if payload.get("status"):
-        statement = statement.where(Task.status == TaskStatus(payload["status"]))
-    if only_open:
-        statement = statement.where(Task.status != TaskStatus.DONE)
-
-    tasks = session.exec(statement).all()
-    return {"tasks": [task.model_dump(mode="json") for task in tasks]}
-
-
-def _handle_task_update(payload, session, *, user, now, user_id):
-    task_id = _int_id(payload, "task_id")
-    task = _get_owned_task(session, user_id, task_id)
-
-    patch = TaskUpdate.model_validate({k: v for k, v in payload.items() if k != "task_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No task fields to update")
-
-    apply_task_update(task, updates)
-
-    validate_task_schedule_free(session, task, ignore_task_id=task.id)
-    task.updated_at = now
-
-    session.add(task)
-    session.commit()
-    session.refresh(task)
-    return {"task": task.model_dump(mode="json")}
-
-
-def _handle_task_complete(payload, session, *, user, now, user_id):
-    task_id = _int_id(payload, "task_id")
-    task = _get_owned_task(session, user_id, task_id)
-    task.status = TaskStatus.DONE
-    task.updated_at = now
-    task = save(session, task)
-    return {"task": task.model_dump(mode="json")}
-
-
-def _handle_task_delete(payload, session, *, user, now, user_id):
-    task_id = _int_id(payload, "task_id")
-    task = _get_owned_task(session, user_id, task_id)
-    delete(session, task)
-    return {"ok": True, "deleted_id": task_id}
-
-
-def _handle_finance_add_transaction(payload, session, *, user, now, user_id):
-    data = FinanceTransactionCreate.model_validate(payload)
-    tx = FinanceTransaction(**data.model_dump(), user_id=user_id)
-    if tx.occurred_at is None:
-        tx.occurred_at = now
-    tx = create(session, tx)
-    return {"transaction": tx.model_dump(mode="json")}
-
-
-def _handle_finance_list_transactions(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    statement = (
-        select(FinanceTransaction)
-        .where(FinanceTransaction.user_id == user_id)
-        .order_by(FinanceTransaction.occurred_at.desc())
-        .limit(limit)
-    )
-
-    if payload.get("kind"):
-        statement = statement.where(FinanceTransaction.kind == TransactionKind(payload["kind"]))
-
-    year = payload.get("year")
-    month = payload.get("month")
-    if year is not None and month is not None:
-        year = int(year)
-        month = int(month)
-        if month < 1 or month > 12:
-            raise ValueError("month must be between 1 and 12")
-        start = datetime(year, month, 1, tzinfo=timezone.utc)
-        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc) if month == 12 else datetime(year, month + 1, 1, tzinfo=timezone.utc)
-        statement = statement.where(
-            FinanceTransaction.occurred_at >= start,
-            FinanceTransaction.occurred_at < end,
-        )
-
-    txs = session.exec(statement).all()
-    return {"transactions": [tx.model_dump(mode="json") for tx in txs]}
-
-
-def _handle_finance_create_budget(payload, session, *, user, now, user_id):
-    data = BudgetCreate.model_validate(payload)
-    if len(data.month) != 7 or data.month[4] != "-":
-        raise ValueError("month must be in format YYYY-MM")
-    budget = create(session, Budget(**data.model_dump(), user_id=user_id))
-    return {"budget": budget.model_dump(mode="json")}
-
-
-def _handle_finance_list_budgets(payload, session, *, user, now, user_id):
-    statement = (
-        select(Budget)
-        .where(Budget.user_id == user_id)
-        .order_by(Budget.month.desc(), Budget.category.asc())
-    )
-    if payload.get("month"):
-        statement = statement.where(Budget.month == payload["month"])
-    budgets = session.exec(statement).all()
-    return {"budgets": [budget.model_dump(mode="json") for budget in budgets]}
-
-
-def _handle_finance_month_summary(payload, session, *, user, now, user_id):
-    year = int(payload.get("year", now.year))
-    month = int(payload.get("month", now.month))
-    summary = build_month_summary(session, year, month, user_id=user_id)
-    return {"summary": summary.model_dump(mode="json")}
-
-
-def _handle_fitness_overview(payload, session, *, user, now, user_id):
-    return {"overview": build_fitness_overview(session, user_id=user_id).model_dump(mode="json")}
-
-
-def _handle_fitness_list_sessions(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    rows = session.exec(
-        select(FitnessSession)
-        .where(FitnessSession.user_id == user_id)
-        .order_by(FitnessSession.planned_at.desc())
-        .limit(limit)
-    ).all()
-    return {"sessions": [build_fitness_session_read(row).model_dump(mode="json") for row in rows]}
-
-
-def _get_owned_fitness_session(session, user_id: int, session_id: int) -> FitnessSession:
-    row = session.get(FitnessSession, session_id)
-    if not row or row.user_id != user_id:
-        raise ValueError("session_id not found")
-    return row
-
-
-def _handle_fitness_create_session(payload, session, *, user, now, user_id):
-    data = FitnessSessionCreate.model_validate(payload)
-    planned_at = _ensure_utc(data.planned_at)
-    validate_calendar_slot_free(
-        session,
-        planned_at,
-        planned_at + timedelta(minutes=data.duration_minutes),
-        source=CalendarSource.FITNESS_SESSION,
-        user_id=user_id,
-    )
-    row = FitnessSession(
-        title=data.title.strip(),
-        session_type=data.session_type,
-        planned_at=planned_at,
-        duration_minutes=data.duration_minutes,
-        exercises=coerce_fitness_exercises(data.exercises),
-        note=data.note.strip() if data.note else None,
-        user_id=user_id,
-    )
-    session.add(row)
-    session.commit()
-    session.refresh(row)
-    return {"session": build_fitness_session_read(row).model_dump(mode="json")}
-
-
-def _handle_fitness_update_session(payload, session, *, user, now, user_id):
-    session_id = _int_id(payload, "session_id")
-    row = _get_owned_fitness_session(session, user_id, session_id)
-
-    patch = FitnessSessionUpdate.model_validate(
-        {k: v for k, v in payload.items() if k != "session_id"}
-    )
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No fitness session fields to update")
-
-    if "title" in updates and updates["title"] is not None:
-        updates["title"] = str(updates["title"]).strip()
-    if "note" in updates and updates["note"] is not None:
-        updates["note"] = str(updates["note"]).strip() or None
-    if "exercises" in updates:
-        updates["exercises"] = coerce_fitness_exercises(updates["exercises"])
-    if "planned_at" in updates and updates["planned_at"] is not None:
-        updates["planned_at"] = _ensure_utc(updates["planned_at"])
-
-    next_planned_at = updates.get("planned_at", row.planned_at)
-    next_duration_minutes = updates.get("duration_minutes", row.duration_minutes)
-    validate_calendar_slot_free(
-        session,
-        next_planned_at,
-        next_planned_at + timedelta(minutes=next_duration_minutes),
-        source=CalendarSource.FITNESS_SESSION,
-        source_ref_id=row.id,
-        user_id=user_id,
-    )
-
-    if "status" in updates and updates["status"] != FitnessSessionStatus.COMPLETED:
-        updates["completed_at"] = None
-        updates.setdefault("actual_duration_minutes", None)
-        updates.setdefault("effort_rating", None)
-        updates.setdefault("calories_burned", None)
-
-    for key, value in updates.items():
-        setattr(row, key, value)
-
-    if row.status == FitnessSessionStatus.COMPLETED and row.completed_at is None:
-        row.completed_at = now
-
-    row.updated_at = now
-    session.add(row)
-    session.commit()
-    session.refresh(row)
-    return {"session": build_fitness_session_read(row).model_dump(mode="json")}
-
-
-def _handle_fitness_complete_session(payload, session, *, user, now, user_id):
-    session_id = _int_id(payload, "session_id")
-    row = _get_owned_fitness_session(session, user_id, session_id)
-
-    completion = FitnessSessionComplete.model_validate(
-        {k: v for k, v in payload.items() if k != "session_id"}
-    )
-    row.status = FitnessSessionStatus.COMPLETED
-    row.completed_at = now
-    row.actual_duration_minutes = completion.actual_duration_minutes or row.duration_minutes
-    if completion.effort_rating is not None:
-        row.effort_rating = completion.effort_rating
-    if completion.calories_burned is not None:
-        row.calories_burned = completion.calories_burned
-    if completion.note is not None:
-        row.note = completion.note.strip() or row.note
-    row.updated_at = now
-    session.add(row)
-    session.commit()
-    session.refresh(row)
-    return {"session": build_fitness_session_read(row).model_dump(mode="json")}
-
-
-def _handle_fitness_delete_session(payload, session, *, user, now, user_id):
-    session_id = _int_id(payload, "session_id")
-    row = _get_owned_fitness_session(session, user_id, session_id)
-    delete(session, row)
-    return {"ok": True, "deleted_id": session_id}
-
-
-def _handle_fitness_list_measurements(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    rows = session.exec(
-        select(FitnessMeasurement)
-        .where(FitnessMeasurement.user_id == user_id)
-        .order_by(FitnessMeasurement.recorded_at.desc())
-        .limit(limit)
-    ).all()
-    return {
-        "measurements": [
-            build_fitness_measurement_read(row).model_dump(mode="json") for row in rows
-        ]
-    }
-
-
-def _handle_fitness_add_measurement(payload, session, *, user, now, user_id):
-    data = FitnessMeasurementCreate.model_validate(payload)
-    row = FitnessMeasurement(
-        recorded_at=_ensure_utc(data.recorded_at),
-        body_weight_kg=data.body_weight_kg,
-        body_fat_pct=data.body_fat_pct,
-        resting_hr=data.resting_hr,
-        sleep_hours=data.sleep_hours,
-        steps=data.steps,
-        note=data.note.strip() if data.note else None,
-        user_id=user_id,
-    )
-    row = create(session, row)
-    return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
-
-
-def _get_owned_fitness_measurement(session, user_id: int, measurement_id: int) -> FitnessMeasurement:
-    row = session.get(FitnessMeasurement, measurement_id)
-    if not row or row.user_id != user_id:
-        raise ValueError("measurement_id not found")
-    return row
-
-
-def _handle_fitness_update_measurement(payload, session, *, user, now, user_id):
-    measurement_id = _int_id(payload, "measurement_id")
-    row = _get_owned_fitness_measurement(session, user_id, measurement_id)
-
-    patch = FitnessMeasurementUpdate.model_validate(
-        {k: v for k, v in payload.items() if k != "measurement_id"}
-    )
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No fitness measurement fields to update")
-
-    if "note" in updates and updates["note"] is not None:
-        updates["note"] = str(updates["note"]).strip() or None
-    if "recorded_at" in updates and updates["recorded_at"] is not None:
-        updates["recorded_at"] = _ensure_utc(updates["recorded_at"])
-
-    apply_updates(row, updates, touch=True)
-    row = save(session, row)
-    return {"measurement": build_fitness_measurement_read(row).model_dump(mode="json")}
-
-
-def _handle_fitness_delete_measurement(payload, session, *, user, now, user_id):
-    measurement_id = _int_id(payload, "measurement_id")
-    row = _get_owned_fitness_measurement(session, user_id, measurement_id)
-    delete(session, row)
-    return {"ok": True, "deleted_id": measurement_id}
-
-
-def _handle_grocery_add_item(payload, session, *, user, now, user_id):
-    data = GroceryItemCreate.model_validate(payload)
-    item = create(session, GroceryItem(**data.model_dump(), user_id=user_id))
-    return {"item": item.model_dump(mode="json")}
-
+# ── Supermarket Handlers ──────────────────────────────────────────────────
 
 def _handle_supermarket_list_stores(payload, session, *, user, now, user_id):
     return {
@@ -699,8 +262,6 @@ def _handle_supermarket_list_connections(payload, session, *, user, now, user_id
     store_enum = SupermarketStore(store_key.lower()) if store_key else None
     rows = list_supermarket_connections(session, store_enum, user_id=user_id)
     if _is_owner_user(user):
-        # Legacy (pre-scoping) connections with a NULL user_id belong to the
-        # single-user owner and must remain visible to the legacy path.
         rows += list_supermarket_connections(session, store_enum, user_id=None)
 
     def _read(row):
@@ -782,8 +343,7 @@ def _handle_supermarket_search(payload, session, *, user, now, user_id):
     store_key = (payload.get("store") or "intermarche").lower()
     if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
         raise ValueError(
-            "supermarket.search supports 'intermarche', 'carrefour', 'leclerc' "
-            "or 'auchan'."
+            "supermarket.search supports 'intermarche', 'carrefour', 'leclerc' or 'auchan'."
         )
     store_enum = SupermarketStore(store_key)
     queries = payload.get("queries")
@@ -1133,18 +693,22 @@ def _handle_supermarket_confirm_pickup(payload, session, *, user, now, user_id):
     return {"pickup": res.model_dump(mode="json")}
 
 
-def _opt_float(value):
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+# ── Grocery Handlers ──────────────────────────────────────────────────────
+
+def _handle_grocery_add_item(payload, session, *, user, now, user_id):
+    data = GroceryItemCreate.model_validate(payload)
+    item = create(session, GroceryItem(**data.model_dump(), user_id=user_id))
+    return {"item": item.model_dump(mode="json")}
 
 
 def _handle_grocery_list_items(payload, session, *, user, now, user_id):
     limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
-    statement = select(GroceryItem).where(GroceryItem.user_id == user_id).order_by(GroceryItem.checked.asc(), GroceryItem.priority.asc()).limit(limit)
+    statement = (
+        select(GroceryItem)
+        .where(GroceryItem.user_id == user_id)
+        .order_by(GroceryItem.checked.asc(), GroceryItem.priority.asc())
+        .limit(limit)
+    )
     if payload.get("checked") is not None:
         statement = statement.where(GroceryItem.checked == _as_bool(payload.get("checked")))
 
@@ -1206,12 +770,7 @@ def _handle_grocery_delete_item(payload, session, *, user, now, user_id):
     return {"ok": True, "deleted_id": item_id}
 
 
-def _handle_video_fetch(payload, session, *, user, now, user_id):
-    url = str(payload.get("url") or "").strip()
-    if not url:
-      raise ValueError("url is required")
-    return {"video": extract_video_source(url).model_dump(mode="json")}
-
+# ── Recipe Handlers ───────────────────────────────────────────────────────
 
 def _handle_recipe_add(payload, session, *, user, now, user_id):
     data = RecipeCreate.model_validate(payload)
@@ -1366,6 +925,8 @@ def _handle_recipe_delete(payload, session, *, user, now, user_id):
     return {"ok": True, "deleted_id": recipe_id}
 
 
+# ── Meal Plan Handlers ────────────────────────────────────────────────────
+
 def _handle_meal_plan_add(payload, session, *, user, now, user_id):
     if "slot" in payload and isinstance(payload["slot"], str):
         s = payload["slot"].lower()
@@ -1452,8 +1013,7 @@ def _handle_meal_plan_update(payload, session, *, user, now, user_id):
 
     reset_cook_confirmation = (
         ("planned_at" in updates and updates.get("planned_at") != plan.planned_at)
-        or
-        ("planned_for" in updates and updates.get("planned_for") != plan.planned_for)
+        or ("planned_for" in updates and updates.get("planned_for") != plan.planned_for)
         or ("slot" in updates and updates.get("slot") != plan.slot)
         or ("recipe_id" in updates and updates.get("recipe_id") != plan.recipe_id)
         or ("servings_override" in updates and updates.get("servings_override") != plan.servings_override)
@@ -1546,704 +1106,7 @@ def _handle_meal_plan_unconfirm_cooked(payload, session, *, user, now, user_id):
     }
 
 
-def _get_owned_calendar_item(session, user_id: int, item_id: int) -> CalendarItem:
-    item = session.get(CalendarItem, item_id)
-    if not item or item.user_id != user_id:
-        raise ValueError("item_id not found")
-    return item
-
-
-def _handle_calendar_add_item(payload, session, *, user, now, user_id):
-    clean_payload = {k: v for k, v in payload.items() if k != "force"}
-    data = CalendarItemCreate.model_validate(clean_payload)
-    if data.end_at <= data.start_at:
-        raise ValueError("end_at must be after start_at")
-    force = _as_bool(payload.get("force"), default=False)
-    if not force:
-        validate_calendar_slot_free(session, data.start_at, data.end_at, user_id=user_id)
-    item = CalendarItem(
-        **data.model_dump(),
-        source=CalendarSource.MANUAL,
-        generated=False,
-        user_id=user_id,
-    )
-    session.add(item)
-    session.commit()
-    session.refresh(item)
-    result = {"item": build_calendar_item_read(item).model_dump(mode="json", by_alias=True)}
-    if force:
-        result["forced"] = True
-    return result
-
-
-def _handle_calendar_check_availability(payload, session, *, user, now, user_id):
-    start_at_raw = payload.get("start_at")
-    end_at_raw = payload.get("end_at")
-    duration_minutes = _clamp_int(payload.get("duration_minutes"), default=60, minimum=5, maximum=1440)
-
-    if start_at_raw and end_at_raw:
-        start_at = _parse_datetime(start_at_raw, "start_at")
-        end_at = _parse_datetime(end_at_raw, "end_at")
-    elif start_at_raw:
-        start_at = _parse_datetime(start_at_raw, "start_at")
-        end_at = start_at + timedelta(minutes=duration_minutes)
-    else:
-        target_date_raw = payload.get("target_date")
-        if target_date_raw:
-            target_date = _parse_date(target_date_raw, "target_date")
-        else:
-            target_date = now.date()
-        start_at = datetime.combine(target_date, time(9, 0)).replace(tzinfo=timezone.utc)
-        end_at = start_at + timedelta(minutes=duration_minutes)
-
-    result = detect_calendar_conflicts_and_alternatives(
-        session,
-        start_at,
-        end_at,
-        user_id=user_id,
-        max_suggestions=4,
-    )
-    return {
-        "available": not result["conflict"],
-        "requested_slot": {"start_at": start_at.isoformat(), "end_at": end_at.isoformat()},
-        "conflict": result["conflict"],
-        "colliding_items": result["colliding_items"],
-        "suggested_slots": result["suggested_slots"],
-    }
-
-
-def _handle_calendar_list_items(payload, session, *, user, now, user_id):
-    sync_generated_calendar_items(session, user_id=user_id)
-    limit = _clamp_int(payload.get("limit"), default=500, minimum=1, maximum=2000)
-    statement = (
-        select(CalendarItem)
-        .where(CalendarItem.user_id == user_id)
-        .order_by(CalendarItem.start_at.asc())
-        .limit(limit)
-    )
-    if payload.get("from_at"):
-        statement = statement.where(CalendarItem.start_at >= _parse_datetime(payload.get("from_at"), "from_at"))
-    if payload.get("to_at"):
-        statement = statement.where(CalendarItem.start_at <= _parse_datetime(payload.get("to_at"), "to_at"))
-    if payload.get("category"):
-        statement = statement.where(CalendarItem.category == CalendarCategory(payload.get("category")))
-    if payload.get("source"):
-        statement = statement.where(CalendarItem.source == CalendarSource(payload.get("source")))
-    if payload.get("include_completed") is not None and not _as_bool(payload.get("include_completed"), default=True):
-        statement = statement.where(CalendarItem.completed.is_(False))
-    if payload.get("generated_only") is not None:
-        statement = statement.where(CalendarItem.generated == _as_bool(payload.get("generated_only"), default=False))
-
-    rows = session.exec(statement).all()
-    return {"items": [build_calendar_item_read(item).model_dump(mode="json", by_alias=True) for item in rows]}
-
-
-def _handle_calendar_update_item(payload, session, *, user, now, user_id):
-    item_id = _int_id(payload, "item_id")
-    item = _get_owned_calendar_item(session, user_id, item_id)
-    if item.generated:
-        raise ValueError("Generated calendar items must be updated from their source module")
-    patch = CalendarItemUpdate.model_validate({k: v for k, v in payload.items() if k != "item_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No calendar fields to update")
-    for key, value in updates.items():
-        setattr(item, key, value)
-    if item.end_at <= item.start_at:
-        raise ValueError("end_at must be after start_at")
-    validate_calendar_slot_free(
-        session,
-        item.start_at,
-        item.end_at,
-        ignore_calendar_item_id=item.id,
-        user_id=user_id,
-    )
-    item.updated_at = now
-    session.add(item)
-    session.commit()
-    session.refresh(item)
-    return {"item": build_calendar_item_read(item).model_dump(mode="json", by_alias=True)}
-
-
-def _handle_calendar_delete_item(payload, session, *, user, now, user_id):
-    item_id = _int_id(payload, "item_id")
-    item = _get_owned_calendar_item(session, user_id, item_id)
-    if item.generated:
-        raise ValueError("Generated calendar items must be deleted from their source module")
-    session.delete(item)
-    session.commit()
-    return {"ok": True, "deleted_id": item_id}
-
-
-def _handle_calendar_agenda(payload, session, *, user, now, user_id):
-    sync_generated_calendar_items(session, user_id=user_id)
-    day_value = _parse_date(payload.get("day"), "day") or now.date()
-    day_start = datetime.combine(day_value, datetime.min.time()).replace(tzinfo=timezone.utc)
-    day_end = day_start + timedelta(days=1)
-    include_completed = _as_bool(payload.get("include_completed"), default=False)
-    statement = (
-        select(CalendarItem)
-        .where(
-            CalendarItem.user_id == user_id,
-            CalendarItem.start_at >= day_start,
-            CalendarItem.start_at < day_end,
-        )
-        .order_by(CalendarItem.start_at.asc())
-    )
-    if not include_completed:
-        statement = statement.where(CalendarItem.completed.is_(False))
-    rows = session.exec(statement).all()
-    return {"items": [build_calendar_item_read(item).model_dump(mode="json", by_alias=True) for item in rows]}
-
-
-def _handle_calendar_sync(payload, session, *, user, now, user_id):
-    synced, removed, by_source = sync_generated_calendar_items(session, user_id=user_id)
-    return {"synced": synced, "removed": removed, "generated_by_source": by_source, "synced_at": now.isoformat()}
-
-
-def _handle_calendar_due_reminders(payload, session, *, user, now, user_id):
-    sync_generated_calendar_items(session, user_id=user_id)
-    within_minutes = _clamp_int(payload.get("within_minutes"), default=30, minimum=1, maximum=1440)
-    reminders = list_due_reminders(session, within_minutes=within_minutes, user_id=user_id)
-    return {"reminders": [entry.model_dump(mode="json") for entry in reminders]}
-
-
-def _handle_calendar_ack_reminder(payload, session, *, user, now, user_id):
-    item_id = _int_id(payload, "item_id")
-    item = _get_owned_calendar_item(session, user_id, item_id)
-    item.last_notified_at = now
-    item.updated_at = now
-    session.add(item)
-    session.commit()
-    return {"ok": True, "item_id": item_id, "ack_at": now.isoformat()}
-
-
-def _handle_habit_create(payload, session, *, user, now, user_id):
-    data = HabitCreate.model_validate(payload)
-    habit = Habit(**data.model_dump(), user_id=user_id)
-    validate_habit_schedule_free(session, habit)
-    session.add(habit)
-    session.commit()
-    session.refresh(habit)
-    return {"habit": habit.model_dump(mode="json")}
-
-
-def _get_owned_habit(session, user_id: int, habit_id: int) -> Habit:
-    habit = session.get(Habit, habit_id)
-    if not habit or habit.user_id != user_id:
-        raise ValueError("habit_id not found")
-    return habit
-
-
-def _handle_habit_update(payload, session, *, user, now, user_id):
-    habit_id = _int_id(payload, "habit_id")
-    habit = _get_owned_habit(session, user_id, habit_id)
-
-    patch = HabitUpdate.model_validate({k: v for k, v in payload.items() if k != "habit_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No habit fields to update")
-
-    if "schedule_time" in updates or "schedule_times" in updates:
-        schedule_time, schedule_times = _normalize_schedule_times(
-            updates.get("schedule_time", habit.schedule_time),
-            updates.get("schedule_times", habit.schedule_times),
-        )
-        updates["schedule_time"] = schedule_time
-        updates["schedule_times"] = schedule_times
-    if "schedule_weekday" in updates or "schedule_weekdays" in updates:
-        schedule_weekday, schedule_weekdays = _normalize_schedule_weekdays(
-            updates.get("schedule_weekday", habit.schedule_weekday),
-            updates.get("schedule_weekdays", habit.schedule_weekdays),
-        )
-        updates["schedule_weekday"] = schedule_weekday
-        updates["schedule_weekdays"] = schedule_weekdays
-
-    next_frequency = updates.get("frequency", habit.frequency)
-    if "schedule_time" in updates and updates["schedule_time"] is None:
-        updates["schedule_times"] = []
-        updates["schedule_weekday"] = None
-        updates["schedule_weekdays"] = []
-    if next_frequency == HabitFrequency.DAILY and "schedule_weekday" not in updates:
-        if updates.get("frequency") == HabitFrequency.DAILY:
-            updates["schedule_weekday"] = None
-            updates["schedule_weekdays"] = []
-
-    for key, value in updates.items():
-        setattr(habit, key, value)
-
-    if habit.schedule_time is None:
-        habit.schedule_times = []
-        habit.schedule_weekday = None
-        habit.schedule_weekdays = []
-    if habit.frequency == HabitFrequency.DAILY:
-        habit.schedule_weekday = None
-        habit.schedule_weekdays = []
-
-    validate_habit_schedule_free(session, habit, ignore_habit_id=habit.id)
-
-    habit.updated_at = now
-    session.add(habit)
-    session.commit()
-    session.refresh(habit)
-    return {"habit": habit.model_dump(mode="json")}
-
-
-def _handle_habit_list(payload, session, *, user, now, user_id):
-    active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = (
-        select(Habit)
-        .where(Habit.user_id == user_id)
-        .order_by(Habit.created_at.desc())
-    )
-    if active_only:
-        statement = statement.where(Habit.active.is_(True))
-    habits = session.exec(statement).all()
-    return {"habits": [habit.model_dump(mode="json") for habit in habits]}
-
-
-def _handle_habit_set_active(payload, session, *, user, now, user_id):
-    habit_id = _int_id(payload, "habit_id")
-    active = _as_bool(payload.get("active"), default=True)
-    habit = _get_owned_habit(session, user_id, habit_id)
-    habit.active = active
-    habit.updated_at = now
-    session.add(habit)
-    session.commit()
-    session.refresh(habit)
-    return {"habit": habit.model_dump(mode="json")}
-
-
-def _handle_habit_log(payload, session, *, user, now, user_id):
-    habit_id = _int_id(payload, "habit_id")
-    habit = _get_owned_habit(session, user_id, habit_id)
-
-    log = create(
-        session,
-        HabitLog(
-            habit_id=habit_id,
-            user_id=user_id,
-            value=int(payload.get("value", 1)),
-            note=payload.get("note"),
-        ),
-    )
-
-    streak = update_habit_streak(session, habit_id)
-    # update_habit_streak commits (expiring every instance in the session);
-    # reload the log so its fields survive model_dump.
-    session.refresh(log)
-    return {"log": log.model_dump(mode="json"), "streak": streak}
-
-
-def _handle_habit_list_logs(payload, session, *, user, now, user_id):
-    habit_id = _int_id(payload, "habit_id")
-    habit = _get_owned_habit(session, user_id, habit_id)
-
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=500)
-    logs = session.exec(
-        select(HabitLog)
-        .where(HabitLog.habit_id == habit_id, HabitLog.user_id == user_id)
-        .order_by(HabitLog.logged_at.desc())
-        .limit(limit)
-    ).all()
-    return {"logs": [log.model_dump(mode="json") for log in logs]}
-
-
-def _handle_goal_create(payload, session, *, user, now, user_id):
-    data = GoalCreate.model_validate(payload)
-    goal = create(session, Goal(**data.model_dump(), user_id=user_id))
-    return {"goal": goal.model_dump(mode="json")}
-
-
-def _handle_goal_list(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=100, minimum=1, maximum=300)
-    statement = (
-        select(Goal)
-        .where(Goal.user_id == user_id)
-        .order_by(Goal.created_at.desc())
-        .limit(limit)
-    )
-    if payload.get("status"):
-        statement = statement.where(Goal.status == GoalStatus(payload["status"]))
-    goals = session.exec(statement).all()
-    return {"goals": [goal.model_dump(mode="json") for goal in goals]}
-
-
-def _get_owned_goal(session, user_id: int, goal_id: int) -> Goal:
-    goal = session.get(Goal, goal_id)
-    if not goal or goal.user_id != user_id:
-        raise ValueError("goal_id not found")
-    return goal
-
-
-def _handle_goal_get(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    goal = _get_owned_goal(session, user_id, goal_id)
-    return {"goal": goal.model_dump(mode="json")}
-
-
-def _handle_goal_update(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    goal = _get_owned_goal(session, user_id, goal_id)
-
-    patch = GoalUpdate.model_validate({k: v for k, v in payload.items() if k != "goal_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No goal fields to update")
-
-    apply_updates(goal, updates, touch=True)
-    goal = save(session, goal)
-    return {"goal": goal.model_dump(mode="json")}
-
-
-def _handle_goal_add_milestone(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    goal = _get_owned_goal(session, user_id, goal_id)
-
-    data = GoalMilestoneCreate.model_validate({k: v for k, v in payload.items() if k != "goal_id"})
-    milestone = create(session, GoalMilestone(goal_id=goal.id, **data.model_dump()))
-    return {"milestone": milestone.model_dump(mode="json")}
-
-
-def _handle_goal_list_milestones(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    goal = _get_owned_goal(session, user_id, goal_id)
-
-    limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
-    milestones = session.exec(
-        select(GoalMilestone)
-        .where(GoalMilestone.goal_id == goal.id)
-        .order_by(GoalMilestone.created_at.desc())
-        .limit(limit)
-    ).all()
-    return {"milestones": [item.model_dump(mode="json") for item in milestones]}
-
-
-def _handle_goal_update_milestone(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    milestone_id = _int_id(payload, "milestone_id")
-    goal = _get_owned_goal(session, user_id, goal_id)
-
-    milestone = session.get(GoalMilestone, milestone_id)
-    if not milestone or milestone.goal_id != goal.id:
-        raise ValueError("milestone_id not found")
-
-    patch = GoalMilestoneUpdate.model_validate(
-        {k: v for k, v in payload.items() if k not in {"goal_id", "milestone_id"}}
-    )
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No milestone fields to update")
-
-    apply_updates(milestone, updates)
-    if patch.completed is True and milestone.completed_at is None:
-        milestone.completed_at = now
-    if patch.completed is False:
-        milestone.completed_at = None
-
-    milestone = save(session, milestone)
-    return {"milestone": milestone.model_dump(mode="json")}
-
-
-def _get_owned_event(session, user_id: int, event_id: int) -> CalendarEvent:
-    event = session.get(CalendarEvent, event_id)
-    if not event or event.user_id != user_id:
-        raise ValueError("event_id not found")
-    return event
-
-
-def _handle_event_create(payload, session, *, user, now, user_id):
-    data = EventCreate.model_validate(payload)
-    if data.end_at <= data.start_at:
-        raise ValueError("end_at must be after start_at")
-    validate_calendar_slot_free(
-        session,
-        data.start_at,
-        data.end_at,
-        source=CalendarSource.EVENT,
-        user_id=user_id,
-    )
-    event = CalendarEvent(**data.model_dump(), user_id=user_id)
-    session.add(event)
-    session.commit()
-    session.refresh(event)
-    return {"event": event.model_dump(mode="json")}
-
-
-def _handle_event_list(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
-    statement = (
-        select(CalendarEvent)
-        .where(CalendarEvent.user_id == user_id)
-        .order_by(CalendarEvent.start_at.asc())
-        .limit(limit)
-    )
-    from_at = _parse_datetime(payload.get("from_at"), "from_at")
-    to_at = _parse_datetime(payload.get("to_at"), "to_at")
-    if from_at:
-        statement = statement.where(CalendarEvent.start_at >= from_at)
-    if to_at:
-        statement = statement.where(CalendarEvent.start_at <= to_at)
-    if payload.get("type"):
-        statement = statement.where(CalendarEvent.type == EventType(payload["type"]))
-
-    events = session.exec(statement).all()
-    return {"events": [event.model_dump(mode="json") for event in events]}
-
-
-def _handle_event_upcoming(payload, session, *, user, now, user_id):
-    days = _clamp_int(payload.get("days"), default=7, minimum=1, maximum=365)
-    event_type = EventType(payload["type"]) if payload.get("type") else None
-    events = list_upcoming_events(session, days=days, event_type=event_type, user_id=user_id)
-    return {"events": [event.model_dump(mode="json") for event in events]}
-
-
-def _handle_event_get(payload, session, *, user, now, user_id):
-    event_id = _int_id(payload, "event_id")
-    event = _get_owned_event(session, user_id, event_id)
-    return {"event": event.model_dump(mode="json")}
-
-
-def _handle_event_update(payload, session, *, user, now, user_id):
-    event_id = _int_id(payload, "event_id")
-    event = _get_owned_event(session, user_id, event_id)
-
-    patch = EventUpdate.model_validate({k: v for k, v in payload.items() if k != "event_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No event fields to update")
-
-    for key, value in updates.items():
-        setattr(event, key, value)
-    if event.end_at <= event.start_at:
-        raise ValueError("end_at must be after start_at")
-    validate_calendar_slot_free(
-        session,
-        event.start_at,
-        event.end_at,
-        source=CalendarSource.EVENT,
-        source_ref_id=event.id,
-        user_id=user_id,
-    )
-    event.updated_at = now
-
-    session.add(event)
-    session.commit()
-    session.refresh(event)
-    return {"event": event.model_dump(mode="json")}
-
-
-def _handle_event_delete(payload, session, *, user, now, user_id):
-    event_id = _int_id(payload, "event_id")
-    event = _get_owned_event(session, user_id, event_id)
-    delete(session, event)
-    return {"ok": True, "deleted_id": event_id}
-
-
-def _handle_subscription_create(payload, session, *, user, now, user_id):
-    data = SubscriptionCreate.model_validate(payload)
-    slot_start = _subscription_slot_start(data.next_due_date)
-    validate_calendar_slot_free(
-        session,
-        slot_start,
-        slot_start + timedelta(minutes=30),
-        source=CalendarSource.SUBSCRIPTION,
-        user_id=user_id,
-    )
-    subscription = Subscription(**data.model_dump(), user_id=user_id)
-    session.add(subscription)
-    session.commit()
-    session.refresh(subscription)
-    return {"subscription": subscription.model_dump(mode="json")}
-
-
-def _handle_subscription_list(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=500)
-    active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = (
-        select(Subscription)
-        .where(Subscription.user_id == user_id)
-        .order_by(Subscription.next_due_date.asc())
-        .limit(limit)
-    )
-    if active_only:
-        statement = statement.where(Subscription.active.is_(True))
-    subscriptions = session.exec(statement).all()
-    return {"subscriptions": [item.model_dump(mode="json") for item in subscriptions]}
-
-
-def _get_owned_subscription(session, user_id: int, subscription_id: int) -> Subscription:
-    subscription = session.get(Subscription, subscription_id)
-    if not subscription or subscription.user_id != user_id:
-        raise ValueError("subscription_id not found")
-    return subscription
-
-
-def _handle_subscription_get(payload, session, *, user, now, user_id):
-    subscription_id = _int_id(payload, "subscription_id")
-    subscription = _get_owned_subscription(session, user_id, subscription_id)
-    return {"subscription": subscription.model_dump(mode="json")}
-
-
-def _handle_subscription_update(payload, session, *, user, now, user_id):
-    subscription_id = _int_id(payload, "subscription_id")
-    subscription = _get_owned_subscription(session, user_id, subscription_id)
-
-    patch = SubscriptionUpdate.model_validate({k: v for k, v in payload.items() if k != "subscription_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No subscription fields to update")
-
-    next_due_date = updates.get("next_due_date", subscription.next_due_date)
-    slot_start = _subscription_slot_start(next_due_date)
-    validate_calendar_slot_free(
-        session,
-        slot_start,
-        slot_start + timedelta(minutes=30),
-        source=CalendarSource.SUBSCRIPTION,
-        source_ref_id=subscription.id,
-        user_id=user_id,
-    )
-
-    for key, value in updates.items():
-        setattr(subscription, key, value)
-    subscription.updated_at = now
-
-    session.add(subscription)
-    session.commit()
-    session.refresh(subscription)
-    return {"subscription": subscription.model_dump(mode="json")}
-
-
-def _handle_subscription_upcoming(payload, session, *, user, now, user_id):
-    days = _clamp_int(payload.get("days"), default=30, minimum=1, maximum=365)
-    subscriptions = list_upcoming_subscriptions(session, days=days, user_id=user_id)
-    return {"subscriptions": [item.model_dump(mode="json") for item in subscriptions]}
-
-
-def _handle_subscription_projection(payload, session, *, user, now, user_id):
-    currency = payload.get("currency", "EUR")
-    projection = build_subscription_projection(session, currency=currency, user_id=user_id)
-    return {"projection": projection.model_dump(mode="json")}
-
-
-def _handle_patrimony_overview(payload, session, *, user, now, user_id):
-    accounts = session.exec(
-        select(Account)
-        .where(Account.user_id == user_id, Account.is_active.is_(True))
-        .order_by(Account.name.asc())
-    ).all()
-    goals = session.exec(
-        select(SavingsGoal)
-        .where(SavingsGoal.user_id == user_id)
-        .order_by(SavingsGoal.target_date.asc())
-    ).all()
-    accounts_by_id = {account.id: account for account in accounts if account.id is not None}
-    return {
-        "overview": {
-            "net_worth": sum(account.balance for account in accounts),
-            "currency": "EUR",
-            "accounts": [_build_account_read_payload(account) for account in accounts],
-            "goals": [
-                _build_savings_goal_read_payload(goal, accounts_by_id) for goal in goals
-            ],
-        }
-    }
-
-
-def _handle_patrimony_list_accounts(payload, session, *, user, now, user_id):
-    active_only = _as_bool(payload.get("active_only"), default=True)
-    statement = select(Account).where(Account.user_id == user_id).order_by(Account.name.asc())
-    if active_only:
-        statement = statement.where(Account.is_active.is_(True))
-    rows = session.exec(statement).all()
-    return {"accounts": [_build_account_read_payload(row) for row in rows]}
-
-
-def _handle_patrimony_add_account(payload, session, *, user, now, user_id):
-    data = AccountCreate.model_validate(payload)
-    row = create(session, Account(**data.model_dump(), user_id=user_id))
-    return {"account": _build_account_read_payload(row)}
-
-
-def _handle_patrimony_update_account(payload, session, *, user, now, user_id):
-    account_id = _int_id(payload, "account_id")
-    row = session.get(Account, account_id)
-    if not row or row.user_id != user_id:
-        raise ValueError("account_id not found")
-    patch = AccountUpdate.model_validate(
-        {k: v for k, v in payload.items() if k != "account_id"}
-    )
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No patrimony account fields to update")
-    apply_updates(row, updates, touch=True)
-    row = save(session, row)
-    return {"account": _build_account_read_payload(row)}
-
-
-def _handle_patrimony_delete_account(payload, session, *, user, now, user_id):
-    account_id = _int_id(payload, "account_id")
-    row = session.get(Account, account_id)
-    if not row or row.user_id != user_id:
-        raise ValueError("account_id not found")
-    delete(session, row)
-    return {"ok": True, "deleted_id": account_id}
-
-
-def _scoped_accounts_by_id(session, user_id: int) -> dict[int, Account]:
-    rows = session.exec(
-        select(Account).where(Account.user_id == user_id)
-    ).all()
-    return {account.id: account for account in rows if account.id is not None}
-
-
-def _handle_patrimony_list_goals(payload, session, *, user, now, user_id):
-    goals = session.exec(
-        select(SavingsGoal)
-        .where(SavingsGoal.user_id == user_id)
-        .order_by(SavingsGoal.target_date.asc())
-    ).all()
-    accounts_by_id = _scoped_accounts_by_id(session, user_id)
-    return {
-        "goals": [
-            _build_savings_goal_read_payload(goal, accounts_by_id) for goal in goals
-        ]
-    }
-
-
-def _handle_patrimony_add_goal(payload, session, *, user, now, user_id):
-    data = SavingsGoalCreate.model_validate(payload)
-    row = create(session, SavingsGoal(**data.model_dump(), user_id=user_id))
-    accounts_by_id = _scoped_accounts_by_id(session, user_id)
-    return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
-
-
-def _handle_patrimony_update_goal(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    row = session.get(SavingsGoal, goal_id)
-    if not row or row.user_id != user_id:
-        raise ValueError("goal_id not found")
-    patch = SavingsGoalUpdate.model_validate(
-        {k: v for k, v in payload.items() if k != "goal_id"}
-    )
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No patrimony goal fields to update")
-    apply_updates(row, updates, touch=True)
-    row = save(session, row)
-    accounts_by_id = _scoped_accounts_by_id(session, user_id)
-    return {"goal": _build_savings_goal_read_payload(row, accounts_by_id)}
-
-
-def _handle_patrimony_delete_goal(payload, session, *, user, now, user_id):
-    goal_id = _int_id(payload, "goal_id")
-    row = session.get(SavingsGoal, goal_id)
-    if not row or row.user_id != user_id:
-        raise ValueError("goal_id not found")
-    delete(session, row)
-    return {"ok": True, "deleted_id": goal_id}
-
+# ── Pantry Handlers ───────────────────────────────────────────────────────
 
 def _handle_pantry_add_item(payload, session, *, user, now, user_id):
     data = PantryItemCreate.model_validate(payload)
@@ -2335,146 +1198,47 @@ def _handle_pantry_lookup_barcode(payload, session, *, user, now, user_id):
     return {"product": draft.model_dump(mode="json")}
 
 
-def _handle_note_create(payload, session, *, user, now, user_id):
-    data = NoteCreate.model_validate(payload)
-    note = create(session, Note(**data.model_dump(), user_id=user_id))
-    return {"note": note.model_dump(mode="json")}
-
-
-def _handle_note_list(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=300, minimum=1, maximum=1000)
-    statement = (
-        select(Note)
-        .where(Note.user_id == user_id)
-        .order_by(Note.pinned.desc(), Note.updated_at.desc())
-        .limit(limit)
-    )
-    if payload.get("kind"):
-        statement = statement.where(Note.kind == NoteKind(payload["kind"]))
-    if payload.get("pinned") is not None:
-        statement = statement.where(Note.pinned == _as_bool(payload.get("pinned")))
-
-    notes = session.exec(statement).all()
-    tag = payload.get("tag")
-    if tag:
-        notes = [note for note in notes if tag in note.tags]
-    q = payload.get("q")
-    if q:
-        ql = str(q).lower()
-        notes = [note for note in notes if ql in note.title.lower() or ql in note.content.lower()]
-
-    return {"notes": [note.model_dump(mode="json") for note in notes]}
-
-
-def _handle_note_get(payload, session, *, user, now, user_id):
-    note_id = _int_id(payload, "note_id")
-    note = _get_owned_note(session, note_id, user_id)
-    return {"note": note.model_dump(mode="json")}
-
-
-def _handle_note_update(payload, session, *, user, now, user_id):
-    note_id = _int_id(payload, "note_id")
-    note = _get_owned_note(session, note_id, user_id)
-
-    patch = NoteUpdate.model_validate({k: v for k, v in payload.items() if k != "note_id"})
-    updates = patch.model_dump(exclude_unset=True)
-    if not updates:
-        raise ValueError("No note fields to update")
-
-    apply_updates(note, updates, touch=True)
-    note = save(session, note)
-    return {"note": note.model_dump(mode="json")}
-
-
-def _handle_note_delete(payload, session, *, user, now, user_id):
-    note_id = _int_id(payload, "note_id")
-    note = _get_owned_note(session, note_id, user_id)
-
-    delete(session, note)
-    return {"ok": True, "deleted_id": note_id}
-
-
-def _handle_note_journal(payload, session, *, user, now, user_id):
-    limit = _clamp_int(payload.get("limit"), default=200, minimum=1, maximum=1000)
-    statement = (
-        select(Note)
-        .where(Note.kind == NoteKind.JOURNAL, Note.user_id == user_id)
-        .order_by(Note.created_at.desc())
-        .limit(limit)
-    )
-    notes = session.exec(statement).all()
-
-    from_date = _parse_date(payload.get("from_date"), "from_date")
-    to_date = _parse_date(payload.get("to_date"), "to_date")
-    if from_date:
-        notes = [note for note in notes if note.created_at.date() >= from_date]
-    if to_date:
-        notes = [note for note in notes if note.created_at.date() <= to_date]
-
-    return {"notes": [note.model_dump(mode="json") for note in notes]}
-
-
-def _handle_dashboard_overview(payload, session, *, user, now, user_id):
-    return {"overview": build_dashboard_overview(session, user_id=user_id).model_dump(mode="json")}
-
+# ── Action Catalog ────────────────────────────────────────────────────────
 
 ACTION_CATALOG = [
-    {"action": "task.create", "description": "Create a one-shot task. For a scheduled task, use due_at plus estimated_minutes. If the user wants a checklist or steps, store them in subtasks. Do not use calendar.add_item for normal tasks.", "input_schema": {"title": "string", "description": "string?", "subtasks": "[{id?, title, completed}]?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent", "estimated_minutes": "int?", "tags": "string[]?"}, "handler": _handle_task_create},
-    {"action": "task.list", "description": "List tasks with optional status filter", "input_schema": {"status": "todo|in_progress|done|blocked?", "only_open": "bool?", "limit": "int?"}, "handler": _handle_task_list},
-    {"action": "task.update", "description": "Update an existing task. Use this to change title, description, checklist, timing, duration, or status. Keep task scheduling inside task.update, not calendar.update_item.", "input_schema": {"task_id": "int", "title": "string?", "description": "string?", "subtasks": "[{id?, title, completed}]?", "schedule_mode": "none|once|daily|weekly?", "schedule_time": "HH:MM?", "schedule_weekday": "0=Monday..6=Sunday?", "due_at": "datetime?", "priority": "low|medium|high|urgent?", "status": "todo|in_progress|done|blocked?", "estimated_minutes": "int?", "tags": "string[]?"}, "handler": _handle_task_update},
-    {"action": "task.complete", "description": "Mark a task as done", "input_schema": {"task_id": "int"}, "handler": _handle_task_complete},
-    {"action": "task.delete", "description": "Delete a task", "input_schema": {"task_id": "int"}, "handler": _handle_task_delete},
-    {"action": "finance.add_transaction", "description": "Add an income or expense transaction", "input_schema": {"kind": "income|expense", "amount": "float", "currency": "string?", "category": "string", "note": "string?", "occurred_at": "datetime?", "is_recurring": "bool?"}, "handler": _handle_finance_add_transaction},
-    {"action": "finance.list_transactions", "description": "List transactions", "input_schema": {"kind": "income|expense?", "year": "int?", "month": "int?", "limit": "int?"}, "handler": _handle_finance_list_transactions},
-    {"action": "finance.create_budget", "description": "Create a monthly category budget", "input_schema": {"month": "YYYY-MM", "category": "string", "monthly_limit": "float", "currency": "string?", "alert_threshold": "float?"}, "handler": _handle_finance_create_budget},
-    {"action": "finance.list_budgets", "description": "List budgets with optional month", "input_schema": {"month": "YYYY-MM?"}, "handler": _handle_finance_list_budgets},
-    {"action": "finance.month_summary", "description": "Compute month financial summary", "input_schema": {"year": "int?", "month": "int?"}, "handler": _handle_finance_month_summary},
-    {"action": "fitness.overview", "description": "Return the fitness dashboard overview", "input_schema": {}, "handler": _handle_fitness_overview},
-    {"action": "fitness.list_sessions", "description": "List fitness sessions", "input_schema": {"limit": "int?"}, "handler": _handle_fitness_list_sessions},
-    {"action": "fitness.create_session", "description": "Create a fitness session", "input_schema": {"title": "string", "session_type": "strength|cardio|mobility|recovery|mixed?", "planned_at": "datetime?", "duration_minutes": "int?", "exercises": "[{name, mode, reps, duration_minutes, note}|string]?", "note": "string?"}, "handler": _handle_fitness_create_session},
-    {"action": "fitness.update_session", "description": "Update a fitness session", "input_schema": {"session_id": "int", "title": "string?", "session_type": "strength|cardio|mobility|recovery|mixed?", "planned_at": "datetime?", "duration_minutes": "int?", "exercises": "[{name, mode, reps, duration_minutes, note}|string]?", "note": "string?", "status": "planned|completed|skipped?", "actual_duration_minutes": "int?", "effort_rating": "int?", "calories_burned": "float?"}, "handler": _handle_fitness_update_session},
-    {"action": "fitness.complete_session", "description": "Mark a fitness session as completed", "input_schema": {"session_id": "int", "note": "string?", "actual_duration_minutes": "int?", "effort_rating": "int?", "calories_burned": "float?"}, "handler": _handle_fitness_complete_session},
-    {"action": "fitness.delete_session", "description": "Delete a fitness session", "input_schema": {"session_id": "int"}, "handler": _handle_fitness_delete_session},
-    {"action": "fitness.list_measurements", "description": "List fitness measurements", "input_schema": {"limit": "int?"}, "handler": _handle_fitness_list_measurements},
-    {"action": "fitness.add_measurement", "description": "Add a fitness measurement", "input_schema": {"recorded_at": "datetime?", "body_weight_kg": "float?", "body_fat_pct": "float?", "resting_hr": "int?", "sleep_hours": "float?", "steps": "int?", "note": "string?"}, "handler": _handle_fitness_add_measurement},
-    {"action": "fitness.update_measurement", "description": "Update a fitness measurement", "input_schema": {"measurement_id": "int", "recorded_at": "datetime?", "body_weight_kg": "float?", "body_fat_pct": "float?", "resting_hr": "int?", "sleep_hours": "float?", "steps": "int?", "note": "string?"}, "handler": _handle_fitness_update_measurement},
-    {"action": "fitness.delete_measurement", "description": "Delete a fitness measurement", "input_schema": {"measurement_id": "int"}, "handler": _handle_fitness_delete_measurement},
+    # ── Supermarket stores & connections ──
     {"action": "supermarket.list_stores", "description": "List supported supermarket stores and capabilities", "input_schema": {}, "handler": _handle_supermarket_list_stores},
-    # ── Multi-account connections (cookies stored encrypted in DB) ──────────
-    {"action": "supermarket.list_connections", "description": "List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count. Multiple connections per store are allowed (e.g. user + spouse).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?"}, "handler": _handle_supermarket_list_connections},
-    {"action": "supermarket.import_connection", "description": "Save a fresh cookie set (or best-effort credentials) for a supermarket. Used by the AdamHUB Connect Chrome extension after a successful login. `cookies` is the array dumped via chrome.cookies.getAll. Set activate=true to make this connection the default consumer for the store. `credentials` ({username, password}) is a best-effort fallback when the store has no captcha/2FA on programmatic login; cookies remain the reliable path.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "label": "string", "cookies": "object[]?", "credentials": "object?", "activate": "bool?", "connection_id": "int?"}, "handler": _handle_supermarket_import_connection},
-    {"action": "supermarket.activate_connection", "description": "Switch the active connection for a store (search/cart/orders will use this account next).", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_activate_connection},
+    {"action": "supermarket.list_connections", "description": "List saved supermarket connections (cookie sets) across all stores. Each entry has an id, label, store, is_active flag and cookies_count.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?"}, "handler": _handle_supermarket_list_connections},
+    {"action": "supermarket.import_connection", "description": "Save a fresh cookie set for a supermarket. Set activate=true to make this connection the default consumer for the store.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "label": "string", "cookies": "object[]?", "credentials": "object?", "activate": "bool?", "connection_id": "int?"}, "handler": _handle_supermarket_import_connection},
+    {"action": "supermarket.activate_connection", "description": "Switch the active connection for a store.", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_activate_connection},
     {"action": "supermarket.delete_connection", "description": "Delete a saved supermarket connection.", "input_schema": {"connection_id": "int"}, "handler": _handle_supermarket_delete_connection},
-    {"action": "supermarket.list_offering_contexts", "description": "List the Auchan stores selectable for an address. Each entry carries `seller_id`, `store_reference`, `channel`, `name`, `address` and `distance` — feed them to `supermarket.select_auchan_store`.", "input_schema": {"zipcode": "string", "city": "string", "latitude": "float", "longitude": "float", "country": "string?"}, "handler": _handle_supermarket_list_offering_contexts},
-    {"action": "supermarket.select_auchan_store", "description": "Select the Auchan store used for search (POST /journey/update + persist). Auchan prices are only server-rendered once a store is selected; searching without one returns a 400 'sélectionnez un magasin'.", "input_schema": {"seller_id": "string", "store_reference": "string", "store_label": "string", "channel": "string?", "location_label": "string?", "zipcode": "string?", "city": "string?", "country": "string?", "latitude": "float?", "longitude": "float?"}, "handler": _handle_supermarket_select_auchan_store},
-    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (JSON API), 'carrefour' (JSON endpoint), 'leclerc' (JSON API + cookies) or 'auchan' (server-rendered HTML; works without login but requires a selected store via `supermarket.select_auchan_store`).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
-    # ── Supermarket Carts (Multi-store live mirror) ─────────────────────────
-    {"action": "supermarket.get_cart", "description": "Retrieve the current contents, item quantities, prices, and status of a supermarket cart for a given store.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "force_sync": "bool?"}, "handler": _handle_supermarket_get_cart},
-    {"action": "supermarket.list_carts", "description": "List all active supermarket shopping carts across all supported retailers for the user.", "input_schema": {}, "handler": _handle_supermarket_list_carts},
-    {"action": "supermarket.add_cart_item", "description": "Add a product from authentic supermarket search results (via cache_id) to the store's live cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "cache_id": "int", "quantity": "int?"}, "handler": _handle_supermarket_add_cart_item},
-    {"action": "supermarket.update_cart_item", "description": "Update the quantity of an existing line item in a store's cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "item_id": "int", "quantity": "int"}, "handler": _handle_supermarket_update_cart_item},
-    {"action": "supermarket.remove_cart_item", "description": "Remove an individual product line from a supermarket cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "item_id": "int"}, "handler": _handle_supermarket_remove_cart_item},
-    {"action": "supermarket.clear_cart", "description": "Empty the user's shopping cart for a specific supermarket retailer.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan"}, "handler": _handle_supermarket_clear_cart},
-    # ── Supermarket Drive (Store Selection, Local Staging & Sync) ───────────
+    {"action": "supermarket.list_offering_contexts", "description": "List the Auchan stores selectable for an address.", "input_schema": {"zipcode": "string", "city": "string", "latitude": "float", "longitude": "float", "country": "string?"}, "handler": _handle_supermarket_list_offering_contexts},
+    {"action": "supermarket.select_auchan_store", "description": "Select the Auchan store used for search.", "input_schema": {"seller_id": "string", "store_reference": "string", "store_label": "string", "channel": "string?", "location_label": "string?", "zipcode": "string?", "city": "string?", "country": "string?", "latitude": "float?", "longitude": "float?"}, "handler": _handle_supermarket_select_auchan_store},
+    {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
+    # ── Supermarket Carts ──
+    {"action": "supermarket.get_cart", "description": "Retrieve current contents and prices of a supermarket cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "force_sync": "bool?"}, "handler": _handle_supermarket_get_cart},
+    {"action": "supermarket.list_carts", "description": "List all active supermarket shopping carts.", "input_schema": {}, "handler": _handle_supermarket_list_carts},
+    {"action": "supermarket.add_cart_item", "description": "Add a product from search results to the store live cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "cache_id": "int", "quantity": "int?"}, "handler": _handle_supermarket_add_cart_item},
+    {"action": "supermarket.update_cart_item", "description": "Update quantity of a line item in a store cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "item_id": "int", "quantity": "int"}, "handler": _handle_supermarket_update_cart_item},
+    {"action": "supermarket.remove_cart_item", "description": "Remove a product line from a supermarket cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "item_id": "int"}, "handler": _handle_supermarket_remove_cart_item},
+    {"action": "supermarket.clear_cart", "description": "Empty the shopping cart for a specific retailer.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan"}, "handler": _handle_supermarket_clear_cart},
+    # ── Supermarket Drive (Store Selection, Local Staging & Sync) ──
     {"action": "supermarket.search_stores", "description": "Search physical supermarket drive stores by postal code or city across Leclerc, Carrefour, Intermarché, and Auchan.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "zipcode": "string?", "city": "string?", "latitude": "float?", "longitude": "float?"}, "handler": _handle_supermarket_search_stores},
-    {"action": "supermarket.set_favorite_store", "description": "Configure the user's preferred drive store, pickup typology (quai, spot, tape, pieton), and default optimization strategy (mdd, budget, bio).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "external_store_id": "string", "store_label": "string", "location_label": "string?", "pickup_type": "quai|spot|tape|pieton?", "optimization_strategy": "mdd|budget|bio?"}, "handler": _handle_supermarket_set_favorite_store},
-    {"action": "supermarket.prepare_cart", "description": "Generate a staging draft drive shopping cart (GroceryToCartJob) resolving unchecked grocery items to real supermarket SKUs according to optimization strategy.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "optimization_strategy": "mdd|budget|bio?", "external_store_id": "string?", "item_ids": "int[]?"}, "handler": _handle_supermarket_prepare_cart},
-    {"action": "supermarket.confirm_cart_sync", "description": "Push the staging cart to the retailer drive cart, marking items as in_cart=True without restocking pantry (Principle III).", "input_schema": {"job_id": "int"}, "handler": _handle_supermarket_confirm_cart_sync},
-    {"action": "supermarket.confirm_pickup", "description": "Confirm physical drive pickup of groceries: marks grocery items as checked=True and restocks pantry inventory via GroceryPantrySync (Principle III).", "input_schema": {"job_id": "int"}, "handler": _handle_supermarket_confirm_pickup},
+    {"action": "supermarket.set_favorite_store", "description": "Configure the user preferred drive store, pickup typology, and default optimization strategy.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "external_store_id": "string", "store_label": "string", "location_label": "string?", "pickup_type": "quai|spot|tape|pieton?", "optimization_strategy": "mdd|budget|bio?"}, "handler": _handle_supermarket_set_favorite_store},
+    {"action": "supermarket.prepare_cart", "description": "Generate a staging draft drive shopping cart resolving unchecked grocery items to real supermarket SKUs.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "optimization_strategy": "mdd|budget|bio?", "external_store_id": "string?", "item_ids": "int[]?"}, "handler": _handle_supermarket_prepare_cart},
+    {"action": "supermarket.confirm_cart_sync", "description": "Push the staging cart to the retailer drive cart, marking items as in_cart=True without restocking pantry.", "input_schema": {"job_id": "int"}, "handler": _handle_supermarket_confirm_cart_sync},
+    {"action": "supermarket.confirm_pickup", "description": "Confirm physical drive pickup of groceries: marks grocery items as checked=True and restocks pantry inventory.", "input_schema": {"job_id": "int"}, "handler": _handle_supermarket_confirm_pickup},
+    # ── Groceries ──
     {"action": "grocery.add_item", "description": "Add an item to grocery list", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "image_url": "string?", "store_label": "string?", "external_id": "string?", "packaging": "string?", "price_text": "string?", "product_url": "string?", "priority": "int?", "note": "string?"}, "handler": _handle_grocery_add_item},
     {"action": "grocery.list_items", "description": "List grocery items", "input_schema": {"checked": "bool?", "limit": "int?"}, "handler": _handle_grocery_list_items},
     {"action": "grocery.update_item", "description": "Update a grocery item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "checked": "bool?", "priority": "int?", "note": "string?"}, "handler": _handle_grocery_update_item},
     {"action": "grocery.check_item", "description": "Mark grocery item checked or unchecked", "input_schema": {"item_id": "int", "checked": "bool?"}, "handler": _handle_grocery_check_item},
     {"action": "grocery.delete_item", "description": "Delete a grocery item", "input_schema": {"item_id": "int"}, "handler": _handle_grocery_delete_item},
-    {"action": "video.fetch", "description": "Fetch transcript and description from a YouTube, Instagram, or TikTok URL", "input_schema": {"url": "string"}, "handler": _handle_video_fetch},
+    # ── Recipes ──
     {"action": "recipe.add", "description": "Create a recipe with optional ingredients", "input_schema": {"name": "string", "description": "string?", "instructions": "string", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}, "handler": _handle_recipe_add},
     {"action": "recipe.list", "description": "List recipes", "input_schema": {"limit": "int?"}, "handler": _handle_recipe_list},
     {"action": "recipe.get", "description": "Get one recipe by id", "input_schema": {"recipe_id": "int"}, "handler": _handle_recipe_get},
     {"action": "recipe.update", "description": "Update a recipe", "input_schema": {"recipe_id": "int", "name": "string?", "description": "string?", "instructions": "string?", "steps": "string[]?", "utensils": "string[]?", "prep_minutes": "int?", "cook_minutes": "int?", "servings": "int?", "tags": "string[]?", "source_url": "string?", "source_platform": "string?", "source_title": "string?", "source_description": "string?", "source_transcript": "string?", "ingredients": "[{name, quantity, unit, note, category, cache_id}]?"}, "handler": _handle_recipe_update},
-    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients (idempotent; undo with recipe.unconfirm_cooked)", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}, "handler": _handle_recipe_confirm_cooked},
+    {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}, "handler": _handle_recipe_confirm_cooked},
     {"action": "recipe.unconfirm_cooked", "description": "Undo a recipe-level cooked confirmation and restore pantry stock", "input_schema": {"recipe_id": "int"}, "handler": _handle_recipe_unconfirm_cooked},
     {"action": "recipe.delete", "description": "Delete a recipe and its dependent recipe ingredients / meal plans", "input_schema": {"recipe_id": "int"}, "handler": _handle_recipe_delete},
-    {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_add},
+    # ── Meal Plans ──
+    {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime or slot", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_add},
     {"action": "meal_plan.log_cooked", "description": "Log a recipe as cooked without pre-planning", "input_schema": {"recipe_id": "int", "cooked_at": "datetime?", "servings_override": "int?", "note": "string?"}, "handler": _handle_meal_plan_log_cooked},
     {"action": "meal_plan.list", "description": "List meal plans", "input_schema": {"date_from": "YYYY-MM-DD?", "date_to": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "limit": "int?"}, "handler": _handle_meal_plan_list},
     {"action": "meal_plan.update", "description": "Update one meal plan", "input_schema": {"meal_plan_id": "int", "planned_at": "datetime?", "planned_for": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "recipe_id": "int?", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_update},
@@ -2482,49 +1246,7 @@ ACTION_CATALOG = [
     {"action": "meal_plan.sync_groceries", "description": "Sync missing ingredients to grocery list for one meal plan", "input_schema": {"meal_plan_id": "int"}, "handler": _handle_meal_plan_sync_groceries},
     {"action": "meal_plan.confirm_cooked", "description": "Confirm meal was cooked and consume pantry ingredients", "input_schema": {"meal_plan_id": "int", "note": "string?"}, "handler": _handle_meal_plan_confirm_cooked},
     {"action": "meal_plan.unconfirm_cooked", "description": "Undo cooked confirmation and restore pantry", "input_schema": {"meal_plan_id": "int"}, "handler": _handle_meal_plan_unconfirm_cooked},
-    {"action": "calendar.add_item", "description": "Create a manual calendar block only when the user wants a generic time slot and not a real task, habit, event, meal, subscription, or fitness session.", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "force": "bool?", "metadata": "object?"}, "handler": _handle_calendar_add_item},
-    {"action": "calendar.check_availability", "description": "Check if a calendar slot is free or find open non-conflicting slots", "input_schema": {"start_at": "datetime?", "end_at": "datetime?", "target_date": "date?", "duration_minutes": "int?"}, "handler": _handle_calendar_check_availability},
-    {"action": "calendar.list_items", "description": "List calendar items", "input_schema": {"from_at": "datetime?", "to_at": "datetime?", "category": "general|task|event|subscription|meal?", "source": "manual|task|habit|event|subscription|meal_plan|fitness_session?", "include_completed": "bool?", "generated_only": "bool?", "limit": "int?"}, "handler": _handle_calendar_list_items},
-    {"action": "calendar.update_item", "description": "Update calendar item", "input_schema": {"item_id": "int", "title": "string?", "description": "string?", "start_at": "datetime?", "end_at": "datetime?", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "completed": "bool?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}, "handler": _handle_calendar_update_item},
-    {"action": "calendar.delete_item", "description": "Delete calendar item", "input_schema": {"item_id": "int"}, "handler": _handle_calendar_delete_item},
-    {"action": "calendar.agenda", "description": "List day agenda", "input_schema": {"day": "YYYY-MM-DD?", "include_completed": "bool?"}, "handler": _handle_calendar_agenda},
-    {"action": "calendar.sync", "description": "Sync tasks/events/subscriptions/meal plans into calendar", "input_schema": {}, "handler": _handle_calendar_sync},
-    {"action": "calendar.due_reminders", "description": "List due reminders in next N minutes", "input_schema": {"within_minutes": "int?"}, "handler": _handle_calendar_due_reminders},
-    {"action": "calendar.ack_reminder", "description": "Acknowledge reminders for a calendar item", "input_schema": {"item_id": "int"}, "handler": _handle_calendar_ack_reminder},
-    {"action": "habit.create", "description": "Create a habit", "input_schema": {"name": "string", "description": "string?", "frequency": "daily|weekly?", "target_per_period": "int?", "schedule_time": "HH:MM?", "schedule_times": "HH:MM[]?", "schedule_weekday": "0=Monday..6=Sunday?", "schedule_weekdays": "0..6[]?", "duration_minutes": "int?"}, "handler": _handle_habit_create},
-    {"action": "habit.list", "description": "List habits", "input_schema": {"active_only": "bool?"}, "handler": _handle_habit_list},
-    {"action": "habit.update", "description": "Update a habit", "input_schema": {"habit_id": "int", "name": "string?", "description": "string?", "frequency": "daily|weekly?", "target_per_period": "int?", "schedule_time": "HH:MM?", "schedule_times": "HH:MM[]?", "schedule_weekday": "0=Monday..6=Sunday?", "schedule_weekdays": "0..6[]?", "duration_minutes": "int?", "active": "bool?"}, "handler": _handle_habit_update},
-    {"action": "habit.set_active", "description": "Activate or deactivate a habit", "input_schema": {"habit_id": "int", "active": "bool"}, "handler": _handle_habit_set_active},
-    {"action": "habit.log", "description": "Log completion for a habit", "input_schema": {"habit_id": "int", "value": "int?", "note": "string?"}, "handler": _handle_habit_log},
-    {"action": "habit.list_logs", "description": "List logs for one habit", "input_schema": {"habit_id": "int", "limit": "int?"}, "handler": _handle_habit_list_logs},
-    {"action": "goal.create", "description": "Create a goal", "input_schema": {"title": "string", "description": "string?", "status": "planned|active|completed|paused|cancelled?", "progress_percent": "int?", "target_date": "YYYY-MM-DD?", "tags": "string[]?"}, "handler": _handle_goal_create},
-    {"action": "goal.list", "description": "List goals", "input_schema": {"status": "planned|active|completed|paused|cancelled?", "limit": "int?"}, "handler": _handle_goal_list},
-    {"action": "goal.get", "description": "Get one goal", "input_schema": {"goal_id": "int"}, "handler": _handle_goal_get},
-    {"action": "goal.update", "description": "Update a goal", "input_schema": {"goal_id": "int", "title": "string?", "description": "string?", "status": "planned|active|completed|paused|cancelled?", "progress_percent": "int?", "target_date": "YYYY-MM-DD?", "tags": "string[]?"}, "handler": _handle_goal_update},
-    {"action": "goal.add_milestone", "description": "Add a milestone to a goal", "input_schema": {"goal_id": "int", "title": "string", "due_at": "datetime?"}, "handler": _handle_goal_add_milestone},
-    {"action": "goal.list_milestones", "description": "List milestones for a goal", "input_schema": {"goal_id": "int", "limit": "int?"}, "handler": _handle_goal_list_milestones},
-    {"action": "goal.update_milestone", "description": "Update a goal milestone", "input_schema": {"goal_id": "int", "milestone_id": "int", "title": "string?", "due_at": "datetime?", "completed": "bool?"}, "handler": _handle_goal_update_milestone},
-    {"action": "event.create", "description": "Create calendar event", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "location": "string?", "type": "personal|work|health|finance|social?", "all_day": "bool?", "tags": "string[]?"}, "handler": _handle_event_create},
-    {"action": "event.list", "description": "List events", "input_schema": {"from_at": "datetime?", "to_at": "datetime?", "type": "personal|work|health|finance|social?", "limit": "int?"}, "handler": _handle_event_list},
-    {"action": "event.upcoming", "description": "List upcoming events", "input_schema": {"days": "int?", "type": "personal|work|health|finance|social?"}, "handler": _handle_event_upcoming},
-    {"action": "event.get", "description": "Get one event", "input_schema": {"event_id": "int"}, "handler": _handle_event_get},
-    {"action": "event.update", "description": "Update an event", "input_schema": {"event_id": "int", "title": "string?", "description": "string?", "start_at": "datetime?", "end_at": "datetime?", "location": "string?", "type": "personal|work|health|finance|social?", "all_day": "bool?", "tags": "string[]?"}, "handler": _handle_event_update},
-    {"action": "event.delete", "description": "Delete an event", "input_schema": {"event_id": "int"}, "handler": _handle_event_delete},
-    {"action": "subscription.create", "description": "Create subscription", "input_schema": {"name": "string", "category": "string?", "amount": "float", "currency": "string?", "interval": "weekly|monthly|yearly?", "next_due_date": "YYYY-MM-DD", "autopay": "bool?", "active": "bool?", "note": "string?"}, "handler": _handle_subscription_create},
-    {"action": "subscription.list", "description": "List subscriptions", "input_schema": {"active_only": "bool?", "limit": "int?"}, "handler": _handle_subscription_list},
-    {"action": "subscription.get", "description": "Get one subscription", "input_schema": {"subscription_id": "int"}, "handler": _handle_subscription_get},
-    {"action": "subscription.update", "description": "Update subscription", "input_schema": {"subscription_id": "int", "name": "string?", "category": "string?", "amount": "float?", "currency": "string?", "interval": "weekly|monthly|yearly?", "next_due_date": "YYYY-MM-DD?", "autopay": "bool?", "active": "bool?", "note": "string?"}, "handler": _handle_subscription_update},
-    {"action": "subscription.upcoming", "description": "List upcoming subscriptions", "input_schema": {"days": "int?"}, "handler": _handle_subscription_upcoming},
-    {"action": "subscription.projection", "description": "Compute monthly and yearly subscription projection", "input_schema": {"currency": "string?"}, "handler": _handle_subscription_projection},
-    {"action": "patrimony.overview", "description": "Return patrimony overview with net worth, accounts, and savings goals", "input_schema": {}, "handler": _handle_patrimony_overview},
-    {"action": "patrimony.list_accounts", "description": "List patrimony accounts", "input_schema": {"active_only": "bool?"}, "handler": _handle_patrimony_list_accounts},
-    {"action": "patrimony.add_account", "description": "Create a patrimony account", "input_schema": {"name": "string", "account_type": "checking|savings|investment|crypto|other?", "balance": "float?", "currency": "string?", "institution": "string?", "note": "string?"}, "handler": _handle_patrimony_add_account},
-    {"action": "patrimony.update_account", "description": "Update a patrimony account", "input_schema": {"account_id": "int", "name": "string?", "account_type": "checking|savings|investment|crypto|other?", "balance": "float?", "currency": "string?", "institution": "string?", "note": "string?", "is_active": "bool?"}, "handler": _handle_patrimony_update_account},
-    {"action": "patrimony.delete_account", "description": "Delete a patrimony account", "input_schema": {"account_id": "int"}, "handler": _handle_patrimony_delete_account},
-    {"action": "patrimony.list_goals", "description": "List savings goals", "input_schema": {}, "handler": _handle_patrimony_list_goals},
-    {"action": "patrimony.add_goal", "description": "Create a savings goal", "input_schema": {"title": "string", "target_amount": "float", "current_amount": "float?", "currency": "string?", "target_date": "YYYY-MM-DD?", "account_id": "int?", "note": "string?"}, "handler": _handle_patrimony_add_goal},
-    {"action": "patrimony.update_goal", "description": "Update a savings goal", "input_schema": {"goal_id": "int", "title": "string?", "target_amount": "float?", "current_amount": "float?", "currency": "string?", "target_date": "YYYY-MM-DD?", "account_id": "int?", "note": "string?", "completed": "bool?"}, "handler": _handle_patrimony_update_goal},
-    {"action": "patrimony.delete_goal", "description": "Delete a savings goal", "input_schema": {"goal_id": "int"}, "handler": _handle_patrimony_delete_goal},
+    # ── Pantry ──
     {"action": "pantry.add_item", "description": "Add pantry item", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "min_quantity": "float?", "expires_at": "YYYY-MM-DD?", "location": "string?", "note": "string?"}, "handler": _handle_pantry_add_item},
     {"action": "pantry.list_items", "description": "List pantry items", "input_schema": {"low_stock_only": "bool?", "expiring_in_days": "int?", "limit": "int?"}, "handler": _handle_pantry_list_items},
     {"action": "pantry.update_item", "description": "Update pantry item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "min_quantity": "float?", "expires_at": "YYYY-MM-DD?", "location": "string?", "note": "string?"}, "handler": _handle_pantry_update_item},
@@ -2532,13 +1254,6 @@ ACTION_CATALOG = [
     {"action": "pantry.delete_item", "description": "Delete pantry item", "input_schema": {"item_id": "int"}, "handler": _handle_pantry_delete_item},
     {"action": "pantry.overview", "description": "Get pantry overview", "input_schema": {"days": "int?"}, "handler": _handle_pantry_overview},
     {"action": "pantry.lookup_barcode", "description": "Lookup product details by barcode via Open Food Facts", "input_schema": {"barcode": "string"}, "handler": _handle_pantry_lookup_barcode},
-    {"action": "note.create", "description": "Create note", "input_schema": {"title": "string", "content": "string", "kind": "note|journal|idea?", "tags": "string[]?", "pinned": "bool?", "mood": "1..10?"}, "handler": _handle_note_create},
-    {"action": "note.list", "description": "List notes", "input_schema": {"kind": "note|journal|idea?", "tag": "string?", "q": "string?", "pinned": "bool?", "limit": "int?"}, "handler": _handle_note_list},
-    {"action": "note.get", "description": "Get one note", "input_schema": {"note_id": "int"}, "handler": _handle_note_get},
-    {"action": "note.update", "description": "Update note", "input_schema": {"note_id": "int", "title": "string?", "content": "string?", "kind": "note|journal|idea?", "tags": "string[]?", "pinned": "bool?", "mood": "1..10?"}, "handler": _handle_note_update},
-    {"action": "note.delete", "description": "Delete note", "input_schema": {"note_id": "int"}, "handler": _handle_note_delete},
-    {"action": "note.journal", "description": "List journal entries", "input_schema": {"from_date": "YYYY-MM-DD?", "to_date": "YYYY-MM-DD?", "limit": "int?"}, "handler": _handle_note_journal},
-    {"action": "dashboard.overview", "description": "Return current productivity and life overview", "input_schema": {}, "handler": _handle_dashboard_overview},
 ]
 
 

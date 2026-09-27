@@ -5,7 +5,7 @@ from sqlmodel import select
 
 from app.api._crud import get_owned_or_404
 from app.api.deps import CurrentOrOwnerUser, SessionDep
-from app.models import CalendarSource, MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
+from app.models import MealPlan, MealPlanCookConfirmation, MealSlot, Recipe
 from app.schemas import (
     MealCookLogCreate,
     MealPlanConfirmCooked,
@@ -15,18 +15,16 @@ from app.schemas import (
     MealPlanUnconfirmResult,
     MealPlanUpdate,
 )
-from app.services.calendar_hub import (
-    CalendarConflictError,
-    detect_calendar_conflicts_and_alternatives,
-)
 from app.services.cook import (
     confirm_meal_plan_cooked,
     reset_meal_plan_cook_confirmation,
     unconfirm_meal_plan_cooked,
 )
 from app.services.meal_planning import (
+    CalendarConflictError,
     build_meal_plan_read,
     build_meal_plan_reads,
+    detect_calendar_conflicts_and_alternatives,
     sync_meal_plan_to_grocery,
     validate_meal_plan_slot_free,
     visible_meal_plans,
@@ -187,7 +185,6 @@ def update_meal_plan(
         session,
         next_planned_at,
         next_end_at,
-        source=CalendarSource.MEAL_PLAN,
         source_ref_id=meal_plan.id,
         user_id=user.id,
     )

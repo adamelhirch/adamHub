@@ -3,10 +3,8 @@ import pytest
 from sqlmodel import Session
 
 from app.models.entities import (
+    GroceryItem,
     PantryItem,
-    Task,
-    TaskPriority,
-    TaskStatus,
     UserMemory,
     UserProfile,
 )
@@ -34,14 +32,13 @@ def test_context_builder_includes_profile_and_memories(test_engine, owner_id):
         )
         session.add(memory)
 
-        # Seed urgent task
-        task = Task(
+        # Seed grocery item
+        grocery = GroceryItem(
             user_id=owner_id,
-            title="Acheter des protéines",
-            status=TaskStatus.TODO,
-            priority=TaskPriority.HIGH,
+            name="Acheter des protéines",
+            checked=False,
         )
-        session.add(task)
+        session.add(grocery)
 
         # Seed low pantry stock
         pantry = PantryItem(

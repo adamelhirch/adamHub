@@ -4,13 +4,11 @@ import pytest
 from sqlmodel import Session, select
 
 from app.models.entities import (
-    CalendarItem,
     GroceryItem,
     MealPlan,
     PantryItem,
     Recipe,
     RecipeIngredient,
-    Task,
     User,
 )
 from app.services.assistant.context_builder import build_system_context
@@ -18,11 +16,6 @@ from app.services.assistant.tool_dispatcher import (
     ASSISTANT_ALLOWED_ACTIONS,
     dispatch_assistant_tool,
     get_assistant_tools,
-)
-from app.services.calendar_hub import (
-    CalendarConflictError,
-    detect_calendar_conflicts_and_alternatives,
-    validate_calendar_slot_free,
 )
 from app.skill.actions import execute_action
 from tests.conftest import register_user
@@ -96,11 +89,6 @@ def test_assistant_recipe_creation_anti_task(client, jwt_headers, test_engine):
         ing_names = [i.name.lower() for i in ingredients]
         assert any("riz" in n for n in ing_names)
 
-        # STRICT: Zero tasks were created for this culinary request!
-        tasks = session.exec(select(Task).where(Task.user_id == user.id)).all()
-        recipe_tasks = [t for t in tasks if "risotto" in t.title.lower()]
-        assert len(recipe_tasks) == 0
-
 
 def test_assistant_recipe_list_search(client, jwt_headers, test_engine):
     """Assistant can list and query saved recipes."""
@@ -149,139 +137,7 @@ def test_assistant_recipe_delete_requires_confirmation(client, jwt_headers, test
     assert "recipe__delete" in confirm_resp.text
 
 
-# ── US2: Smart Calendar Conflict Detection & Proactive Resolution ─────────────
 
-def test_detect_calendar_conflicts_and_alternatives(test_engine):
-    """Conflict detection identifies colliding event by title and computes viable alternative slots."""
-    now = datetime.now(UTC).replace(microsecond=0)
-    event_start = now + timedelta(days=1, hours=2)
-    event_end = event_start + timedelta(hours=1)
-
-    with Session(test_engine) as session:
-        user = _get_or_create_user(session)
-        assert user is not None
-
-        # Seed an existing calendar item
-        item = CalendarItem(
-            title="Rendez-vous dentiste",
-            start_at=event_start,
-            end_at=event_end,
-            user_id=user.id,
-            generated=False,
-        )
-        session.add(item)
-        session.commit()
-
-        # Overlapping target: overlaps by 30 minutes
-        overlap_start = event_start + timedelta(minutes=30)
-        overlap_end = overlap_start + timedelta(hours=1)
-
-        result = detect_calendar_conflicts_and_alternatives(
-            session,
-            overlap_start,
-            overlap_end,
-            user_id=user.id,
-            max_suggestions=2,
-        )
-
-        assert result["conflict"] is True
-        assert len(result["colliding_items"]) >= 1
-        assert result["colliding_items"][0]["title"] == "Rendez-vous dentiste"
-        assert len(result["suggested_slots"]) >= 1
-
-        # Verify suggested slot is collision free
-        sugg = result["suggested_slots"][0]
-        s_start = datetime.fromisoformat(sugg["start_at"])
-        s_end = datetime.fromisoformat(sugg["end_at"])
-        # validate_calendar_slot_free should not raise for suggested slot
-        validate_calendar_slot_free(session, s_start, s_end, user_id=user.id)
-
-
-def test_calendar_conflict_flow_in_assistant(client, jwt_headers, test_engine):
-    """When a collision occurs, assistant returns colliding title and suggestions without 500 error (SC-002)."""
-    with Session(test_engine) as session:
-        user = session.exec(select(User).where(User.email == "jwt-user@adamelhirch.com")).first()
-        # Create an event at 10:30
-        seed_start = datetime.fromisoformat("2026-09-13T10:30:00Z")
-        seed_end = seed_start + timedelta(hours=1)
-        item = CalendarItem(
-            title="Dentiste",
-            start_at=seed_start,
-            end_at=seed_end,
-            user_id=user.id,
-            generated=False,
-        )
-        session.add(item)
-        session.commit()
-
-    # Try to add conflicting event at 10:30
-    response = client.post(
-        "/api/v1/assistant/chat",
-        headers=jwt_headers,
-        json={"message": "Planifie un rendez-vous dentiste demain de 10:30 à 11:30"},
-    )
-    assert response.status_code == 200
-    events = response.text
-
-    assert "calendar__add_item" in events
-    # Tool result indicates conflict
-    assert "conflict" in events
-    # Assistant text communicates conflict with title
-    assert "Dentiste" in events or "collision" in events.lower() or "indisponible" in events.lower()
-
-
-def test_calendar_force_scheduling(client, jwt_headers, test_engine):
-    """User can explicitly force scheduling despite collision."""
-    with Session(test_engine) as session:
-        user = session.exec(select(User).where(User.email == "jwt-user@adamelhirch.com")).first()
-        seed_start = datetime.fromisoformat("2026-09-13T10:30:00Z")
-        seed_end = seed_start + timedelta(hours=1)
-        item = CalendarItem(
-            title="Dentiste",
-            start_at=seed_start,
-            end_at=seed_end,
-            user_id=user.id,
-            generated=False,
-        )
-        session.add(item)
-        session.commit()
-
-    # User explicitly forces scheduling
-    response = client.post(
-        "/api/v1/assistant/chat",
-        headers=jwt_headers,
-        json={"message": "Force l'ajout quand même de mon rendez-vous sur ce créneau"},
-    )
-    assert response.status_code == 200
-    events = response.text
-    assert "calendar__add_item" in events
-    # Parse SSE events for calendar__add_item arguments
-    tool_calls = [
-        json.loads(line[6:])
-        for line in events.split("\n")
-        if line.startswith("data: ") and "calendar__add_item" in line
-    ]
-    assert len(tool_calls) > 0
-    args = json.loads(tool_calls[0]["function"]["arguments"])
-    assert args.get("force") is True
-
-
-def test_calendar_check_availability_action(test_engine):
-    """calendar.check_availability returns available: true for empty slot and false with suggestions for occupied."""
-    now = datetime.now(UTC).replace(microsecond=0)
-    with Session(test_engine) as session:
-        user = _get_or_create_user(session)
-        res_free = execute_action(
-            "calendar.check_availability",
-            {
-                "start_at": (now + timedelta(days=2, hours=10)).isoformat(),
-                "end_at": (now + timedelta(days=2, hours=11)).isoformat(),
-            },
-            session,
-            user=user,
-        )
-        assert res_free["available"] is True
-        assert res_free["conflict"] is False
 
 
 # ── US3: Supermarket Drive Search & Cart Integration ──────────────────────────

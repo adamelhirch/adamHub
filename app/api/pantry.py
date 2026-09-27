@@ -14,8 +14,7 @@ from app.schemas import (
     PantryItemUpdate,
     PantryOverview,
 )
-from app.services.life import build_pantry_overview
-from app.services.grocery_pantry import resolve_store_metadata
+from app.services.grocery_pantry import build_pantry_overview, resolve_store_metadata
 from app.services.openfoodfacts import lookup_openfoodfacts_barcode
 
 router = APIRouter(prefix="/pantry", tags=["pantry"])

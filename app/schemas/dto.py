@@ -1,67 +1,6 @@
-"""Backwards-compatible facade over the per-domain schema modules.
+"""Backwards-compatible facade over the active per-domain schema modules."""
 
-The DTO definitions previously gathered here now live in per-domain modules
-under ``app/schemas/`` (tasks, habits, finance, groceries, pantry,
-supermarket, meal_planning, video, fitness, goals, calendar, notes,
-skills, dashboard). This module only re-exports them so existing
-``from app.schemas.dto import ...`` call sites keep working unchanged.
-"""
-
-from app.schemas.calendar import (
-    CalendarFeedCreate,
-    CalendarFeedRead,
-    CalendarItemCreate,
-    CalendarItemRead,
-    CalendarItemUpdate,
-    CalendarReminderRead,
-    CalendarSyncResult,
-    EventCreate,
-    EventRead,
-    EventUpdate,
-)
-from app.schemas.dashboard import DashboardOverview
-from app.schemas.finance import (
-    AccountCreate,
-    AccountRead,
-    AccountUpdate,
-    BudgetCreate,
-    BudgetRead,
-    CategoryBudgetAnalytics,
-    FinanceMonthSummary,
-    FinanceTransactionCreate,
-    FinanceTransactionRead,
-    PatrimoineOverview,
-    SavingsGoalCreate,
-    SavingsGoalRead,
-    SavingsGoalUpdate,
-    SubscriptionCreate,
-    SubscriptionProjection,
-    SubscriptionRead,
-    SubscriptionUpdate,
-)
-from app.schemas.fitness import (
-    FitnessExerciseIn,
-    FitnessExerciseRead,
-    FitnessMeasurementCreate,
-    FitnessMeasurementRead,
-    FitnessMeasurementUpdate,
-    FitnessOverviewRead,
-    FitnessSessionComplete,
-    FitnessSessionCreate,
-    FitnessSessionRead,
-    FitnessSessionUpdate,
-    FitnessStatsRead,
-)
-from app.schemas.goals import (
-    GoalCreate,
-    GoalMilestoneCreate,
-    GoalMilestoneRead,
-    GoalMilestoneUpdate,
-    GoalRead,
-    GoalUpdate,
-)
 from app.schemas.groceries import GroceryItemCreate, GroceryItemRead, GroceryItemUpdate
-from app.schemas.habits import HabitCreate, HabitLogCreate, HabitLogRead, HabitRead, HabitUpdate
 from app.schemas.meal_planning import (
     MealCookLogCreate,
     MealIngredientConsumptionRead,
@@ -82,7 +21,6 @@ from app.schemas.meal_planning import (
     RecipeUncookResult,
     RecipeUpdate,
 )
-from app.schemas.notes import NoteCreate, NoteRead, NoteUpdate
 from app.schemas.pantry import (
     PantryConsume,
     PantryItemCreate,
@@ -100,66 +38,11 @@ from app.schemas.supermarket import (
     SupermarketSearchResult,
     SupermarketStoreRead,
 )
-from app.schemas.tasks import (
-    TaskCreate,
-    TaskRead,
-    TaskSubtask,
-    TaskUpdate,
-    _normalize_task_subtasks,
-)
-from app.schemas._schedule import (
-    SCHEDULE_TIME_PATTERN,
-    _normalize_schedule_times,
-    _normalize_schedule_weekdays,
-)
-from app.schemas.video import TranscriptSegmentRead, VideoSourceRead, VideoSourceRequest
 
 __all__ = [
-    "AccountCreate",
-    "AccountRead",
-    "AccountUpdate",
-    "BudgetCreate",
-    "BudgetRead",
-    "CalendarItemCreate",
-    "CalendarFeedCreate",
-    "CalendarFeedRead",
-    "CalendarItemRead",
-    "CalendarItemUpdate",
-    "CalendarReminderRead",
-    "CalendarSyncResult",
-    "CategoryBudgetAnalytics",
-    "DashboardOverview",
-    "EventCreate",
-    "EventRead",
-    "EventUpdate",
-    "FinanceMonthSummary",
-    "FinanceTransactionCreate",
-    "FinanceTransactionRead",
-    "FitnessMeasurementCreate",
-    "FitnessMeasurementRead",
-    "FitnessMeasurementUpdate",
-    "FitnessExerciseIn",
-    "FitnessExerciseRead",
-    "FitnessOverviewRead",
-    "FitnessSessionComplete",
-    "FitnessSessionCreate",
-    "FitnessSessionRead",
-    "FitnessSessionUpdate",
-    "FitnessStatsRead",
-    "GoalCreate",
-    "GoalMilestoneCreate",
-    "GoalMilestoneRead",
-    "GoalMilestoneUpdate",
-    "GoalRead",
-    "GoalUpdate",
     "GroceryItemCreate",
     "GroceryItemRead",
     "GroceryItemUpdate",
-    "HabitCreate",
-    "HabitLogCreate",
-    "HabitLogRead",
-    "HabitRead",
-    "HabitUpdate",
     "MealPlanCreate",
     "MealPlanConfirmCooked",
     "MealPlanConfirmResult",
@@ -173,28 +56,18 @@ __all__ = [
     "RecipeCookResult",
     "RecipeUncookResult",
     "MissingIngredientRead",
-    "NoteCreate",
-    "NoteRead",
-    "NoteUpdate",
     "PantryConsume",
     "PantryItemCreate",
     "PantryItemRead",
     "PantryItemUpdate",
     "PantryOverview",
-    "PatrimoineOverview",
     "RecipeCreate",
     "RecipeIngredientIn",
     "RecipeIngredientRead",
     "RecipeRead",
     "RecipeUpdate",
-    "TranscriptSegmentRead",
-    "VideoSourceRead",
-    "VideoSourceRequest",
     "SkillExecuteRequest",
     "SkillExecuteResponse",
-    "SavingsGoalCreate",
-    "SavingsGoalRead",
-    "SavingsGoalUpdate",
     "SupermarketConnectionImport",
     "SupermarketConnectionRead",
     "SupermarketMappingCreate",
@@ -202,12 +75,4 @@ __all__ = [
     "SupermarketSearchRequest",
     "SupermarketSearchResult",
     "SupermarketStoreRead",
-    "SubscriptionCreate",
-    "SubscriptionProjection",
-    "SubscriptionRead",
-    "SubscriptionUpdate",
-    "TaskCreate",
-    "TaskRead",
-    "TaskSubtask",
-    "TaskUpdate",
 ]

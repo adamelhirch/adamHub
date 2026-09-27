@@ -179,3 +179,40 @@ def unsync_checked_grocery_item_from_pantry(session: Session, grocery_item: Groc
         "pantry_item_id": sync_row.pantry_item_id,
         "removed_quantity": removed_quantity,
     }
+
+
+def build_pantry_overview(
+    session: Session, days: int = 7, *, user_id: int | None = None
+):
+    from datetime import date, timedelta
+    from app.schemas.pantry import PantryOverview
+
+    today = date.today()
+    until = today + timedelta(days=days)
+
+    def _scoped(statement):
+        if user_id is not None:
+            statement = statement.where(PantryItem.user_id == user_id)
+        return statement
+
+    total_items = session.exec(_scoped(select(func.count()).select_from(PantryItem))).one()
+    low_stock_items = session.exec(
+        _scoped(
+            select(func.count())
+            .select_from(PantryItem)
+            .where(PantryItem.quantity <= PantryItem.min_quantity)
+        )
+    ).one()
+    expiring_soon = session.exec(
+        _scoped(
+            select(func.count())
+            .select_from(PantryItem)
+            .where(PantryItem.expires_at.is_not(None), PantryItem.expires_at <= until)
+        )
+    ).one()
+
+    return PantryOverview(
+        total_items=int(total_items or 0),
+        low_stock_items=int(low_stock_items or 0),
+        expiring_within_7_days=int(expiring_soon or 0),
+    )

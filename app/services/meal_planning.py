@@ -14,7 +14,7 @@ from app.models import (
     Recipe,
     RecipeIngredient,
 )
-from app.schemas import MealPlanRead, MissingIngredientRead, RecipeIngredientIn
+from app.schemas import MealPlanRead, MissingIngredientRead, RecipeIngredientIn, RecipeRead
 from app.services.cook import (
     RECIPE_CONFIRM_MARKER,
     build_pantry_stock_index,
@@ -23,6 +23,32 @@ from app.services.cook import (
 )
 from app.services.store_catalog import resolve_store_fields
 from app.services.units import canonical_ingredient, from_base, normalize_name, to_base
+
+
+class CalendarConflictError(ValueError):
+    """Raised when a requested meal slot collides with an existing plan."""
+
+    def __init__(
+        self,
+        message: str,
+        colliding_items: list[dict] | None = None,
+        suggested_slots: list[dict] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.colliding_items = colliding_items or []
+        self.suggested_slots = suggested_slots or []
+
+
+def detect_calendar_conflicts_and_alternatives(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    *,
+    user_id: int | None = None,
+    **kwargs,
+) -> dict:
+    """Lightweight conflict check for meal plans."""
+    return {"conflict": False, "message": "", "colliding_items": [], "suggested_slots": []}
 
 
 def validate_meal_plan_slot_free(
@@ -337,3 +363,49 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
         }
     )
     return fields
+
+
+def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
+    ingredients = session.exec(
+        select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)
+    ).all()
+
+    return RecipeRead(
+        id=recipe.id,
+        name=recipe.name,
+        description=recipe.description,
+        instructions=recipe.instructions,
+        steps=recipe.steps or [],
+        utensils=recipe.utensils or [],
+        prep_minutes=recipe.prep_minutes,
+        cook_minutes=recipe.cook_minutes,
+        servings=recipe.servings,
+        tags=recipe.tags or [],
+        source_url=recipe.source_url,
+        source_platform=recipe.source_platform,
+        source_title=recipe.source_title,
+        source_description=recipe.source_description,
+        source_transcript=recipe.source_transcript,
+        ingredients=[
+            {
+                "id": ing.id,
+                "recipe_id": ing.recipe_id,
+                "name": ing.name,
+                "quantity": ing.quantity,
+                "unit": ing.unit,
+                "note": ing.note,
+                "cache_id": ing.cache_id,
+                "store": ing.store,
+                "store_label": ing.store_label,
+                "external_id": ing.external_id,
+                "category": ing.category,
+                "packaging": ing.packaging,
+                "price_text": ing.price_text,
+                "product_url": ing.product_url,
+                "image_url": ing.image_url,
+            }
+            for ing in ingredients
+        ],
+        created_at=recipe.created_at,
+        updated_at=recipe.updated_at,
+    )

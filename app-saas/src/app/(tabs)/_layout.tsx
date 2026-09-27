@@ -21,24 +21,24 @@ export default function TabsLayout() {
         },
       }}
     >
-      {/* 1. Accueil (Calendrier + Tâches) */}
+      {/* 1. Accueil (Hub Food & Supermarchés) */}
       <Tabs.Screen
         name="index"
         options={{
           title: "Accueil",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
+            <Ionicons name="home-outline" size={size} color={color} />
           ),
         }}
       />
 
-      {/* 2. Cuisine (Courses + Recettes + Garde-manger) */}
+      {/* 2. Courses (Liste + Drive) */}
       <Tabs.Screen
-        name="kitchen"
+        name="groceries"
         options={{
-          title: "Cuisine",
+          title: "Courses",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="restaurant-outline" size={size} color={color} />
+            <Ionicons name="cart-outline" size={size} color={color} />
           ),
         }}
       />
@@ -82,33 +82,31 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* 4. Sport */}
+      {/* 4. Recettes & Menus */}
       <Tabs.Screen
-        name="fitness"
+        name="recipes"
         options={{
-          title: "Sport",
+          title: "Recettes",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="barbell-outline" size={size} color={color} />
+            <Ionicons name="restaurant-outline" size={size} color={color} />
           ),
         }}
       />
 
-      {/* 5. Finance */}
+      {/* 5. Garde-manger / Frigo */}
       <Tabs.Screen
-        name="finance"
+        name="pantry"
         options={{
-          title: "Finance",
+          title: "Frigo",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="wallet-outline" size={size} color={color} />
+            <Ionicons name="cube-outline" size={size} color={color} />
           ),
         }}
       />
 
-      {/* Legacy hidden routes */}
+      {/* Hidden sub-flows */}
+      <Tabs.Screen name="kitchen" options={{ href: null }} />
       <Tabs.Screen name="meal-plan" options={{ href: null }} />
-      <Tabs.Screen name="recipes" options={{ href: null }} />
-      <Tabs.Screen name="groceries" options={{ href: null }} />
-      <Tabs.Screen name="pantry" options={{ href: null }} />
     </Tabs>
   );
 }

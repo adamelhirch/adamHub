@@ -1,13 +1,10 @@
 from tests.conftest import register_user
 
 
-# ── Off-MVP domains are Owner-only (#59) ─────────────────────────────────────
-# The unscoped domain (skill, …) must reject any JWT that does not belong to
+# ── Off-MVP domains are Owner-only ──────────────────────────────────────────
+# The unscoped domain (skill) rejects any JWT that does not belong to
 # ADAMHUB_OWNER_EMAIL, while the legacy X-API-Key path and the Owner's own JWT
-# keep working. Finances (t1), tasks (t6), events (t7), subscriptions (t8),
-# fitness (t9), habits (t10), calendar items (t11) and calendar feeds (t12)
-# were tenant-scoped and moved to CurrentOrOwnerUser, so they are no longer
-# part of this gate.
+# keep working.
 
 def test_owner_only_route_rejects_non_owner_jwt(client, jwt_headers):
     saas = register_user(client, "saas-user@adamelhirch.com")
@@ -19,112 +16,22 @@ def test_owner_only_route_rejects_non_owner_jwt(client, jwt_headers):
         client.post(
             "/api/v1/skill/execute",
             headers=saas["headers"],
-            json={"action": "task.list", "input": {}},
+            json={"action": "grocery.list_items", "input": {}},
         ).status_code
         == 401
     )
 
 
-def test_calendar_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped calendar (t11) no longer gates on ownership: a plain JWT
-    # user reaches it and sees only its own (empty) calendar.
-    assert client.get("/api/v1/calendar/items", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/calendar/items", headers=jwt_headers).json() == []
-
-
-def test_calendar_feeds_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped calendar feeds (t12) no longer gate on ownership either: a
-    # plain JWT user reaches /calendar/feeds and sees its own (empty) list.
-    assert client.get("/api/v1/calendar/feeds", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/calendar/feeds", headers=jwt_headers).json() == []
-
-
-def test_finances_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped finances no longer gates on ownership: a plain JWT user
-    # reaches it (and simply sees their own empty data).
-    assert client.get("/api/v1/finances/transactions", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/finances/transactions", headers=jwt_headers).json() == []
-
-
-def test_fitness_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped fitness (t9) no longer gates on ownership either: a plain
-    # JWT user reaches /fitness/sessions and sees their own empty data.
-    assert client.get("/api/v1/fitness/sessions", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/fitness/sessions", headers=jwt_headers).json() == []
-
-
-def test_tasks_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped tasks (t6) no longer gates on ownership: a plain JWT user
-    # reaches it (and simply sees their own empty data).
-    assert client.get("/api/v1/tasks", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/tasks", headers=jwt_headers).json() == []
-
-
-def test_events_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped events (user_id on CalendarEvent) no longer gate on
-    # ownership: a plain JWT user reaches it (and simply sees their own data).
-    assert client.get("/api/v1/events", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/events", headers=jwt_headers).json() == []
-
-
-def test_habits_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped habits (t10) no longer gate on ownership either: a plain
-    # JWT user reaches /habits and sees their own empty data.
-    assert client.get("/api/v1/habits", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/habits", headers=jwt_headers).json() == []
-
-
-def test_subscriptions_router_accepts_any_authenticated_user(client, jwt_headers):
-    # Tenant-scoped subscriptions (t8) no longer gate on ownership either: a
-    # plain JWT user reaches /subscriptions and sees their own empty data.
-    assert client.get("/api/v1/subscriptions", headers=jwt_headers).status_code == 200
-    assert client.get("/api/v1/subscriptions", headers=jwt_headers).json() == []
-
-
 def test_owner_only_route_accepts_api_key_and_owner_jwt(client, auth_headers, owner_headers):
-    assert client.get("/api/v1/finances/transactions", headers=auth_headers).status_code == 200
-    assert client.get("/api/v1/tasks", headers=auth_headers).status_code == 200
-    assert client.get("/api/v1/finances/transactions", headers=owner_headers).status_code == 200
-    assert client.get("/api/v1/tasks", headers=owner_headers).status_code == 200
+    assert client.get("/api/v1/skill/manifest", headers=auth_headers).status_code == 200
+    assert client.get("/api/v1/skill/manifest", headers=owner_headers).status_code == 200
 
 
 def test_owner_only_gate_does_not_block_mvp_or_auth_routes(client, jwt_headers):
     saas = register_user(client, "saas-mvp@adamelhirch.com")
 
-    # The same SaaS user still reaches its MVP routes and /auth/me.
+    # The same SaaS user reaches its MVP routes and /auth/me.
     assert client.get("/api/v1/groceries", headers=saas["headers"]).status_code == 200
     assert client.get("/api/v1/auth/me", headers=saas["headers"]).status_code == 200
-
-
-def test_video_route_accepts_non_owner_jwt(client, jwt_headers, monkeypatch):
-    # Video extraction is stateless (no user_id table — app/services/video_intake.py
-    # just fetches public pages and returns transcript + metadata), so the /video
-    # router flipped from owner_only_user to CurrentOrOwnerUser (ADR-0001
-    # anticipates exactly this move). A non-Owner JWT must now reach the endpoint
-    # with 200 instead of being rejected with 401.
-    from app.api import video as video_api
-    from app.schemas import VideoSourceRead
-
-    def fake_extract(url: str):
-        return VideoSourceRead(
-            url=url,
-            canonical_url=url,
-            platform="youtube",
-            title="Sample",
-            description="Desc",
-            transcript="Line 1",
-            transcript_source="caption",
-            transcript_segments=[],
-            warnings=[],
-        )
-
-    monkeypatch.setattr(video_api, "extract_video_source", fake_extract)
-
-    response = client.post(
-        "/api/v1/video/extract",
-        headers=jwt_headers,
-        json={"url": "https://www.youtube.com/watch?v=abc123"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["platform"] == "youtube"
+    assert client.get("/api/v1/recipes", headers=saas["headers"]).status_code == 200
+    assert client.get("/api/v1/pantry/items", headers=saas["headers"]).status_code == 200

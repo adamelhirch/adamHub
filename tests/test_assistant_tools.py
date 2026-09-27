@@ -2,7 +2,7 @@ import json
 import pytest
 from sqlmodel import Session, select
 
-from app.models.entities import GroceryItem, Task, User
+from app.models.entities import GroceryItem, Recipe, User
 from app.services.assistant.tool_dispatcher import (
     ASSISTANT_ALLOWED_ACTIONS,
     dispatch_assistant_tool,
@@ -23,24 +23,24 @@ def test_get_assistant_tools_schema():
         assert action_name in ASSISTANT_ALLOWED_ACTIONS
 
 
-def test_dispatch_assistant_tool_task_create(test_engine, owner_id):
+def test_dispatch_assistant_tool_recipe_add(test_engine, owner_id):
     with Session(test_engine) as session:
         user = session.get(User, owner_id)
         result = dispatch_assistant_tool(
-            "task__create",
-            {"title": "Courir 10km", "priority": "high"},
+            "recipe__add",
+            {"name": "Bowl Saumon", "instructions": "Dresser", "servings": 2},
             session,
             user,
         )
 
         assert result["success"] is True
-        assert result["action"] == "task.create"
+        assert result["action"] == "recipe.add"
 
-        created_task = session.exec(
-            select(Task).where(Task.user_id == owner_id, Task.title == "Courir 10km")
+        created_recipe = session.exec(
+            select(Recipe).where(Recipe.user_id == owner_id, Recipe.name == "Bowl Saumon")
         ).first()
-        assert created_task is not None
-        assert created_task.priority.value == "high"
+        assert created_recipe is not None
+        assert created_recipe.servings == 2
 
 
 def test_dispatch_assistant_tool_grocery_add_item(test_engine, owner_id):
@@ -82,7 +82,7 @@ def test_assistant_chat_tool_execution_flow(client, auth_headers, test_engine, o
     response = client.post(
         "/api/v1/assistant/chat",
         headers=auth_headers,
-        json={"message": "Ajoute la tâche Méditation matinale"},
+        json={"message": "Achète du pain aux courses s'il te plaît"},
     )
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
@@ -90,12 +90,12 @@ def test_assistant_chat_tool_execution_flow(client, auth_headers, test_engine, o
     content = response.text
     assert "event: tool_call" in content
     assert "event: tool_result" in content
-    assert "task.create" in content
+    assert "grocery.add_item" in content
     assert "event: done" in content
 
-    # Verify task persisted in PostgreSQL
+    # Verify grocery item persisted
     with Session(test_engine) as session:
-        task = session.exec(
-            select(Task).where(Task.user_id == owner_id, Task.title.contains("Méditation"))
+        item = session.exec(
+            select(GroceryItem).where(GroceryItem.user_id == owner_id, GroceryItem.name.contains("Pain"))
         ).first()
-        assert task is not None
+        assert item is not None

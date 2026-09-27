@@ -56,16 +56,16 @@ def test_owner_sees_full_catalog(client, test_engine, owner_user_id, monkeypatch
 
     names = _tool_names(result)
     assert "grocery.add_item" in names
-    assert "task.create" in names
-    assert "finance.add_transaction" in names
+    assert "supermarket.search" in names
+    assert "recipe.add" in names
+    assert "pantry.add_item" in names
     assert len(names) == len(mcp_server.ACTION_CATALOG)
 
 
 def test_non_owner_sees_all_tenant_scoped_tools(client, test_engine, monkeypatch):
-    """After t1-t13, all 16 domains are tenant-scoped and reachable by a
-    non-Owner: the 5 MVP prefixes plus the 11 formerly owner-only ones
-    (task, finance, calendar, habit, goal, event, fitness, subscription,
-    patrimony, note, video). Only `dashboard` remains owner-only."""
+    """In the food-focused AdamHUB, all tools in ACTION_CATALOG belong to
+    MVP_ACTION_PREFIXES (grocery, recipe, pantry, meal_plan, supermarket)
+    and are accessible to tenant users."""
     saas = register_user(client, "mcp-saas-user@adamelhirch.com")
     monkeypatch.setattr(mcp_server, "engine", test_engine)
     token = _auth_as(int(saas["user"]["id"]))
@@ -75,68 +75,16 @@ def test_non_owner_sees_all_tenant_scoped_tools(client, test_engine, monkeypatch
         auth_context_var.reset(token)
 
     names = _tool_names(result)
-    # MVP prefixes are still there.
     assert "grocery.add_item" in names
     assert "supermarket.search" in names
-    # The 11 newly-scoped domain prefixes are now visible to a non-Owner.
-    for action in (
-        "task.create",
-        "finance.add_transaction",
-        "calendar.add_item",
-        "habit.create",
-        "goal.create",
-        "event.create",
-        "fitness.create_session",
-        "subscription.create",
-        "patrimony.add_account",
-        "note.create",
-        "video.fetch",
-    ):
-        assert action in names
-    # The last non-tenant-scoped action stays hidden from the listing.
-    assert "dashboard.overview" not in names
-    assert names <= {
-        name for name in mcp_server._ACTION_BY_NAME if name.split(".", 1)[0] in mcp_server.MVP_ACTION_PREFIXES
-    }
+    assert "recipe.add" in names
+    assert "meal_plan.add" in names
+    assert "pantry.add_item" in names
+    assert names == set(mcp_server._ACTION_BY_NAME.keys())
 
 
-def test_non_owner_can_execute_newly_scoped_action(client, test_engine, monkeypatch):
-    """A non-Owner can execute a formerly owner-only action (task.create)."""
-    saas = register_user(client, "mcp-saas-execute@adamelhirch.com")
-    monkeypatch.setattr(mcp_server, "engine", test_engine)
-    token = _auth_as(int(saas["user"]["id"]))
-    try:
-        result = _run(
-            mcp_server._on_call_tool(
-                None, types.CallToolRequestParams(name="task.create", arguments={"title": "Nouvelle tache"})
-            )
-        )
-    finally:
-        auth_context_var.reset(token)
-
-    assert result.is_error is not True
-    assert "Nouvelle tache" in result.content[0].text
-
-
-def test_non_owner_call_of_owner_only_action_is_rejected_even_though_hidden(client, test_engine, monkeypatch):
-    """Defense in depth: rejected on direct invocation, not just absent from listing."""
-    saas = register_user(client, "mcp-saas-direct-call@adamelhirch.com")
-    monkeypatch.setattr(mcp_server, "engine", test_engine)
-    token = _auth_as(int(saas["user"]["id"]))
-    try:
-        result = _run(
-            mcp_server._on_call_tool(
-                None, types.CallToolRequestParams(name="dashboard.overview", arguments={})
-            )
-        )
-    finally:
-        auth_context_var.reset(token)
-
-    assert result.is_error is True
-    assert "not available" in result.content[0].text.lower()
-
-
-def test_non_owner_can_execute_mvp_action(client, test_engine, monkeypatch):
+def test_non_owner_can_execute_tenant_action(client, test_engine, monkeypatch):
+    """A non-Owner can execute tenant-scoped food actions."""
     saas = register_user(client, "mcp-saas-execute@adamelhirch.com")
     monkeypatch.setattr(mcp_server, "engine", test_engine)
     token = _auth_as(int(saas["user"]["id"]))
@@ -153,22 +101,22 @@ def test_non_owner_can_execute_mvp_action(client, test_engine, monkeypatch):
     assert "Pommes" in result.content[0].text
 
 
-def test_owner_can_execute_owner_only_action(client, test_engine, owner_user_id, monkeypatch):
+def test_non_owner_call_of_disallowed_action_is_rejected_even_though_hidden(client, test_engine, monkeypatch):
+    """Defense in depth: unknown or non-tenant action rejected on invocation."""
+    saas = register_user(client, "mcp-saas-direct-call@adamelhirch.com")
     monkeypatch.setattr(mcp_server, "engine", test_engine)
-    token = _auth_as(owner_user_id)
+    token = _auth_as(int(saas["user"]["id"]))
     try:
         result = _run(
             mcp_server._on_call_tool(
-                None,
-                types.CallToolRequestParams(
-                    name="dashboard.overview", arguments={}
-                ),
+                None, types.CallToolRequestParams(name="dashboard.overview", arguments={})
             )
         )
     finally:
         auth_context_var.reset(token)
 
-    assert result.is_error is not True
+    assert result.is_error is True
+    assert "not available" in result.content[0].text.lower()
 
 
 def test_informal_schema_conversion():

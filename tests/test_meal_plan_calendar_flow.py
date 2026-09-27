@@ -62,21 +62,6 @@ def test_meal_confirm_unconfirm_and_calendar_completion(client, auth_headers):
     egg_row_after_second_confirm = next(row for row in client.get("/api/v1/pantry/items", headers=auth_headers).json() if row["id"] == pantry_id)
     assert egg_row_after_second_confirm["quantity"] == 3.0
 
-    sync = client.post("/api/v1/calendar/sync", headers=auth_headers)
-    assert sync.status_code == 200
-    calendar_rows = client.get(
-        "/api/v1/calendar/items",
-        headers=auth_headers,
-        params={"include_completed": True, "limit": 500},
-    )
-    assert calendar_rows.status_code == 200
-    meal_item = next(
-        row
-        for row in calendar_rows.json()
-        if row["source"] == "meal_plan" and row["source_ref_id"] == meal_plan_id
-    )
-    assert meal_item["completed"] is True
-
     unconfirm = client.post(f"/api/v1/meal-plans/{meal_plan_id}/unconfirm-cooked", headers=auth_headers)
     assert unconfirm.status_code == 200
     assert unconfirm.json()["already_unconfirmed"] is False
@@ -87,20 +72,6 @@ def test_meal_confirm_unconfirm_and_calendar_completion(client, auth_headers):
     unconfirm_again = client.post(f"/api/v1/meal-plans/{meal_plan_id}/unconfirm-cooked", headers=auth_headers)
     assert unconfirm_again.status_code == 200
     assert unconfirm_again.json()["already_unconfirmed"] is True
-
-    sync_after = client.post("/api/v1/calendar/sync", headers=auth_headers)
-    assert sync_after.status_code == 200
-    calendar_rows_after = client.get(
-        "/api/v1/calendar/items",
-        headers=auth_headers,
-        params={"include_completed": True, "limit": 500},
-    )
-    meal_item_after = next(
-        row
-        for row in calendar_rows_after.json()
-        if row["source"] == "meal_plan" and row["source_ref_id"] == meal_plan_id
-    )
-    assert meal_item_after["completed"] is False
 
 
 def test_edit_confirmed_meal_plan_restores_pantry_stock(client, auth_headers):
@@ -301,17 +272,6 @@ def test_recipe_confirm_cooked_marker_plan_hidden_from_meal_plans_and_calendar(c
     assert marker_plan_id not in skill_plan_ids
     assert real_plan_id in skill_plan_ids
 
-    sync = client.post("/api/v1/calendar/sync", headers=auth_headers)
-    assert sync.status_code == 200
-    calendar_rows = client.get(
-        "/api/v1/calendar/items",
-        headers=auth_headers,
-        params={"include_completed": True, "limit": 500},
-    )
-    assert calendar_rows.status_code == 200
-    meal_ref_ids = [row["source_ref_id"] for row in calendar_rows.json() if row["source"] == "meal_plan"]
-    assert marker_plan_id not in meal_ref_ids
-    assert real_plan_id in meal_ref_ids
 
 
 def test_recipe_confirm_cooked_refreshes_marker_plan_timestamp(client, auth_headers, test_engine):

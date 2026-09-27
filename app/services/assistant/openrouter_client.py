@@ -188,40 +188,6 @@ async def stream_openrouter_chat(
             }
             return
 
-        # 2. CALENDAR SCHEDULING & CONFLICT (FR-016 - FR-020)
-        if any(w in user_lower for w in ("planifie", "rendez-vous", "séance de sport", "dentiste", "calendrier", "agenda")) and ("repas" not in user_lower and "dîner" not in user_lower and "carbonara" not in user_lower) and tools:
-            force = any(w in user_lower for w in ("force", "quand même", "malgré"))
-            title = "Rendez-vous"
-            if "dentiste" in user_lower:
-                title = "Dentiste"
-            elif "sport" in user_lower or "séance" in user_lower:
-                title = "Séance de sport"
-
-            # Parse or mock time slot
-            start_at = "2026-09-13T10:30:00Z"
-            end_at = "2026-09-13T11:30:00Z"
-            if "14" in user_lower or "15" in user_lower:
-                start_at = "2026-09-13T14:30:00Z"
-                end_at = "2026-09-13T15:30:00Z"
-
-            yield {
-                "delta": f"Je vérifie le créneau et planifie '{title}'. ",
-                "tool_calls": [{
-                    "id": "call_mock_calendar_add",
-                    "type": "function",
-                    "function": {
-                        "name": "calendar__add_item",
-                        "arguments": json.dumps({
-                            "title": title,
-                            "start_at": start_at,
-                            "end_at": end_at,
-                            "force": force,
-                        }),
-                    },
-                }],
-                "finish_reason": "tool_calls",
-            }
-            return
 
         # 3. SUPERMARKET DRIVE (FR-011 - FR-015)
         if any(w in user_lower for w in ("intermarché", "intermarche", "carrefour", "leclerc", "auchan", "drive")) and tools:
@@ -329,28 +295,6 @@ async def stream_openrouter_chat(
                 }
                 return
 
-        # 6. TASKS (Fallback for non-recipe tasks)
-        if ("tâche" in user_lower or "task" in user_lower) and tools:
-            title = user_text
-            for prefix in ["ajoute la tâche", "ajoute une tâche", "crée la tâche", "crée une tâche", "nouvelle tâche", "tâche"]:
-                if prefix in user_lower:
-                    idx = user_lower.find(prefix) + len(prefix)
-                    title = user_text[idx:].strip(" :-\"'\t\r\n") or "Nouvelle tâche"
-                    break
-            yield {
-                "delta": "J'ajoute cette tâche pour toi. ",
-                "tool_calls": [{
-                    "id": "call_mock_task",
-                    "type": "function",
-                    "function": {
-                        "name": "task__create",
-                        "arguments": json.dumps({"title": title, "priority": "medium"}),
-                    },
-                }],
-                "finish_reason": "tool_calls",
-            }
-            yield {"delta": f"\nC'est fait ! La tâche '{title}' a été créée.", "tool_calls": [], "finish_reason": "stop"}
-            return
 
         # 7. GROCERIES
         if ("courses" in user_lower or "achète" in user_lower) and tools:
