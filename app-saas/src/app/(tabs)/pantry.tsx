@@ -5,8 +5,9 @@ import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 
 import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
+import { PantryEditSheet } from "@/components/pantry-edit-sheet";
 import { listPantryItems, type PantryItemRead } from "@/lib/api";
-import { consumePantryItem, deletePantryItem, updatePantryItem } from "@/lib/pantry";
+import { consumePantryItem, deletePantryItem, updatePantryItem, type PantryItemUpdateInput } from "@/lib/pantry";
 
 const UNCATEGORIZED = "Sans catégorie";
 
@@ -18,6 +19,12 @@ export default function PantryScreen() {
   const [items, setItems] = useState<PantryItemRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingItem, setEditingItem] = useState<PantryItemRead | null>(null);
+
+  async function handleSaveEdit(id: number, payload: PantryItemUpdateInput) {
+    const updated = await updatePantryItem(id, payload);
+    setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -90,6 +97,13 @@ export default function PantryScreen() {
         <ScreenHeader title="Garde-manger" subtitle="Vos stocks actuels" />
         <View className="flex-row items-center gap-2">
           <Pressable
+            onPress={() => router.push("/barcode-scanner" as any)}
+            hitSlop={8}
+            className="h-11 w-11 items-center justify-center rounded-full bg-slate-200 active:bg-slate-300"
+          >
+            <Ionicons name="barcode-outline" size={22} color="#0f172a" />
+          </Pressable>
+          <Pressable
             onPress={() =>
               router.push({ pathname: "/supermarket-search", params: { returnTo: "pantry" } })
             }
@@ -132,8 +146,14 @@ export default function PantryScreen() {
                     className={`px-4 py-3 ${index > 0 ? "border-t border-slate-100" : ""}`}
                   >
                     <View className="flex-row items-center justify-between">
-                      <View className="flex-1 pr-2">
-                        <Text className="text-base text-slate-900">{item.name}</Text>
+                      <Pressable onPress={() => setEditingItem(item)} className="flex-1 pr-2">
+                        <View className="flex-row items-center gap-1.5">
+                          <Text className="text-base font-medium text-slate-900">{item.name}</Text>
+                          <Ionicons name="pencil-outline" size={13} color="#94a3b8" />
+                        </View>
+                        {item.note ? (
+                          <Text className="text-xs text-slate-500">{item.note}</Text>
+                        ) : null}
                         {item.expires_at ? (
                           <Text className="text-xs text-slate-400">
                             Expire :{" "}
@@ -143,7 +163,7 @@ export default function PantryScreen() {
                             }).format(new Date(`${item.expires_at}T00:00:00`))}
                           </Text>
                         ) : null}
-                      </View>
+                      </Pressable>
                       <View className="flex-row items-center">
                         <Pressable
                           onPress={() => adjustQuantity(item, -1)}
@@ -152,9 +172,11 @@ export default function PantryScreen() {
                         >
                           <Ionicons name="remove" size={16} color="#334155" />
                         </Pressable>
-                        <Text className="min-w-[70px] text-center text-sm font-medium text-slate-500">
-                          {formatQuantity(item.quantity)} {item.unit}
-                        </Text>
+                        <Pressable onPress={() => setEditingItem(item)} hitSlop={6}>
+                          <Text className="min-w-[70px] text-center text-sm font-medium text-slate-700 underline decoration-slate-300">
+                            {formatQuantity(item.quantity)} {item.unit}
+                          </Text>
+                        </Pressable>
                         <Pressable
                           onPress={() => adjustQuantity(item, 1)}
                           hitSlop={6}
@@ -177,6 +199,13 @@ export default function PantryScreen() {
           </View>
         ))
       )}
+
+      <PantryEditSheet
+        visible={!!editingItem}
+        item={editingItem}
+        onClose={() => setEditingItem(null)}
+        onSave={handleSaveEdit}
+      />
     </Screen>
   );
 }

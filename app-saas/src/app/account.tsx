@@ -8,6 +8,7 @@ import { Field } from "@/components/field";
 import { PrimaryButton } from "@/components/primary-button";
 import { Screen } from "@/components/screen";
 import { ScreenHeader } from "@/components/screen-header";
+import { SupermarketStoreModal } from "@/components/supermarket-store-modal";
 import {
   API_URL,
   generateApiKey,
@@ -45,6 +46,8 @@ export default function AccountScreen() {
   const [ntfyTopic, setNtfyTopicValue] = useState("");
   const [ntfyLoading, setNtfyLoading] = useState(true);
   const [ntfySaving, setNtfySaving] = useState(false);
+
+  const [showStoreModal, setShowStoreModal] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -185,9 +188,11 @@ export default function AccountScreen() {
 
   return (
     <Screen>
-      <View className="mb-6 flex-row items-center justify-between">
-        <ScreenHeader title="Compte" subtitle="Vos informations personnelles" />
-      </View>
+      <ScreenHeader
+        title="Mon Compte"
+        subtitle="Paramètres, MCP et profil IA"
+        backButton={true}
+      />
 
       {error ? (
         <View className="mb-4 rounded-xl bg-red-50 px-4 py-3">
@@ -201,7 +206,7 @@ export default function AccountScreen() {
         </View>
       ) : user ? (
         <>
-          <View className="mb-4 items-center rounded-2xl border border-slate-100 bg-white p-6">
+          <View className="mb-4 items-center rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
             <View className="mb-3 h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
               <Ionicons name="person" size={32} color="#059669" />
             </View>
@@ -209,7 +214,7 @@ export default function AccountScreen() {
             <Text className="mt-1 text-base text-slate-500">{user.email}</Text>
           </View>
 
-          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4">
+          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
             <View className="flex-row items-center justify-between py-2">
               <Text className="text-sm text-slate-500">Membre depuis</Text>
               <Text className="text-sm font-medium text-slate-900">
@@ -224,7 +229,50 @@ export default function AccountScreen() {
             </View>
           </View>
 
-          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4">
+          {/* AI Copilot & Personalization Shortcut */}
+          <Pressable
+            onPress={() => router.push("/settings-memories")}
+            className="mb-6 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 active:bg-emerald-100/50 flex-row items-center justify-between shadow-sm"
+          >
+            <View className="flex-row items-center flex-1 mr-2">
+              <View className="mr-3 h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 shadow-sm">
+                <Ionicons name="sparkles" size={20} color="#ffffff" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-base font-semibold text-slate-900">
+                  Copilote & Mémoires IA
+                </Text>
+                <Text className="text-xs text-slate-500 mt-0.5">
+                  Objectifs, régime, ton de réponse & connaissances apprises
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#059669" />
+          </Pressable>
+
+          {/* Drive Store Preferences */}
+          <Pressable
+            onPress={() => setShowStoreModal(true)}
+            className="mb-6 rounded-2xl border border-amber-100 bg-amber-50/50 p-4 active:bg-amber-100/50 flex-row items-center justify-between shadow-sm"
+          >
+            <View className="flex-row items-center flex-1 mr-2">
+              <View className="mr-3 h-10 w-10 items-center justify-center rounded-xl bg-amber-500 shadow-sm">
+                <Ionicons name="cart" size={20} color="#ffffff" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-base font-semibold text-slate-900">
+                  Magasin Drive Favori
+                </Text>
+                <Text className="text-xs text-slate-500 mt-0.5">
+                  Point de retrait (quai, spot, TAPE, piéton) & stratégie panier
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#d97706" />
+          </Pressable>
+
+          {/* MCP API Key */}
+          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
             <View className="mb-3 flex-row items-center justify-between">
               <Text className="text-sm font-semibold text-slate-900">Clé API / MCP</Text>
               {!keyLoading && !keyActionLoading ? (
@@ -273,7 +321,8 @@ export default function AccountScreen() {
             )}
           </View>
 
-          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4">
+          {/* Notifications */}
+          <View className="mb-6 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
             <View className="mb-3 flex-row items-center justify-between">
               <Text className="text-sm font-semibold text-slate-900">Notifications push (ntfy)</Text>
             </View>
@@ -305,6 +354,7 @@ export default function AccountScreen() {
             )}
           </View>
 
+          {/* Logout */}
           <Pressable
             onPress={handleLogout}
             disabled={loggingOut}
@@ -323,6 +373,11 @@ export default function AccountScreen() {
           </Pressable>
         </>
       ) : null}
+
+      <SupermarketStoreModal
+        visible={showStoreModal}
+        onClose={() => setShowStoreModal(false)}
+      />
     </Screen>
   );
 }

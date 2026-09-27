@@ -6,9 +6,11 @@
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "expo": "~57.0.12",
+    "expo-camera": "~57.0.5",
     "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.10",
     "expo-font": "~57.0.1",
+    "expo-image-picker": "~57.0.17",
     "expo-linking": "~57.0.5",
     "expo-router": "~57.0.12",
     "expo-secure-store": "~57.0.1",
@@ -40,7 +42,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test:e2e": "../scripts/run_mobile_e2e.sh",
+    "test:e2e:headed": "../scripts/run_mobile_e2e.sh --headed"
   },
   "private": true
 }

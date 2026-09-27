@@ -24,7 +24,7 @@ export default function RegisterScreen() {
     setError(null);
     try {
       await register(email.trim(), password, displayName.trim());
-      router.replace("/(tabs)/meal-plan");
+      router.replace("/(tabs)");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Une erreur est survenue");
     } finally {

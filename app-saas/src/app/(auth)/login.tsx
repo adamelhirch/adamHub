@@ -22,7 +22,7 @@ export default function LoginScreen() {
     setError(null);
     try {
       await login(email.trim(), password);
-      router.replace("/(tabs)/meal-plan");
+      router.replace("/(tabs)");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Une erreur est survenue");
     } finally {

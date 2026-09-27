@@ -83,6 +83,16 @@ export default function NewPantryScreen() {
 
       <ScreenHeader title="Nouvel article" subtitle="Ajoutez un article à votre garde-manger." />
 
+      <Pressable
+        onPress={() => router.push("/barcode-scanner" as any)}
+        className="mb-5 flex-row items-center justify-center gap-2 rounded-xl border border-emerald-600/30 bg-emerald-50 py-3 active:bg-emerald-100"
+      >
+        <Ionicons name="barcode-outline" size={20} color="#059669" />
+        <Text className="text-sm font-semibold text-emerald-700">
+          Scanner avec Open Food Facts
+        </Text>
+      </Pressable>
+
       {error ? (
         <View className="mb-4 rounded-xl bg-red-50 px-4 py-3">
           <Text className="text-sm text-red-600">{error}</Text>

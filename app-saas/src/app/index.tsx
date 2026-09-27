@@ -30,5 +30,5 @@ export default function RootIndex() {
     );
   }
 
-  return <Redirect href={authenticated ? "/(tabs)/meal-plan" : "/(auth)/login"} />;
+  return <Redirect href={authenticated ? "/(tabs)" : "/(auth)/login"} />;
 }

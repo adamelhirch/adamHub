@@ -55,13 +55,18 @@ function groupMealPlans(plans: MealPlanRead[]): MealPlanDay[] {
       return {
         day,
         date,
-        meals: dayPlans.map((plan) => ({
-          id: plan.id,
-          label: plan.slot ? SLOT_LABELS[plan.slot] : "Repas",
-          recipe: plan.recipe_name,
-          syncedGroceryAt: plan.synced_grocery_at,
-          cooked: plan.cooked,
-        })),
+        meals: dayPlans.map((plan) => {
+          const match = plan.planned_at.match(/T(\d{2}):(\d{2})/);
+          const timeStr = match ? `${match[1]}:${match[2]}` : "";
+          const slotName = plan.slot ? SLOT_LABELS[plan.slot] : "Repas";
+          return {
+            id: plan.id,
+            label: timeStr ? `${slotName} (${timeStr})` : slotName,
+            recipe: plan.recipe_name,
+            syncedGroceryAt: plan.synced_grocery_at,
+            cooked: plan.cooked,
+          };
+        }),
       };
     });
 }

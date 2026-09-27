@@ -49,3 +49,23 @@ export function consumePantryItem(id: number, amount: number): Promise<PantryIte
 export function deletePantryItem(id: number): Promise<PantryItemDeleteResult> {
   return request<PantryItemDeleteResult>(`/pantry/items/${id}`, { method: "DELETE" });
 }
+
+export interface OpenFoodFactsProductDraft {
+  barcode: string;
+  found: boolean;
+  raw_name: string | null;
+  brand: string | null;
+  suggested_name: string;
+  quantity: number;
+  unit: string;
+  category: string | null;
+  image_url: string | null;
+  nutriscore: string | null;
+  packaging: string | null;
+  location: string | null;
+  missing_fields: string[];
+}
+
+export function lookupBarcode(barcode: string): Promise<OpenFoodFactsProductDraft> {
+  return request<OpenFoodFactsProductDraft>(`/pantry/barcode/${encodeURIComponent(barcode)}`);
+}
