@@ -5,9 +5,9 @@ services:
     image: postgres:16-alpine
     container_name: adamhub-postgres
     environment:
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-adamhub}
+      - POSTGRES_USER=${POSTGRES_USER:-adamhub}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-db-password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:

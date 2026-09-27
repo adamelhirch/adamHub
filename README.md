@@ -180,25 +180,67 @@ Cloudflare/DataDome bloque les IP data-center : la recherche supermarché passe 
 
 ## Testing
 
-Backend:
+### Backend unit & integration tests
 
 ```bash
-.venv/bin/python -m pytest
+uv run --extra dev pytest
 ```
 
 Optional PostgreSQL smoke tests:
 
 ```bash
 export ADAMHUB_POSTGRES_SMOKE_URL='postgresql+psycopg://adamhub:adamhub@localhost:5432/adamhub'
-.venv/bin/python -m pytest -m postgres
+uv run --extra dev pytest -m postgres
 ```
 
-Frontend build:
+### Frontend build & lint
 
 ```bash
 cd web
 npm run build
+npm run lint
 ```
+
+### Automated Browser E2E & System Accuracy Tests (Playwright)
+
+AdamHUB includes an automated End-to-End browser test suite that verifies core workflows, pantry inventory mathematical invariants, AI assistant unit guardrails, and audits supermarket category matching accuracy.
+
+The suite runs against an isolated test tenant (`e2e-tester@adamelhirch.com`) with automated database seeding:
+
+```bash
+# Run all E2E tests (headless)
+./scripts/run_e2e_tests.sh
+
+# Run in visual headed mode to watch the browser execute in real time
+./scripts/run_e2e_tests.sh --headed
+
+# Run rapid sanity smoke tests (< 2 minutes)
+./scripts/run_e2e_tests.sh --smoke
+
+# Run deep supermarket matching accuracy benchmarks
+./scripts/run_e2e_tests.sh --accuracy
+
+# Open the interactive Playwright UI runner
+./scripts/run_e2e_tests.sh --ui
+
+# Automatically open the generated HTML test report after completion
+./scripts/run_e2e_tests.sh --report
+```
+
+Or directly via npm in the `web/` directory:
+
+```bash
+cd web
+npm run test:e2e          # All E2E tests
+npm run test:e2e:headed   # Visual headed mode
+npm run test:e2e:smoke    # Smoke tests
+npm run test:e2e:accuracy # Accuracy benchmarks
+npm run test:e2e:ui       # Interactive UI
+```
+
+Audit reports are automatically published to:
+- **Markdown Audit Report**: `docs/audit/e2e-accuracy-report.md` (retail accuracy score, benchmark results, pantry invariants, detected UI gaps catalog)
+- **HTML Report**: `web/playwright-report/index.html` (traces, screenshots, execution timelines)
 
 ## Modification rules
 
