@@ -488,6 +488,88 @@ async def search_intermarche(
     return results
 
 
+async def search_intermarche_stores(
+    *,
+    zipcode: str | None = None,
+    city: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> list[dict[str, Any]]:
+    """Search for Intermarché Drive stores / points de vente near a location."""
+    query = zipcode or city or ""
+    params: dict[str, Any] = {}
+    if query:
+        params["query"] = query
+    if latitude is not None and longitude is not None:
+        params["latitude"] = str(latitude)
+        params["longitude"] = str(longitude)
+
+    url = f"{INTERMARCHE_BASE_URL}/api/pdv/search"
+    headers = {
+        **_CHROME_HEADERS,
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            response = await client.get(url, params=params, headers=headers)
+            if response.status_code != 200:
+                return []
+            data = response.json()
+    except Exception:
+        return []
+
+    stores_raw = data if isinstance(data, list) else data.get("pdvs") or data.get("stores") or data.get("data") or []
+    results: list[dict[str, Any]] = []
+
+    for item in stores_raw:
+        pdv_id = str(item.get("id") or item.get("code") or item.get("pdvId") or item.get("pdv") or "")
+        if not pdv_id:
+            continue
+
+        name = item.get("nom") or item.get("name") or "Intermarché Drive"
+        address = item.get("adresse") or item.get("address") or ""
+        item_zip = str(item.get("codePostal") or item.get("zipcode") or zipcode or "")
+        item_city = item.get("ville") or item.get("city") or city or ""
+        services = item.get("services") or []
+        services_str = " ".join(str(s) for s in services).lower() if isinstance(services, list) else str(services).lower()
+
+        name_lower = name.lower()
+        if "borne" in name_lower or "24" in name_lower or "24_24" in services_str:
+            pickup_type = "tape"
+        elif "pieton" in name_lower or "piéton" in name_lower or "pieton" in services_str:
+            pickup_type = "pieton"
+        else:
+            pickup_type = "quai"
+
+        distance = None
+        if "distance" in item:
+            try:
+                distance = float(item["distance"])
+            except (ValueError, TypeError):
+                pass
+        elif "distanceKm" in item:
+            try:
+                distance = float(item["distanceKm"])
+            except (ValueError, TypeError):
+                pass
+
+        results.append({
+            "store": "intermarche",
+            "external_store_id": pdv_id,
+            "name": name,
+            "address": address,
+            "zipcode": item_zip,
+            "city": item_city,
+            "pickup_type": pickup_type,
+            "distance_km": distance,
+            "channel": "tape" if pickup_type == "tape" else "drive",
+        })
+
+    return results
+
+
+
 if __name__ == "__main__":
     import sys
 

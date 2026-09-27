@@ -28,6 +28,7 @@ carry it.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import urllib.parse
@@ -186,14 +187,26 @@ def _format_price(price: float | None) -> str | None:
     return f"{str(price).replace('.', ',')} €"
 
 
+def _decode_jwt_payload(value: str) -> dict[str, Any] | None:
+    parts = value.split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded.encode()))
+    except Exception:
+        return None
+
+
 def extract_customer_uuid_from_cookies(cookies: list[dict[str, Any]] | None) -> str | None:
     """Best-effort recovery of the connected customer uuid from session cookies.
 
-    The connected-session HAR does not store the customer uuid in a cookie (it
-    arrives via the ``/loading?userId=…`` OAuth redirect), so this usually
-    returns ``None`` and the caller supplies the uuid explicitly. It only returns
-    a value when a cookie is unambiguously the customer id (a known name or a
-    JSON cookie carrying ``customerId``/``userId``).
+    Scans:
+    1. Known direct cookie names (_CUSTOMER_UUID_COOKIE_NAMES).
+    2. JSON payload carried by a cookie.
+    3. JWT payload carried by a cookie (e.g. KEYCLOAK_IDENTITY, id_token, access_token),
+       scanning for `sub` carrying Keycloak user federation format `f:<id>:f:<customer_uuid>:<email>`
+       or any customerId / userId / UUID.
     """
     for cookie in cookies or []:
         name = cookie.get("name")
@@ -205,11 +218,29 @@ def extract_customer_uuid_from_cookies(cookies: list[dict[str, Any]] | None) -> 
             if match:
                 return match.group(0)
             continue
+
+        payload: Any = None
         try:
             payload = json.loads(urllib.parse.unquote(value))
         except (json.JSONDecodeError, ValueError):
-            continue
+            payload = None
+
+        if not isinstance(payload, dict) and "." in value:
+            payload = _decode_jwt_payload(value)
+
         if isinstance(payload, dict):
+            sub = str(payload.get("sub") or "")
+            if sub:
+                sub_match = re.search(
+                    r":f:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+                    sub,
+                )
+                if sub_match:
+                    return sub_match.group(1)
+                uuids = _UUID_RE.findall(sub)
+                if uuids:
+                    return uuids[-1]
+
             for key in _CUSTOMER_UUID_JSON_KEYS:
                 raw = payload.get(key)
                 if raw:

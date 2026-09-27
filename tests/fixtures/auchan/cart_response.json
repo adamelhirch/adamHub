@@ -1,0 +1,31 @@
+{
+  "cartId": "14382b45-6789-abcd-ef01-23456789abcd",
+  "totalAmount": 16.75,
+  "itemCount": 2,
+  "seller": {
+    "id": "4c663296-54a8-45f6-b385-0be86b4dfe98",
+    "name": "Auchan Supermarché Toulouse"
+  },
+  "items": [
+    {
+      "id": "line-auchan-1",
+      "productId": "e7ab4048-1234-abcd-5678-abcdef012345",
+      "offerId": "c21f64ea-5678-abcd-1234-fedcba543210",
+      "productTitle": "Lait demi-écrémé stérilisé UHT Auchan 1L",
+      "quantity": 3,
+      "unitPrice": 1.05,
+      "totalPrice": 3.15,
+      "imageUrl": "https://cdn.auchan.fr/media/lait.jpg"
+    },
+    {
+      "id": "line-auchan-2",
+      "productId": "f8bc5159-2345-bcde-6789-bcdef0123456",
+      "offerId": "d32e75fb-6789-bcde-2345-fedcba654321",
+      "productTitle": "Pâtes Penne Rigate Barilla 500g",
+      "quantity": 4,
+      "unitPrice": 3.40,
+      "totalPrice": 13.60,
+      "imageUrl": "https://cdn.auchan.fr/media/penne.jpg"
+    }
+  ]
+}

@@ -17,6 +17,9 @@ import sqlalchemy as sa
 import sqlmodel
 
 
+from sqlalchemy.dialects import postgresql as pg
+
+
 # revision identifiers, used by Alembic.
 revision: str = "m1c4e8f2a6b9"
 down_revision: Union[str, Sequence[str], None] = "70295b0183e8"
@@ -25,20 +28,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    store_enum = (
+        pg.ENUM("INTERMARCHE", "CARREFOUR", "LECLERC", "AUCHAN", name="supermarketstore", create_type=False)
+        if bind.dialect.name == "postgresql"
+        else sa.Enum("INTERMARCHE", "CARREFOUR", "LECLERC", "AUCHAN", name="supermarketstore", create_type=False)
+    )
+
     op.create_table(
         "supermarketcart",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=True),
         sa.Column(
             "store",
-            sa.Enum(
-                "INTERMARCHE",
-                "CARREFOUR",
-                "LECLERC",
-                "AUCHAN",
-                name="supermarketstore",
-                create_type=False,
-            ),
+            store_enum,
             nullable=False,
         ),
         sa.Column(

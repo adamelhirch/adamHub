@@ -32,7 +32,19 @@ from app.schemas import (
     SupermarketSearchResult,
     SupermarketStoreRead,
     SupermarketStoreSelectionRead,
+    SupermarketStoreLocationRead,
+    UserStorePreferenceRead,
+    UserStorePreferenceUpdate,
+    CreateCartJobPayload,
+    GroceryToCartJobRead,
+    MatchedCartItemRead,
+    RefineJobPayload,
+    SyncJobResponse,
+    ConfirmPickupResponse,
+    UpdateMatchedItemPayload,
 )
+from app.services.supermarket.store_locator import SupermarketStoreLocator
+from app.services.supermarket.cart_job_service import CartJobService
 from app.services.cart import (
     add_item as add_cart_item,
     clear_cart,
@@ -447,13 +459,7 @@ def list_carts_endpoint(
 async def get_cart_endpoint(
     store: SupermarketStore, session: SessionDep, user: CurrentOrOwnerUser
 ) -> SupermarketCartRead:
-    if store == SupermarketStore.INTERMARCHE:
-        # Mirror mode: re-read the real cart from the site (empty events) and
-        # rewrite the local cart from the response. A failure rejects without
-        # touching the local cart.
-        cart = await cart_mirror.read_cart(session, user.id)
-        return _cart_to_read(session, cart)
-    cart = upsert_cart(session, store, user_id=user.id)
+    cart = await cart_mirror.read_cart(session, user.id, store=store)
     return _cart_to_read(session, cart)
 
 
@@ -464,14 +470,9 @@ async def add_cart_item_endpoint(
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketCartRead:
-    if store == SupermarketStore.INTERMARCHE:
-        # Mirror mode: add on the site (adapter add_item) then rewrite local.
-        cart = await cart_mirror.add_item(
-            session, user.id, payload.cache_id, quantity=payload.quantity
-        )
-        return _cart_to_read(session, cart)
-    cart = upsert_cart(session, store, user_id=user.id)
-    add_cart_item(session, cart, payload.cache_id, quantity=payload.quantity)
+    cart = await cart_mirror.add_item(
+        session, user.id, payload.cache_id, quantity=payload.quantity, store=store
+    )
     return _cart_to_read(session, cart)
 
 
@@ -483,15 +484,9 @@ async def update_cart_item_endpoint(
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketCartRead:
-    if store == SupermarketStore.INTERMARCHE:
-        # Mirror mode: set the quantity on the site (adapter update_item_quantity)
-        # then rewrite local.
-        cart = await cart_mirror.update_item_quantity(
-            session, user.id, item_id, quantity=payload.quantity
-        )
-        return _cart_to_read(session, cart)
-    cart = upsert_cart(session, store, user_id=user.id)
-    update_cart_item_quantity(session, cart, item_id, payload.quantity)
+    cart = await cart_mirror.update_item_quantity(
+        session, user.id, item_id, quantity=payload.quantity, store=store
+    )
     return _cart_to_read(session, cart)
 
 
@@ -502,12 +497,7 @@ async def remove_cart_item_endpoint(
     session: SessionDep,
     user: CurrentOrOwnerUser,
 ) -> SupermarketCartRead:
-    if store == SupermarketStore.INTERMARCHE:
-        # Mirror mode: remove the line on the site then rewrite local.
-        cart = await cart_mirror.remove_item(session, user.id, item_id)
-        return _cart_to_read(session, cart)
-    cart = upsert_cart(session, store, user_id=user.id)
-    remove_cart_item(session, cart, item_id)
+    cart = await cart_mirror.remove_item(session, user.id, item_id, store=store)
     return _cart_to_read(session, cart)
 
 
@@ -515,12 +505,7 @@ async def remove_cart_item_endpoint(
 async def clear_cart_endpoint(
     store: SupermarketStore, session: SessionDep, user: CurrentOrOwnerUser
 ) -> SupermarketCartRead:
-    if store == SupermarketStore.INTERMARCHE:
-        # Mirror mode: clear the site cart (adapter clear_cart) then empty local.
-        cart = await cart_mirror.clear_cart(session, user.id)
-        return _cart_to_read(session, cart)
-    cart = upsert_cart(session, store, user_id=user.id)
-    clear_cart(session, cart)
+    cart = await cart_mirror.clear_cart(session, user.id, store=store)
     return _cart_to_read(session, cart)
 
 
@@ -534,3 +519,183 @@ def set_cart_status_endpoint(
     cart = upsert_cart(session, store, user_id=user.id)
     set_cart_status(session, cart, payload.status)
     return _cart_to_read(session, cart)
+
+
+@router.get("/stores/search", response_model=list[SupermarketStoreLocationRead])
+async def search_stores_endpoint(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+    store: SupermarketStore | None = Query(default=None),
+    zipcode: str | None = Query(default=None),
+    city: str | None = Query(default=None),
+    latitude: float | None = Query(default=None),
+    longitude: float | None = Query(default=None),
+) -> list[SupermarketStoreLocationRead]:
+    return await SupermarketStoreLocator.search_stores(
+        store=store,
+        zipcode=zipcode,
+        city=city,
+        latitude=latitude,
+        longitude=longitude,
+    )
+
+
+@router.get("/stores/preferences", response_model=list[UserStorePreferenceRead])
+def get_store_preferences_endpoint(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> list[UserStorePreferenceRead]:
+    prefs = SupermarketStoreLocator.get_user_preferences(session, user.id)
+    return [
+        UserStorePreferenceRead(
+            store=p.store,
+            external_store_id=p.external_store_id,
+            store_label=p.store_label,
+            location_label=p.location_label,
+            pickup_type=p.pickup_type,
+            optimization_strategy=p.optimization_strategy,
+            channel=p.channel,
+            updated_at=p.updated_at,
+        )
+        for p in prefs
+    ]
+
+
+@router.put("/stores/preferences/{store}", response_model=UserStorePreferenceRead)
+def set_store_preference_endpoint(
+    store: SupermarketStore,
+    payload: UserStorePreferenceUpdate,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> UserStorePreferenceRead:
+    pref = SupermarketStoreLocator.set_user_preference(session, user.id, store, payload)
+    return UserStorePreferenceRead(
+        store=pref.store,
+        external_store_id=pref.external_store_id,
+        store_label=pref.store_label,
+        location_label=pref.location_label,
+        pickup_type=pref.pickup_type,
+        optimization_strategy=pref.optimization_strategy,
+        channel=pref.channel,
+        updated_at=pref.updated_at,
+    )
+
+
+@router.post("/cart/jobs", response_model=GroceryToCartJobRead, status_code=201)
+async def create_cart_job_endpoint(
+    payload: CreateCartJobPayload,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> GroceryToCartJobRead:
+    await CartJobService.enrich_cache_for_items(session, user.id, payload.store, payload.item_ids)
+    job = CartJobService.create_draft_job(session, user.id, payload)
+    return CartJobService.job_to_read_dto(session, job)
+
+
+@router.get("/cart/jobs/active", response_model=GroceryToCartJobRead | None)
+def get_active_cart_job_endpoint(
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> GroceryToCartJobRead | None:
+    job = CartJobService.get_active_job(session, user.id)
+    if not job:
+        return None
+    return CartJobService.job_to_read_dto(session, job)
+
+
+@router.get("/cart/jobs/{id}", response_model=GroceryToCartJobRead)
+def get_cart_job_endpoint(
+    id: int,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> GroceryToCartJobRead:
+    job = CartJobService.get_job(session, user.id, id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Cart job not found")
+    return CartJobService.job_to_read_dto(session, job)
+
+
+@router.patch("/cart/jobs/{id}/items/{item_id}", response_model=MatchedCartItemRead)
+def update_cart_job_item_endpoint(
+    id: int,
+    item_id: int,
+    payload: UpdateMatchedItemPayload,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> MatchedCartItemRead:
+    item = CartJobService.update_item(session, user.id, id, item_id, payload)
+    sub = CartJobService.get_substitute_for_item(session, item.id)
+    sub_dto = None
+    if sub:
+        from app.schemas.supermarket import SubstituteProposalRead
+        sub_dto = SubstituteProposalRead(
+            id=sub.id,
+            alternative_cache_id=sub.alternative_cache_id,
+            alternative_name=sub.alternative_name,
+            alternative_brand=sub.alternative_brand,
+            alternative_unit_price_cents=sub.alternative_unit_price_cents,
+            price_difference_cents=sub.price_difference_cents,
+            reason=sub.reason,
+            status=sub.status,
+        )
+    return MatchedCartItemRead(
+        id=item.id,
+        grocery_item_id=item.grocery_item_id,
+        cache_id=item.cache_id,
+        external_id=item.external_id,
+        name=item.name,
+        brand=item.brand,
+        packaging=item.packaging,
+        image_url=item.image_url,
+        product_url=item.product_url,
+        quantity=item.quantity,
+        unit_price_cents=item.unit_price_cents,
+        total_price_cents=item.total_price_cents,
+        match_type=item.match_type,
+        status=item.status,
+        custom_note=item.custom_note,
+        substitute_proposal=sub_dto,
+    )
+
+
+@router.post("/cart/jobs/{id}/refine", response_model=GroceryToCartJobRead)
+def refine_cart_job_endpoint(
+    id: int,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+    payload: RefineJobPayload | None = None,
+) -> GroceryToCartJobRead:
+    if payload is None:
+        payload = RefineJobPayload()
+    job = CartJobService.refine_job(session, user.id, id, payload)
+    return CartJobService.job_to_read_dto(session, job)
+
+
+@router.post("/cart/jobs/{id}/sync", response_model=SyncJobResponse)
+def sync_cart_job_endpoint(
+    id: int,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> SyncJobResponse:
+    return CartJobService.sync_remote_cart(session, user.id, id)
+
+
+@router.post("/cart/jobs/{id}/confirm-pickup", response_model=ConfirmPickupResponse)
+def confirm_pickup_cart_job_endpoint(
+    id: int,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> ConfirmPickupResponse:
+    return CartJobService.confirm_pickup(session, user.id, id)
+
+
+@router.delete("/cart/jobs/{id}", status_code=204)
+def delete_cart_job_endpoint(
+    id: int,
+    session: SessionDep,
+    user: CurrentOrOwnerUser,
+) -> None:
+    CartJobService.delete_job(session, user.id, id)
+
+
+

@@ -1,0 +1,32 @@
+{
+  "id": "cart-carrefour-12345",
+  "store": {
+    "id": "0248",
+    "name": "Carrefour Drive Labège"
+  },
+  "total": 14.50,
+  "currency": "EUR",
+  "items_count": 2,
+  "items": [
+    {
+      "id": "line-1",
+      "product_id": "32452",
+      "ean": "3270190209425",
+      "title": "Lait demi-écrémé 1L Carrefour",
+      "quantity": 2,
+      "price": 1.10,
+      "total_price": 2.20,
+      "image": "https://media.carrefour.fr/medias/lait.jpg"
+    },
+    {
+      "id": "line-2",
+      "product_id": "89201",
+      "ean": "3560070523412",
+      "title": "Beurre doux 250g Carrefour Extra",
+      "quantity": 3,
+      "price": 4.10,
+      "total_price": 12.30,
+      "image": "https://media.carrefour.fr/medias/beurre.jpg"
+    }
+  ]
+}

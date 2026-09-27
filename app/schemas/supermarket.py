@@ -208,3 +208,125 @@ class SupermarketCartItemUpdate(BaseModel):
 
 class SupermarketCartStatusUpdate(BaseModel):
     status: CartStatus
+
+
+class SupermarketStoreLocationRead(BaseModel):
+    store: SupermarketStore
+    external_store_id: str
+    name: str
+    address: str | None = None
+    zipcode: str | None = None
+    city: str | None = None
+    pickup_type: str = "quai"
+    distance_km: float | None = None
+    channel: str | None = None
+
+
+class UserStorePreferenceRead(BaseModel):
+    store: SupermarketStore
+    external_store_id: str
+    store_label: str
+    location_label: str | None = None
+    pickup_type: str = "quai"
+    optimization_strategy: str = "mdd"
+    channel: str | None = None
+    updated_at: datetime
+
+
+class UserStorePreferenceUpdate(BaseModel):
+    external_store_id: str = Field(min_length=1, max_length=256)
+    store_label: str = Field(min_length=1, max_length=256)
+    location_label: str | None = Field(default=None, max_length=512)
+    pickup_type: str = Field(default="quai", max_length=32)
+    optimization_strategy: str = Field(default="mdd", max_length=32)
+    channel: str | None = Field(default=None, max_length=64)
+    raw_context: dict = Field(default_factory=dict)
+
+
+class SubstituteProposalRead(BaseModel):
+    id: int
+    alternative_cache_id: int
+    alternative_name: str
+    alternative_brand: str | None = None
+    alternative_unit_price_cents: int = 0
+    price_difference_cents: int = 0
+    reason: str
+    status: str = "pending"
+
+
+class MatchedCartItemRead(BaseModel):
+    id: int
+    grocery_item_id: int | None = None
+    cache_id: int | None = None
+    external_id: str | None = None
+    name: str
+    brand: str | None = None
+    packaging: str | None = None
+    image_url: str | None = None
+    product_url: str | None = None
+    quantity: float = 1.0
+    unit_price_cents: int = 0
+    total_price_cents: int = 0
+    match_type: str = "mdd"
+    status: str = "staged"
+    custom_note: str | None = None
+    substitute_proposal: SubstituteProposalRead | None = None
+
+
+class GroceryToCartJobRead(BaseModel):
+    id: int
+    store: SupermarketStore
+    external_store_id: str
+    status: str
+    optimization_strategy: str
+    items_count: int
+    matched_count: int
+    substitutes_count: int
+    unmatched_count: int
+    estimated_total_cents: int
+    error_message: str | None = None
+    synced_at: datetime | None = None
+    completed_at: datetime | None = None
+    items: list[MatchedCartItemRead] = []
+
+
+class CreateCartJobPayload(BaseModel):
+    store: SupermarketStore
+    external_store_id: str | None = None
+    optimization_strategy: str = "mdd"
+    item_ids: list[int] = Field(default_factory=list)
+
+
+class CartAdjustment(BaseModel):
+    matched_item_id: int
+    action: str = Field(description="'accept_substitute', 'modify_with_note', or 'remove'")
+    substitute_id: int | None = None
+    custom_note: str | None = None
+
+
+class RefineJobPayload(BaseModel):
+    adjustments: list[CartAdjustment] = Field(default_factory=list)
+
+
+class SyncJobResponse(BaseModel):
+    id: int
+    status: str
+    synced_at: datetime
+    remote_cart_ref: str | None = None
+    items_synced_count: int
+    message: str
+
+
+class ConfirmPickupResponse(BaseModel):
+    id: int
+    status: str
+    completed_at: datetime
+    restocked_items_count: int
+    message: str
+
+
+class UpdateMatchedItemPayload(BaseModel):
+    status: str | None = None
+    custom_note: str | None = None
+    quantity: float | None = None
+

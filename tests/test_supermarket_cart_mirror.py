@@ -188,13 +188,13 @@ def _cache_id_of(test_engine, external_id: str) -> int:
         return row.id
 
 
-def _import_connection(client, headers) -> dict:
+def _import_connection(client, headers, store: str = "intermarche") -> dict:
     response = client.post(
         "/api/v1/supermarket/connections/import",
         headers=headers,
         json={
-            "store": "intermarche",
-            "label": "Intermarché session",
+            "store": store,
+            "label": f"{store.capitalize()} session",
             "cookies": SESSION_COOKIES,
             "activate": True,
         },
@@ -264,15 +264,15 @@ def _cart_id(test_engine, user_id) -> int:
         return cart.id
 
 
-def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: FakeCartClient) -> list:
+def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: FakeCartClient, store: str = "intermarche") -> list:
     """Monkeypatch the adapter seam; returns the list of build() invocations."""
     built: list = []
 
-    def build(cookies, customer_uuid, **kwargs):
-        built.append((cookies, customer_uuid))
+    def build(*args, **kwargs):
+        built.append((args, kwargs))
         return fake
 
-    monkeypatch.setattr("app.services.cart_mirror.build_intermarche_cart_client", build)
+    monkeypatch.setattr(f"app.services.cart_mirror.build_{store}_cart_client", build)
     return built
 
 
@@ -726,36 +726,94 @@ def test_mirror_is_scoped_per_tenant_and_never_touches_other_users(
     assert client.get("/api/v1/supermarket/carts", headers=intruder).json() == []
 
 
-# ── Non-regression: the 3 other stores stay local ──────────────────────────────
+# ── Multi-Store Mirror Integration (Carrefour, Leclerc, Auchan) ────────────────
 
 
-def test_local_cart_flow_unchanged_for_other_stores(client, auth_headers, test_engine):
+def test_multi_store_without_connection_rejects_with_400(client, auth_headers, test_engine):
     for store in ("carrefour", "leclerc", "auchan"):
-        with Session(test_engine) as session:
-            _seed_cache_row(session, store=store, external_id=f"sku-{store}")
+        res_get = client.get(f"/api/v1/supermarket/carts/{store}", headers=auth_headers)
+        assert res_get.status_code == 400
+        assert f"Aucune connexion {store.capitalize()} active" in res_get.json()["detail"]
 
+        with Session(test_engine) as session:
+            _seed_cache_row(
+                session,
+                store=SupermarketStore(store),
+                external_id=f"sku-no-conn-{store}",
+            )
+        cache_id = _cache_id_of(test_engine, f"sku-no-conn-{store}")
+
+        res_post = client.post(
+            f"/api/v1/supermarket/carts/{store}/items",
+            headers=auth_headers,
+            json={"cache_id": cache_id, "quantity": 1},
+        )
+        assert res_post.status_code == 400
+        assert f"Aucune connexion {store.capitalize()} active" in res_post.json()["detail"]
+
+
+def test_multi_store_mirror_full_lifecycle(client, auth_headers, test_engine, monkeypatch):
+    for store in ("carrefour", "leclerc", "auchan"):
+        _import_connection(client, auth_headers, store=store)
+        sku = f"sku-{store}"
+        with Session(test_engine) as session:
+            _seed_cache_row(
+                session,
+                store=SupermarketStore(store),
+                external_id=sku,
+                name=f"Produit {store.capitalize()}",
+            )
+
+        fake = FakeCartClient(state=_state_with(sku, quantity=2, name=f"Produit {store.capitalize()}"))
+        _patch_client(monkeypatch, fake, store=store)
+
+        # 1. Add item
+        cache_id = _cache_id_of(test_engine, sku)
         added = client.post(
             f"/api/v1/supermarket/carts/{store}/items",
             headers=auth_headers,
-            json={"cache_id": _cache_id_of(test_engine, f"sku-{store}")},
+            json={"cache_id": cache_id, "quantity": 2},
         )
         assert added.status_code == 200, added.text
         assert added.json()["store"] == store
-        assert added.json()["items"][0]["external_id"] == f"sku-{store}"
+        assert len(added.json()["items"]) == 1
         item_id = added.json()["items"][0]["id"]
+        assert added.json()["items"][0]["external_id"] == sku
+        assert added.json()["items"][0]["quantity"] == 2
 
+        # 2. Duplicate accumulation (T015): adding same item increments quantity
+        fake.state = _state_with(sku, quantity=5, name=f"Produit {store.capitalize()}")
+        acc = client.post(
+            f"/api/v1/supermarket/carts/{store}/items",
+            headers=auth_headers,
+            json={"cache_id": cache_id, "quantity": 3},
+        )
+        assert acc.status_code == 200
+        assert acc.json()["items"][0]["quantity"] == 5
+        # Verify update_item_quantity was called with accumulated quantity (2 + 3 = 5)
+        last_call = fake.calls[-1]
+        assert last_call[0] == "update_item_quantity"
+        assert last_call[1] == (sku,)
+        assert last_call[2] == {"quantity": 5}
+
+        # 3. GET /carts/{store}
         read = client.get(f"/api/v1/supermarket/carts/{store}", headers=auth_headers)
         assert read.status_code == 200
         assert read.json()["id"] == added.json()["id"]
+        item_id = read.json()["items"][0]["id"]
 
+        # 4. PATCH update quantity
+        fake.state = _state_with(sku, quantity=7, name=f"Produit {store.capitalize()}")
         patched = client.patch(
             f"/api/v1/supermarket/carts/{store}/items/{item_id}",
             headers=auth_headers,
-            json={"quantity": 4},
+            json={"quantity": 7},
         )
         assert patched.status_code == 200
-        assert patched.json()["items"][0]["quantity"] == 4
+        assert patched.json()["items"][0]["quantity"] == 7
+        item_id = patched.json()["items"][0]["id"]
 
+        # 5. PUT status stays local
         status = client.put(
             f"/api/v1/supermarket/carts/{store}/status",
             headers=auth_headers,
@@ -764,12 +822,68 @@ def test_local_cart_flow_unchanged_for_other_stores(client, auth_headers, test_e
         assert status.status_code == 200
         assert status.json()["status"] == "validated"
 
+        # 6. DELETE item
+        empty_state = parse_cart_response(
+            {
+                "id": CUSTOMER_UUID,
+                "synchronizeDateTime": "2026-08-15T03:02:28+02:00",
+                "amount": 0.0,
+                "itemsNumber": 0,
+                "carts": [{"items": []}],
+            },
+            store_id=STORE_ID,
+        )
+        fake.state = empty_state
         removed = client.delete(
-            f"/api/v1/supermarket/carts/{store}/items/{item_id}", headers=auth_headers
+            f"/api/v1/supermarket/carts/{store}/items/{item_id}",
+            headers=auth_headers,
         )
         assert removed.status_code == 200
         assert removed.json()["items"] == []
 
+        # 7. Clear cart
         cleared = client.delete(f"/api/v1/supermarket/carts/{store}", headers=auth_headers)
         assert cleared.status_code == 200
         assert cleared.json()["items"] == []
+
+
+def test_multi_store_error_recovery_preserves_local_cart(client, auth_headers, test_engine, monkeypatch):
+    """Verify that remote retailer errors reject cleanly without corrupting local cart (T023)."""
+    for store in ("carrefour", "leclerc", "auchan"):
+        _import_connection(client, auth_headers, store=store)
+        sku = f"sku-err-{store}"
+        with Session(test_engine) as session:
+            _seed_cache_row(
+                session,
+                store=SupermarketStore(store),
+                external_id=sku,
+                name=f"Produit {store.capitalize()}",
+            )
+
+        fake = FakeCartClient(state=_state_with(sku, quantity=1, name=f"Produit {store.capitalize()}"))
+        _patch_client(monkeypatch, fake, store=store)
+
+        cache_id = _cache_id_of(test_engine, sku)
+        added = client.post(
+            f"/api/v1/supermarket/carts/{store}/items",
+            headers=auth_headers,
+            json={"cache_id": cache_id, "quantity": 1},
+        )
+        assert added.status_code == 200
+        item_id = added.json()["items"][0]["id"]
+
+        # Simulate dead session (401) on quantity update
+        fake.error = IntermarcheCartAuthError("Session expired")
+        err_patch = client.patch(
+            f"/api/v1/supermarket/carts/{store}/items/{item_id}",
+            headers=auth_headers,
+            json={"quantity": 10},
+        )
+        assert err_patch.status_code == 401
+
+        # Check that local cart item still exists and was NOT corrupted
+        fake.error = None
+        fake.state = _state_with(sku, quantity=1, name=f"Produit {store.capitalize()}")
+        read = client.get(f"/api/v1/supermarket/carts/{store}", headers=auth_headers)
+        assert read.status_code == 200
+        assert read.json()["items"][0]["quantity"] == 1

@@ -221,7 +221,85 @@ def test_set_status_sets_and_clears_validated_at(test_engine):
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 
-def test_cart_endpoints_full_flow(client, auth_headers, test_engine):
+class FakeCarrefourClient:
+    def __init__(self):
+        self.items = []
+
+    async def get_or_read_cart(self):
+        from app.services.scrapers.carrefour_cart import CarrefourCartState
+        return CarrefourCartState(
+            cart_id="cart-carrefour-test",
+            amount=sum((it.price or 0.0) * it.quantity for it in self.items),
+            items_count=len(self.items),
+            items=tuple(self.items),
+        )
+
+    async def add_item(self, item_id, quantity=1):
+        from app.services.scrapers.carrefour_cart import CarrefourCartItem
+        item = CarrefourCartItem(
+            id=f"line-{item_id}",
+            item_id=item_id,
+            name="Lait entier",
+            quantity=quantity,
+            price=1.2,
+            price_text="1,20 €",
+            image="https://img.test/lait.png",
+            ean=None,
+        )
+        self.items.append(item)
+        return await self.get_or_read_cart()
+
+    async def update_item_quantity(self, item_id, quantity):
+        from app.services.scrapers.carrefour_cart import CarrefourCartItem
+        updated = []
+        for it in self.items:
+            if it.item_id == item_id or it.id == item_id:
+                updated.append(
+                    CarrefourCartItem(
+                        id=it.id,
+                        item_id=it.item_id,
+                        name=it.name,
+                        quantity=quantity,
+                        price=it.price,
+                        price_text=it.price_text,
+                        image=it.image,
+                        ean=it.ean,
+                    )
+                )
+            else:
+                updated.append(it)
+        self.items = updated
+        return await self.get_or_read_cart()
+
+    async def remove_item(self, item_id):
+        self.items = [it for it in self.items if it.item_id != item_id and it.id != item_id]
+        return await self.get_or_read_cart()
+
+    async def clear_cart(self):
+        self.items = []
+
+    async def aclose(self):
+        pass
+
+
+def _setup_carrefour_connection(client, headers, monkeypatch):
+    client.post(
+        "/api/v1/supermarket/connections/import",
+        headers=headers,
+        json={
+            "store": "carrefour",
+            "label": "Carrefour test session",
+            "cookies": [{"name": "cf_clearance", "value": "test"}],
+            "activate": True,
+        },
+    )
+    fake = FakeCarrefourClient()
+    monkeypatch.setattr("app.services.cart_mirror.build_carrefour_cart_client", lambda cookies, **kwargs: fake)
+    return fake
+
+
+def test_cart_endpoints_full_flow(client, auth_headers, test_engine, monkeypatch):
+    _setup_carrefour_connection(client, auth_headers, monkeypatch)
     cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR)
 
     # No carts yet.
@@ -318,9 +396,10 @@ def test_cart_add_rejects_expired_cache(client, auth_headers, test_engine):
     assert response.status_code == 400
 
 
-def test_cart_cross_user_is_404_without_leak(client, test_engine):
+def test_cart_cross_user_is_404_without_leak(client, test_engine, monkeypatch):
     owner = register_user(client, "cart-owner@adamelhirch.com")
     intruder = register_user(client, "cart-intruder@adamelhirch.com")
+    _setup_carrefour_connection(client, owner["headers"], monkeypatch)
     cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR)
 
     added = client.post(
@@ -347,9 +426,11 @@ def test_cart_cross_user_is_404_without_leak(client, test_engine):
     assert cart["items"][0]["quantity"] == 1
 
 
-def test_cart_scoped_per_user_same_store(client, test_engine):
+def test_cart_scoped_per_user_same_store(client, test_engine, monkeypatch):
     user_a = register_user(client, "cart-a@adamelhirch.com")
     user_b = register_user(client, "cart-b@adamelhirch.com")
+    _setup_carrefour_connection(client, user_a["headers"], monkeypatch)
+    _setup_carrefour_connection(client, user_b["headers"], monkeypatch)
     cache_id = _seed_cache(test_engine, store=SupermarketStore.CARREFOUR)
 
     client.post(

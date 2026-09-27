@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 
 from app.core.crypto import decrypt_text, encrypt_text
 from app.models import SupermarketConnection, SupermarketStore
+from app.services.scrapers.intermarche_cart import extract_customer_uuid_from_cookies
 
 
 def list_connections(
@@ -96,6 +97,9 @@ def upsert_connection(
     else:
         raise ValueError("cookies or credentials are required")
     payload = encrypt_text(json.dumps(plain_payload, ensure_ascii=False))
+
+    if store == SupermarketStore.INTERMARCHE and customer_uuid is None and cookies:
+        customer_uuid = extract_customer_uuid_from_cookies(cookies)
 
     existing: SupermarketConnection | None = None
     if connection_id is not None:

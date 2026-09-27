@@ -534,3 +534,156 @@ async def search_carrefour(
     finally:
         await session.aclose()
     return results
+
+
+async def search_carrefour_stores(
+    *,
+    zipcode: str | None = None,
+    city: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> list[dict[str, Any]]:
+    """Search for Carrefour Drive stores near a location."""
+    lat = latitude
+    lng = longitude
+    postal_code = zipcode
+    city_name = city
+
+    if lat is None or lng is None:
+        query = " ".join(part for part in [city, zipcode] if part).strip()
+        if not query:
+            return []
+        clean_q = re.sub(
+            r"\b(carrefour|drive|pieton|piéton|market|city|contact|express)\b",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip() or query
+        if clean_q.lower() == "compans":
+            clean_q = "Compans Caffarelli Toulouse"
+
+        # 1. Geocode via French Government API
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as geo_client:
+                resp = await geo_client.get(
+                    "https://api-adresse.data.gouv.fr/search/",
+                    params={"q": clean_q, "limit": 1},
+                )
+                if resp.status_code == 200:
+                    features = resp.json().get("features", [])
+                    if features:
+                        coords = features[0]["geometry"]["coordinates"]
+                        lat = float(coords[1])
+                        lng = float(coords[0])
+                        props = features[0]["properties"]
+                        postal_code = props.get("postcode") or postal_code
+                        city_name = props.get("city") or city_name
+        except Exception:
+            pass
+
+        # 2. Geocode fallback via Nominatim if gouv API didn't resolve coordinates
+        if lat is None or lng is None:
+            try:
+                async with httpx.AsyncClient(timeout=4.0) as nom_client:
+                    nom_resp = await nom_client.get(
+                        "https://nominatim.openstreetmap.org/search",
+                        params={"q": clean_q, "format": "json", "countrycodes": "fr", "limit": 1},
+                        headers={"User-Agent": "AdamHUB-Supermarket/1.0"},
+                    )
+                    if nom_resp.status_code == 200:
+                        nom_items = nom_resp.json()
+                        if nom_items:
+                            lat = float(nom_items[0]["lat"])
+                            lng = float(nom_items[0]["lon"])
+            except Exception:
+                pass
+
+    if lat is None or lng is None:
+        return []
+
+    url = f"{CARREFOUR_BASE_URL}/api/eligibility/drive"
+    params: dict[str, Any] = {
+        "latitude": str(lat),
+        "longitude": str(lng),
+        "page": "1",
+        "limit": "20",
+    }
+    if postal_code:
+        params["postalCode"] = str(postal_code)
+    if city_name:
+        params["city"] = str(city_name)
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            response = await client.get(url, params=params, headers=headers)
+            if response.status_code != 200:
+                return []
+            data = response.json()
+    except Exception:
+        return []
+
+    stores_raw = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+    results: list[dict[str, Any]] = []
+
+    for item in stores_raw:
+        external_id = str(item.get("ref") or item.get("id") or "")
+        if not external_id:
+            continue
+
+        raw_name = str(item.get("name") or "Carrefour Drive").strip()
+        if "carrefour" not in raw_name.lower():
+            name = f"Carrefour {raw_name}"
+        else:
+            name = raw_name
+
+        addr = item.get("address") if isinstance(item.get("address"), dict) else {}
+        address = addr.get("address1") or ""
+        item_zip = str(addr.get("postalCode") or postal_code or "")
+        item_city = addr.get("city") or city_name or ""
+
+        picking_types = item.get("pickingTypes") or []
+        pt_str = " ".join(
+            str(p.get("driveType", "")) + " " + str(p.get("name", ""))
+            for p in picking_types
+            if isinstance(p, dict)
+        ).lower()
+        banner = str(item.get("banner") or "").lower()
+        name_lower = name.lower()
+
+        if "pieton" in name_lower or "piéton" in name_lower or "pieton" in pt_str or "pieton" in banner:
+            pickup_type = "pieton"
+            channel = "pieton"
+        else:
+            pickup_type = "quai"
+            channel = "drive"
+
+        distance = None
+        if "distance" in item:
+            try:
+                distance = float(item["distance"])
+            except (ValueError, TypeError):
+                pass
+
+        results.append({
+            "store": "carrefour",
+            "external_store_id": external_id,
+            "name": name,
+            "address": address,
+            "zipcode": item_zip,
+            "city": item_city,
+            "pickup_type": pickup_type,
+            "distance_km": distance,
+            "channel": channel,
+        })
+
+    return results
+

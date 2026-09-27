@@ -116,8 +116,11 @@ def _build_curl_cookie_jar(cookies: list[dict[str, Any]]) -> CurlCffiCookies:
     return jar
 
 
-def _resolve_store_base_url(store_base_url: str | None) -> str:
-    """Return the store base URL, from the explicit arg or the env var.
+def _resolve_store_base_url(
+    store_base_url: str | None,
+    cookies: list[dict[str, Any]] | None = None,
+) -> str:
+    """Return the store base URL, from the explicit arg, the env var, or session cookies.
 
     The env var is read at call time (not module import time): the value lives
     in the local `.env` (docker-compose `env_file` exports it into the process
@@ -128,11 +131,22 @@ def _resolve_store_base_url(store_base_url: str | None) -> str:
         os.environ.get("ADAMHUB_LECLERC_BASE_URL") or LECLERC_DEFAULT_BASE_URL
     )
     base = (store_base_url or configured or "").rstrip("/")
+    if not base and cookies:
+        for c in cookies:
+            val = str(c.get("value") or "")
+            match = re.search(r"(?:@d=2%7c|@d=2\|)(\d+)", val)
+            if match:
+                plid = match.group(1)
+                if plid == "123111":
+                    base = "https://fd7-courses.leclercdrive.fr/magasin-123111-Montaudran"
+                else:
+                    base = f"https://fd7-courses.leclercdrive.fr/magasin-{plid}"
+                break
     if not base:
         raise LeclercAuthError(
             "Leclerc store base URL is not configured. Set ADAMHUB_LECLERC_BASE_URL "
             "to the store subdomain + magasin path (e.g. "
-            "https://fd7-courses.leclercdrive.fr/magasin-123111-123111-Montaudran) "
+            "https://fd7-courses.leclercdrive.fr/magasin-123111-Montaudran) "
             "obtained after selecting a Drive store."
         )
     return base
@@ -383,8 +397,6 @@ async def search_leclerc(
     exposes ``supports_promotions`` so callers can skip the flag.
     """
     del promotions_only
-    base = _resolve_store_base_url(store_base_url)
-
     if cookies is None:
         cookies = load_leclerc_cookies()
     if not cookies:
@@ -392,6 +404,7 @@ async def search_leclerc(
             "No Leclerc Drive cookies on disk. Provide `data/cookies_leclerc.json` "
             "exported from a logged-in browser session with a Drive store selected."
         )
+    base = _resolve_store_base_url(store_base_url, cookies=cookies)
 
     tri = LECLERC_SORT_IDS.get(sort_by) if sort_by else None
 
@@ -448,3 +461,95 @@ async def search_leclerc(
     finally:
         await session.aclose()
     return results
+
+
+async def search_leclerc_stores(
+    *,
+    zipcode: str | None = None,
+    city: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> list[dict[str, Any]]:
+    """Search for Leclerc pickup points (quai, spot, tape, pieton) near a location."""
+    params: dict[str, Any] = {}
+    if zipcode:
+        params["postalCode"] = zipcode
+    if city:
+        params["city"] = city
+    if latitude is not None and longitude is not None:
+        params["latitude"] = str(latitude)
+        params["longitude"] = str(longitude)
+
+    url = "https://api-recherchemagasins.leclercdrive.fr/API_RechercheMagasins/api/v1/MapPoint/nearby"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            response = await client.get(url, params=params, headers=headers)
+            if response.status_code != 200:
+                return []
+            data = response.json()
+    except Exception:
+        return []
+
+    stores_raw = data if isinstance(data, list) else data.get("lstPointsRetrait") or data.get("data") or []
+    results: list[dict[str, Any]] = []
+
+    for item in stores_raw:
+        external_id = str(
+            item.get("sNoPointLivraison")
+            or item.get("iIdPointLivraison")
+            or item.get("id")
+            or ""
+        )
+        if not external_id:
+            continue
+
+        name = item.get("sLibelle") or item.get("name") or "E.Leclerc Drive"
+        address = item.get("sAdresse") or item.get("address") or ""
+        item_zip = str(item.get("sCodePostal") or item.get("postalCode") or zipcode or "")
+        item_city = item.get("sVille") or item.get("city") or city or ""
+        raw_type = str(item.get("sTypePointLivraison") or item.get("type") or "").lower()
+        name_lower = name.lower()
+
+        if "tape" in name_lower or "borne" in name_lower or "tape" in raw_type:
+            pickup_type = "tape"
+        elif "spot" in name_lower or "spot" in raw_type:
+            pickup_type = "spot"
+        elif "pieton" in name_lower or "piéton" in name_lower or "pieton" in raw_type:
+            pickup_type = "pieton"
+        else:
+            pickup_type = "quai"
+
+        distance = None
+        if "distance" in item:
+            try:
+                distance = float(item["distance"])
+            except (ValueError, TypeError):
+                pass
+        elif "nrDistanceKm" in item:
+            try:
+                distance = float(item["nrDistanceKm"])
+            except (ValueError, TypeError):
+                pass
+
+        results.append({
+            "store": "leclerc",
+            "external_store_id": external_id,
+            "name": name,
+            "address": address,
+            "zipcode": item_zip,
+            "city": item_city,
+            "pickup_type": pickup_type,
+            "distance_km": distance,
+            "channel": "tape" if pickup_type == "tape" else "drive",
+        })
+
+    return results
+

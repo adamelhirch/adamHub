@@ -1,0 +1,29 @@
+{
+  "bSucces": true,
+  "sMessage": "",
+  "objPanier": {
+    "sNoPointLivraison": "123111",
+    "nrMontantTotalTTC": 18.20,
+    "iNombreArticles": 2,
+    "lstLignes": [
+      {
+        "iIdLigne": 101,
+        "iIdProduit": "32452",
+        "sLibelle": "Lait demi-écrémé UHT 1L",
+        "iQuantite": 2,
+        "nrPrixUnitaireTTC": 1.15,
+        "nrPrixTotalTTC": 2.30,
+        "sUrlVignette": "https://fd7-photos.leclercdrive.fr/image.ashx?id=2929937"
+      },
+      {
+        "iIdLigne": 102,
+        "iIdProduit": "129009",
+        "sLibelle": "Oeufs frais plein air x12",
+        "iQuantite": 4,
+        "nrPrixUnitaireTTC": 3.975,
+        "nrPrixTotalTTC": 15.90,
+        "sUrlVignette": "https://fd7-photos.leclercdrive.fr/image.ashx?id=129009"
+      }
+    ]
+  }
+}
