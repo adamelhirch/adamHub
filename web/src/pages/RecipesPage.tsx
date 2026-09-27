@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarClock, ChefHat, CheckCircle2, Clock, ExternalLink, Link2, Loader2, Plus, Search, Store, Trash2, Unlink, X } from 'lucide-react';
+import { CalendarClock, ChefHat, CheckCircle2, Clock, ExternalLink, Link2, Loader2, Plus, Search, ShoppingBasket, Store, Trash2, Unlink, X } from 'lucide-react';
 import api from '../lib/api';
 import ComposerSheet from '../components/ComposerSheet';
 import { useRecipeStore } from '../store/recipeStore';
@@ -245,6 +245,7 @@ export default function RecipesPage() {
   const [recipeDeletingId, setRecipeDeletingId] = useState<number | null>(null);
   const [mealPlanActionId, setMealPlanActionId] = useState<number | null>(null);
   const [recipeCookingId, setRecipeCookingId] = useState<number | null>(null);
+  const [recipeAddingGroceriesId, setRecipeAddingGroceriesId] = useState<number | null>(null);
   const [recipeFeedback, setRecipeFeedback] = useState<string | null>(null);
   const [recipeError, setRecipeError] = useState<string | null>(null);
   const [activeIngredient, setActiveIngredient] = useState<RecipeIngredient | null>(null);
@@ -515,6 +516,20 @@ export default function RecipesPage() {
       setRecipeError(error instanceof Error ? error.message : 'Impossible de consommer la recette.');
     } finally {
       setRecipeCookingId(null);
+    }
+  };
+
+  const handleAddRecipeToGroceries = async (recipe: Recipe) => {
+    setRecipeAddingGroceriesId(recipe.id);
+    setRecipeError(null);
+    setRecipeFeedback(null);
+    try {
+      const res = await api.post<{ added_count: number }>(`/recipes/${recipe.id}/add-to-groceries`, {});
+      setRecipeFeedback(`${recipe.name}: ${res.data.added_count} ingrédient(s) ajouté(s) aux courses.`);
+    } catch (error) {
+      setRecipeError(error instanceof Error ? error.message : 'Impossible d\'ajouter aux courses.');
+    } finally {
+      setRecipeAddingGroceriesId(null);
     }
   };
 
@@ -1062,6 +1077,17 @@ export default function RecipesPage() {
           </div>
         </ComposerSheet>
 
+        {(recipeFeedback || recipeError) && !showRecipeComposer && !showMealPlanComposer && (
+          <div className="max-w-4xl mx-auto mb-4">
+            <div className={`rounded-xl px-4 py-3 text-sm flex items-center justify-between ${recipeError ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+              <span>{recipeError || recipeFeedback}</span>
+              <button onClick={() => { setRecipeFeedback(null); setRecipeError(null); }} className="text-current opacity-70 hover:opacity-100">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="max-w-4xl mx-auto grid gap-4 lg:grid-cols-[1.4fr_1fr]">
           <div className="space-y-4">
             {loading ? (
@@ -1103,6 +1129,19 @@ export default function RecipesPage() {
                         )}
                       </div>
                       <div className="flex flex-wrap gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => void handleAddRecipeToGroceries(recipe)}
+                          disabled={recipeAddingGroceriesId === recipe.id}
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-apple-gray-200 text-sm font-semibold text-black hover:bg-apple-gray-50 disabled:opacity-50"
+                        >
+                          {recipeAddingGroceriesId === recipe.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <ShoppingBasket className="w-4 h-4" />
+                          )}
+                          Courses
+                        </button>
                         <button
                           type="button"
                           onClick={() => startCreateMealPlan(recipe)}

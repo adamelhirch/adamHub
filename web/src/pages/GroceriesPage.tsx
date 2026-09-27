@@ -1,10 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
+import axios from 'axios';
 import { format, differenceInDays, parseISO } from 'date-fns';
 import {
   ShoppingBasket, ShoppingCart, Package, Plus, Trash2, Check, Search, X, AlertTriangle,
-  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil, Lock, RefreshCw,
+  ChevronDown, ChevronRight, Minus, Loader2, Store, Pencil, Lock, RefreshCw, Barcode,
 } from 'lucide-react';
+import { api } from '../lib/api';
 import { useGroceryStore, STORE_LABELS, STORE_CAPABILITIES, ACCOUNT_REQUIRED_STORES } from '../store/groceryStore';
+import { SupermarketStoreSelector } from '../components/SupermarketStoreSelector';
+import { CartReviewPanel } from '../components/CartReviewPanel';
+import type { GroceryToCartJobRead } from '../types/supermarket';
 import type {
   CartStatus,
   GroceryItem,
@@ -483,8 +488,8 @@ function PantryRow({ item, onDelete, onConsume, onUpdate, onMap, onRestock }: {
                       if (e.key === 'Escape') setEditingQty(false);
                     }}
                     autoFocus
-                    className="w-16 rounded border border-apple-blue px-2 py-1 text-center text-sm focus:outline-none"
-                    step="1"
+                    className="w-20 rounded border border-apple-blue px-2 py-1 text-center text-sm focus:outline-none"
+                    step="any"
                   />
                 </div>
               ) : (
@@ -906,10 +911,11 @@ function AddToCartButton({ store, product, className }: {
 }
 
 // ─── CartItemRow ─────────────────────────────────────────────────────────────
-function CartItemRow({ item, onUpdateQuantity, onRemove }: {
+function CartItemRow({ item, onUpdateQuantity, onRemove, isUpdating = false }: {
   item: SupermarketCartItem;
   onUpdateQuantity: (itemId: number, quantity: number) => void;
   onRemove: (itemId: number) => void;
+  isUpdating?: boolean;
 }) {
   const [editingQty, setEditingQty] = useState(false);
   const [qtyValue, setQtyValue] = useState(String(item.quantity));
@@ -951,55 +957,66 @@ function CartItemRow({ item, onUpdateQuantity, onRemove }: {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1 rounded-full bg-apple-gray-100 px-2 py-1">
-        <button
-          onClick={() => onUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
-          disabled={item.quantity <= 1}
-          className="rounded p-1 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-apple-gray-400"
-          title="Retirer 1"
-        >
-          <Minus className="w-3.5 h-3.5" />
-        </button>
-        {editingQty ? (
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value={qtyValue}
-            onChange={(e) => setQtyValue(e.target.value)}
-            onBlur={commitQty}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitQty();
-              if (e.key === 'Escape') {
-                setQtyValue(String(item.quantity));
-                setEditingQty(false);
-              }
-            }}
-            autoFocus
-            className="w-12 rounded border border-apple-blue px-1.5 py-0.5 text-center text-sm focus:outline-none"
-          />
+        {isUpdating ? (
+          <div className="flex h-6 w-20 items-center justify-center gap-1 px-1 text-[11px] text-apple-gray-500">
+            <Loader2 className="h-3 w-3 animate-spin text-apple-blue" />
+            <span>Mise à jour…</span>
+          </div>
         ) : (
-          <button
-            onClick={() => { setEditingQty(true); setQtyValue(String(item.quantity)); }}
-            className="rounded px-1.5 py-0.5 text-sm font-bold text-black transition-colors hover:bg-white"
-            title="Modifier la quantité"
-          >
-            {item.quantity}
-          </button>
+          <>
+            <button
+              onClick={() => onUpdateQuantity(item.id, Math.max(1, item.quantity - 1))}
+              disabled={item.quantity <= 1 || isUpdating}
+              className="rounded p-1 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-apple-gray-400"
+              title="Retirer 1"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            {editingQty ? (
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={qtyValue}
+                onChange={(e) => setQtyValue(e.target.value)}
+                onBlur={commitQty}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitQty();
+                  if (e.key === 'Escape') {
+                    setQtyValue(String(item.quantity));
+                    setEditingQty(false);
+                  }
+                }}
+                autoFocus
+                className="w-12 rounded border border-apple-blue px-1.5 py-0.5 text-center text-sm focus:outline-none"
+              />
+            ) : (
+              <button
+                onClick={() => { setEditingQty(true); setQtyValue(String(item.quantity)); }}
+                className="rounded px-1.5 py-0.5 text-sm font-bold text-black transition-colors hover:bg-white"
+                title="Modifier la quantité"
+              >
+                {item.quantity}
+              </button>
+            )}
+            <button
+              onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
+              disabled={isUpdating}
+              className="rounded p-1 text-apple-gray-400 transition-all hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40"
+              title="Ajouter 1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </>
         )}
-        <button
-          onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
-          className="rounded p-1 text-apple-gray-400 transition-all hover:bg-emerald-50 hover:text-emerald-600"
-          title="Ajouter 1"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
       </div>
       <span className="w-20 shrink-0 text-right text-sm font-bold text-black">
         {formatCartPrice(subtotal)}
       </span>
       <button
         onClick={() => onRemove(item.id)}
-        className="shrink-0 rounded-lg p-1.5 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500"
+        disabled={isUpdating}
+        className="shrink-0 rounded-lg p-1.5 text-apple-gray-400 transition-all hover:bg-red-50 hover:text-red-500 disabled:opacity-40"
         title="Retirer du panier"
       >
         <Trash2 className="w-3.5 h-3.5" />
@@ -1040,6 +1057,29 @@ export default function GroceriesPage() {
 
   const [activeTab, setActiveTab] = useState<Tab>('Liste de courses');
   const [search, setSearch] = useState('');
+  const [showStoreSelectorModal, setShowStoreSelectorModal] = useState(false);
+  const [preparingDrive, setPreparingDrive] = useState(false);
+  const [activeCartJob, setActiveCartJob] = useState<GroceryToCartJobRead | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+
+  const handlePrepareDrive = async () => {
+    setPreparingDrive(true);
+    try {
+      const res = await api.post<GroceryToCartJobRead>('/supermarket/cart/jobs', {
+        store: selectedStore,
+        optimization_strategy: 'mdd',
+      });
+      setActiveCartJob(res.data);
+      setShowReviewModal(true);
+    } catch (err: unknown) {
+      const msg = axios.isAxiosError(err) && err.response?.data?.detail
+        ? err.response.data.detail
+        : 'Impossible de préparer le panier drive.';
+      alert(msg);
+    } finally {
+      setPreparingDrive(false);
+    }
+  };
 
   // Grocery form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1129,15 +1169,17 @@ export default function GroceriesPage() {
 
   // Keep the current store's cart loaded (tab badge + Panier tab).
   useEffect(() => {
-    void fetchCart(selectedStore);
-  }, [selectedStore, fetchCart]);
+    if (selectedStoreHasConnection) {
+      void fetchCart(selectedStore);
+    }
+  }, [selectedStore, selectedStoreHasConnection, fetchCart]);
 
   // Refresh the cart each time the Panier tab is opened.
   useEffect(() => {
-    if (activeTab === 'Panier') {
+    if (activeTab === 'Panier' && selectedStoreHasConnection) {
       void fetchCart(selectedStore);
     }
-  }, [activeTab, selectedStore, fetchCart]);
+  }, [activeTab, selectedStore, selectedStoreHasConnection, fetchCart]);
 
   useEffect(() => {
     const value = imQuery.trim();
@@ -1270,6 +1312,77 @@ export default function GroceriesPage() {
     await fetchPantryOverview();
   };
 
+  // Open Food Facts Barcode Lookup
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
+  const [barcodeError, setBarcodeError] = useState<string | null>(null);
+  const [barcodeDraft, setBarcodeDraft] = useState<{
+    barcode: string;
+    found: boolean;
+    raw_name: string | null;
+    brand: string | null;
+    suggested_name: string;
+    quantity: number;
+    unit: string;
+    category: string | null;
+    image_url: string | null;
+    nutriscore: string | null;
+    packaging: string | null;
+    location: string | null;
+    expires_at?: string;
+    note?: string;
+  } | null>(null);
+
+  const handleBarcodeLookup = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const bc = barcodeInput.trim();
+    if (!bc) return;
+    setBarcodeLoading(true);
+    setBarcodeError(null);
+    try {
+      const res = await api.get(`/pantry/barcode/${encodeURIComponent(bc)}`);
+      setBarcodeDraft({
+        ...res.data,
+        expires_at: '',
+        note: res.data.brand ? `Marque: ${res.data.brand}` : '',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur lors de la recherche du code-barres';
+      setBarcodeError(msg);
+    } finally {
+      setBarcodeLoading(false);
+    }
+  };
+
+  const handleConfirmBarcodeDraft = async () => {
+    if (!barcodeDraft) return;
+    setBarcodeLoading(true);
+    try {
+      await addPantryItem({
+        name: barcodeDraft.suggested_name || barcodeDraft.raw_name || 'Article sans nom',
+        quantity: Number(barcodeDraft.quantity) || 1,
+        unit: barcodeDraft.unit || 'item',
+        category: barcodeDraft.category || 'Épicerie',
+        location: barcodeDraft.location || 'Placard',
+        expires_at: barcodeDraft.expires_at || undefined,
+        note: barcodeDraft.note || undefined,
+        image_url: barcodeDraft.image_url || undefined,
+        external_id: barcodeDraft.barcode,
+        store_label: barcodeDraft.brand || undefined,
+      });
+      await fetchPantryOverview();
+      setShowBarcodeModal(false);
+      setBarcodeDraft(null);
+      setBarcodeInput('');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur lors de l’ajout au garde-manger';
+      setBarcodeError(msg);
+    } finally {
+      setBarcodeLoading(false);
+    }
+  };
+
   const handleAddLowStockToGroceries = async (item: PantryItem) => {
     const mapping = pantryMappings[item.id] ?? await fetchPantryMapping(item.id);
     const mappedQuantity = parsePackagingQuantity(mapping?.packaging_snapshot);
@@ -1359,6 +1472,26 @@ export default function GroceriesPage() {
 
   const handleSetCartStatus = (status: CartStatus) => {
     void setCartStatus(selectedStore, status);
+  };
+
+  const [updatingCartItemId, setUpdatingCartItemId] = useState<number | null>(null);
+
+  const handleUpdateCartQuantity = async (itemId: number, quantity: number) => {
+    setUpdatingCartItemId(itemId);
+    try {
+      await updateCartItemQuantity(selectedStore, itemId, quantity);
+    } finally {
+      setUpdatingCartItemId(null);
+    }
+  };
+
+  const handleRemoveCartItem = async (itemId: number) => {
+    setUpdatingCartItemId(itemId);
+    try {
+      await removeCartItem(selectedStore, itemId);
+    } finally {
+      setUpdatingCartItemId(null);
+    }
   };
 
   const toggleGroup = (group: string) => {
@@ -1456,6 +1589,26 @@ export default function GroceriesPage() {
                   {showAddForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                   {showAddForm ? 'Fermer' : 'Ajouter'}
                 </button>
+                <button
+                  onClick={() => setShowStoreSelectorModal(true)}
+                  className="flex items-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 transition-colors hover:bg-amber-100"
+                >
+                  <Store className="w-4 h-4 text-amber-600" />
+                  Sélectionner mon Drive
+                </button>
+                <button
+                  onClick={handlePrepareDrive}
+                  disabled={preparingDrive || items.length === 0}
+                  className="flex items-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {preparingDrive ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                  ) : (
+                    <ShoppingCart className="w-4 h-4 text-emerald-600" />
+                  )}
+                  {preparingDrive ? 'Préparation...' : 'Préparer mon Drive'}
+                </button>
+                <StoreSelector selected={selectedStore} onChange={setSelectedStore} connections={connections} />
                 {checkedItems.length > 0 && (
                 <button
                   onClick={clearChecked}
@@ -1796,6 +1949,18 @@ export default function GroceriesPage() {
               {/* Toolbar */}
               <div className="flex items-center gap-3">
                 <button
+                  type="button"
+                  onClick={() => {
+                    setShowBarcodeModal(true);
+                    setBarcodeError(null);
+                    setBarcodeDraft(null);
+                  }}
+                  className="flex items-center gap-2 rounded-2xl border border-apple-gray-200 bg-white/80 px-4 py-2.5 text-sm font-semibold text-apple-gray-700 transition-colors hover:bg-apple-gray-50"
+                >
+                  <Barcode className="w-4 h-4 text-emerald-600" />
+                  Code-barres
+                </button>
+                <button
                   onClick={handleTogglePantryForm}
                   className="flex items-center gap-2 rounded-2xl bg-apple-blue px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-600"
                 >
@@ -2038,6 +2203,237 @@ export default function GroceriesPage() {
                   ))}
                 </div>
               )}
+
+              {/* Barcode Open Food Facts Modal */}
+              {showBarcodeModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+                  <div className="w-full max-w-lg rounded-3xl border border-white/60 bg-white/95 p-6 shadow-2xl backdrop-blur-xl">
+                    <div className="flex items-center justify-between border-b border-apple-gray-100 pb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-apple-gray-900">Ajouter via Open Food Facts</h3>
+                        <p className="text-xs text-apple-gray-500">Scannez ou saisissez un code-barres (EAN)</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBarcodeModal(false);
+                          setBarcodeDraft(null);
+                          setBarcodeInput('');
+                        }}
+                        className="rounded-full p-2 text-apple-gray-400 transition-colors hover:bg-apple-gray-100 hover:text-apple-gray-600"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Barcode lookup form */}
+                    <form onSubmit={handleBarcodeLookup} className="mt-4 flex gap-2">
+                      <div className="relative flex-1">
+                        <Barcode className="absolute left-3 top-1/2 w-4 h-4 -translate-y-1/2 text-apple-gray-400" />
+                        <input
+                          type="text"
+                          value={barcodeInput}
+                          onChange={(e) => setBarcodeInput(e.target.value)}
+                          placeholder="Ex: 3560070557451"
+                          className="w-full rounded-xl border border-apple-gray-200 bg-apple-gray-50 py-2.5 pl-10 pr-3 text-sm text-apple-gray-900 outline-none transition-colors focus:border-apple-blue focus:bg-white"
+                          autoFocus
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={barcodeLoading || !barcodeInput.trim()}
+                        className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        {barcodeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                        Rechercher
+                      </button>
+                    </form>
+
+                    {barcodeError && (
+                      <div className="mt-3 rounded-xl bg-red-50 p-3 text-xs text-red-600">
+                        {barcodeError}
+                      </div>
+                    )}
+
+                    {/* Draft Review Card */}
+                    {barcodeDraft && (
+                      <div className="mt-5 space-y-4 border-t border-apple-gray-100 pt-4">
+                        <div className="flex items-center gap-3 rounded-2xl border border-apple-gray-200 bg-apple-gray-50/70 p-3">
+                          {barcodeDraft.image_url ? (
+                            <img
+                              src={barcodeDraft.image_url}
+                              alt={barcodeDraft.suggested_name}
+                              className="h-14 w-14 rounded-xl object-contain bg-white"
+                            />
+                          ) : (
+                            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-apple-gray-200 text-apple-gray-400">
+                              <Barcode className="w-6 h-6" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-md bg-apple-gray-200 px-2 py-0.5 text-[11px] font-mono font-medium text-apple-gray-700">
+                                {barcodeDraft.barcode}
+                              </span>
+                              {barcodeDraft.nutriscore && (
+                                <span className="rounded-md bg-emerald-700 px-2 py-0.5 text-[10px] font-bold text-white uppercase">
+                                  Nutri-Score {barcodeDraft.nutriscore}
+                                </span>
+                              )}
+                            </div>
+                            <p className="mt-1 truncate text-xs text-apple-gray-500">
+                              {barcodeDraft.raw_name ? `Origine: ${barcodeDraft.raw_name}` : ''}
+                              {barcodeDraft.brand ? ` · Marque: ${barcodeDraft.brand}` : ''}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Editable inputs */}
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                              Nom culinaire nettoyé
+                            </label>
+                            <input
+                              type="text"
+                              value={barcodeDraft.suggested_name}
+                              onChange={(e) =>
+                                setBarcodeDraft({ ...barcodeDraft, suggested_name: e.target.value })
+                              }
+                              className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                                Quantité nette
+                              </label>
+                              <input
+                                type="number"
+                                step="any"
+                                min="0"
+                                value={barcodeDraft.quantity}
+                                onChange={(e) =>
+                                  setBarcodeDraft({ ...barcodeDraft, quantity: parseFloat(e.target.value) || 0 })
+                                }
+                                className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                                Unité
+                              </label>
+                              <input
+                                type="text"
+                                value={barcodeDraft.unit}
+                                onChange={(e) =>
+                                  setBarcodeDraft({ ...barcodeDraft, unit: e.target.value })
+                                }
+                                className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                                Catégorie
+                              </label>
+                              <select
+                                value={barcodeDraft.category || 'Épicerie'}
+                                onChange={(e) =>
+                                  setBarcodeDraft({ ...barcodeDraft, category: e.target.value })
+                                }
+                                className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                              >
+                                {['Épicerie', 'Poisson', 'Viande', 'Légumes', 'Fruits', 'Produits_laitiers', 'Boissons', 'Surgelés'].map(
+                                  (c) => (
+                                    <option key={c} value={c}>
+                                      {formatCategoryLabel(c)}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                                Emplacement
+                              </label>
+                              <select
+                                value={barcodeDraft.location || 'Placard'}
+                                onChange={(e) =>
+                                  setBarcodeDraft({ ...barcodeDraft, location: e.target.value })
+                                }
+                                className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                              >
+                                {['Placard', 'Réfrigérateur', 'Congélateur'].map((l) => (
+                                  <option key={l} value={l}>
+                                    {l}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                                {"Date d'expiration"}
+                              </label>
+                              <input
+                                type="date"
+                                value={barcodeDraft.expires_at || ''}
+                                onChange={(e) =>
+                                  setBarcodeDraft({ ...barcodeDraft, expires_at: e.target.value })
+                                }
+                                className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-apple-gray-500">
+                                Note / Détails
+                              </label>
+                              <input
+                                type="text"
+                                value={barcodeDraft.note || ''}
+                                onChange={(e) =>
+                                  setBarcodeDraft({ ...barcodeDraft, note: e.target.value })
+                                }
+                                placeholder="Ex: 2 pavés..."
+                                className="mt-1 w-full rounded-xl border border-apple-gray-200 bg-white px-3 py-2 text-sm text-apple-gray-900 outline-none focus:border-apple-blue"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setBarcodeDraft(null)}
+                            className="rounded-xl border border-apple-gray-200 px-4 py-2.5 text-sm font-semibold text-apple-gray-600 transition-colors hover:bg-apple-gray-50"
+                          >
+                            Réinitialiser
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleConfirmBarcodeDraft}
+                            disabled={barcodeLoading}
+                            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                          >
+                            {barcodeLoading ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4" />
+                            )}
+                            Ajouter au stock
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -2053,75 +2449,128 @@ export default function GroceriesPage() {
                   </div>
                   <StoreSelector selected={selectedStore} onChange={setSelectedStore} connections={connections} />
                 </div>
-                {selectedStore === 'intermarche' ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {!cartError && (
-                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                        cartLoading && cartItems.length === 0
-                          ? 'border-amber-200 bg-amber-50 text-amber-700'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      }`}>
-                        {cartLoading && cartItems.length === 0 ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-3 h-3" />
-                        )}
-                        {cartLoading && cartItems.length === 0
-                          ? 'Synchronisation avec le site…'
-                          : 'Synchro avec le site Intermarché'}
-                      </span>
-                    )}
+
+                {selectedStoreHasConnection && (
+                  <div className="mt-3 border-t border-apple-gray-100 pt-3">
+                    <ConnectionStrip
+                      store={selectedStore}
+                      connections={connections}
+                      onActivate={activateConnection}
+                      onDelete={deleteConnection}
+                    />
+                  </div>
+                )}
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {!cartError && selectedStoreHasConnection && (
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                      cartLoading && cartItems.length === 0
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {cartLoading && cartItems.length === 0 ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3 h-3" />
+                      )}
+                      {cartLoading && cartItems.length === 0
+                        ? 'Synchronisation avec le site…'
+                        : `Synchro avec le site ${currentStoreLabel}`}
+                    </span>
+                  )}
+                  {currentCart && (
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                      currentCart.status === 'validated'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-amber-200 bg-amber-50 text-amber-700'
+                    }`}>
+                      {currentCart.status === 'validated' ? (
+                        <>
+                          <Check className="w-3 h-3" />
+                          Validé
+                        </>
+                      ) : (
+                        'Brouillon'
+                      )}
+                    </span>
+                  )}
+                  {currentCart?.validated_at && (
+                    <span className="text-[11px] text-apple-gray-500">
+                      Validé le {format(parseISO(currentCart.validated_at), 'dd/MM/yyyy • HH:mm')}
+                    </span>
+                  )}
+                  {selectedStoreHasConnection && (
                     <button
                       type="button"
                       onClick={() => void fetchCart(selectedStore)}
                       disabled={cartLoading}
                       className="inline-flex items-center gap-1 rounded-full border border-apple-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-apple-gray-600 transition-colors hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      title="Recharger le panier depuis le site Intermarché"
+                      title={`Recharger le panier depuis le site ${currentStoreLabel}`}
+                    >
+                      <RefreshCw className={`w-3 h-3 ${cartLoading ? 'animate-spin' : ''}`} />
+                      Resynchroniser
+                    </button>
+                  )}
+                </div>
+
+                {cartError && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-red-500" />
+                    <p className="min-w-0 flex-1 text-xs text-red-600">{cartError}</p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchCart(selectedStore)}
+                      disabled={cartLoading}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <RefreshCw className="w-3 h-3" />
                       Resynchroniser
                     </button>
                   </div>
-                ) : currentCart && (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {currentCart.status === 'validated' ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                        <Check className="w-3 h-3" />
-                        Validé
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700">
-                        Brouillon
-                      </span>
-                    )}
-                    {currentCart.validated_at && (
-                      <span className="text-[11px] text-apple-gray-500">
-                        Validé le {format(parseISO(currentCart.validated_at), 'dd/MM/yyyy • HH:mm')}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {cartError && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-red-500" />
-                    <p className="min-w-0 flex-1 text-xs text-red-600">{cartError}</p>
-                    {selectedStore === 'intermarche' && (
-                      <button
-                        type="button"
-                        onClick={() => void fetchCart(selectedStore)}
-                        disabled={cartLoading}
-                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-red-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        Resynchroniser
-                      </button>
-                    )}
-                  </div>
                 )}
               </div>
 
-              {/* Cart items */}
-              {cartLoading && cartItems.length === 0 ? (
+              {/* Cart items or guidance */}
+              {!selectedStoreHasConnection ? (
+                <div className="rounded-[28px] border border-amber-200/80 bg-amber-50/60 p-8 text-center shadow-[0_18px_48px_rgba(15,23,42,0.06)] backdrop-blur-xl sm:p-10">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 mb-4">
+                    <Store className="h-7 w-7" />
+                  </div>
+                  <h3 className="text-base font-semibold text-amber-900 sm:text-lg">
+                    Connexion {currentStoreLabel} requise
+                  </h3>
+                  <p className="mx-auto mt-2 max-w-md text-sm text-amber-800/90 leading-relaxed">
+                    Pour synchroniser et manipuler le panier en direct avec {currentStoreLabel}, connectez votre compte via l'extension navigateur <strong>AdamHUB Connect</strong>.
+                  </p>
+                  <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row text-xs text-amber-900 font-medium">
+                    <span className="flex items-center gap-1.5 rounded-full bg-white/90 border border-amber-200 px-3 py-1.5 shadow-sm">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-200 text-[11px] font-bold">1</span>
+                      Connectez-vous sur {currentStoreLabel}
+                    </span>
+                    <span className="flex items-center gap-1.5 rounded-full bg-white/90 border border-amber-200 px-3 py-1.5 shadow-sm">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-200 text-[11px] font-bold">2</span>
+                      Ouvrez AdamHUB Connect
+                    </span>
+                    <span className="flex items-center gap-1.5 rounded-full bg-white/90 border border-amber-200 px-3 py-1.5 shadow-sm">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-200 text-[11px] font-bold">3</span>
+                      Cliquez sur « Connecter »
+                    </span>
+                  </div>
+                  <div className="mt-6">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void fetchConnections();
+                        void fetchCart(selectedStore);
+                      }}
+                      className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Vérifier la connexion
+                    </button>
+                  </div>
+                </div>
+              ) : cartLoading && cartItems.length === 0 ? (
                 <div className="flex items-center justify-center py-16">
                   <div className="w-8 h-8 border-2 border-apple-blue/30 border-t-apple-blue rounded-full animate-spin" />
                 </div>
@@ -2147,8 +2596,9 @@ export default function GroceriesPage() {
                         <CartItemRow
                           key={item.id}
                           item={item}
-                          onUpdateQuantity={(itemId, quantity) => void updateCartItemQuantity(selectedStore, itemId, quantity)}
-                          onRemove={(itemId) => void removeCartItem(selectedStore, itemId)}
+                          isUpdating={updatingCartItemId === item.id}
+                          onUpdateQuantity={(itemId, quantity) => void handleUpdateCartQuantity(itemId, quantity)}
+                          onRemove={(itemId) => void handleRemoveCartItem(itemId)}
                         />
                       ))}
                     </div>
@@ -2201,6 +2651,23 @@ export default function GroceriesPage() {
 
         </div>
       </div>
+
+      <SupermarketStoreSelector
+        isOpen={showStoreSelectorModal}
+        onClose={() => setShowStoreSelectorModal(false)}
+        initialStore={selectedStore}
+      />
+
+      <CartReviewPanel
+        isOpen={showReviewModal && activeCartJob !== null}
+        onClose={() => setShowReviewModal(false)}
+        job={activeCartJob}
+        onUpdateJob={(updatedJob) => setActiveCartJob(updatedJob)}
+        onPickupConfirmed={() => {
+          fetchItems();
+          fetchPantry();
+        }}
+      />
     </div>
   );
 }
