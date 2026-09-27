@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "E2EAccuracyReport",
+  "type": "object",
+  "required": [
+    "runId",
+    "timestamp",
+    "durationMs",
+    "mode",
+    "totalTests",
+    "passed",
+    "failed",
+    "accuracyRate",
+    "benchmarks",
+    "anomalies"
+  ],
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "durationMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["headless", "headed", "ui"]
+    },
+    "totalTests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "passed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "accuracyRate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "benchmarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["benchmarkId", "recipeName", "store", "strategy", "accuracyRate", "itemsEvaluated"],
+        "properties": {
+          "benchmarkId": { "type": "string" },
+          "recipeName": { "type": "string" },
+          "store": { "type": "string" },
+          "strategy": { "type": "string" },
+          "accuracyRate": { "type": "number" },
+          "itemsEvaluated": { "type": "integer" }
+        }
+      }
+    },
+    "anomalies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["anomalyId", "severity", "category", "title", "details"],
+        "properties": {
+          "anomalyId": { "type": "string" },
+          "severity": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
+          "category": { "type": "string" },
+          "title": { "type": "string" },
+          "details": { "type": "string" },
+          "reproductionJourney": { "type": "string" },
+          "screenshotPath": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

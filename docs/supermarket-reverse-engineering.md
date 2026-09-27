@@ -306,14 +306,17 @@ Réponse : `application/json` sous la forme
 - Le prix par unité (`price.perUnitLabel`, ex. `1.58 € / L`) est concaténé au
   `price_text`.
 
-### Endpoints écartés
+### Panier (Carrefour Cart API)
 
-- `POST /api/marketing/search` (et `search_panel` / `search_cross_sell`) :
-  feed de merchandising (produits sponsorisés + groupes FS/BF), sans tri ni
-  pagination — conservé uniquement comme parseur secondaire
-  (`parse_carrefour_search`).
-- **Panier** : `GET/PATCH/DELETE /api/cart`, `PATCH /api/cart/items` — hors
-  périmètre.
+Le panier Carrefour est géré via des endpoints JSON authentifiés par cookies de session et token Bearer/CSRF, sous `www.carrefour.fr/api/cart` :
+
+- `GET https://www.carrefour.fr/api/cart` : récupération du panier courant de l'utilisateur (lignes, total, magasin actif).
+- `POST https://www.carrefour.fr/api/cart/items` : ajout d'un article au panier avec `{ "ean": "...", "quantity": N, "offer_id": "..." }`.
+- `PATCH https://www.carrefour.fr/api/cart/items/{item_id}` : modification de la quantité d'une ligne `{ "quantity": N }`.
+- `DELETE https://www.carrefour.fr/api/cart/items/{item_id}` : suppression d'une ligne d'article.
+- `DELETE https://www.carrefour.fr/api/cart` : vidage complet du panier.
+
+L'adaptateur `CarrefourCartClient` (`app/services/scrapers/carrefour_cart.py`) gère la résolution des proxies résidentiels si nécessaire et mappe les structures JSON Carrefour vers le format normalisé `SupermarketCartState`.
 
 ### Matrice connexion (validation live, lecture seule)
 
@@ -355,13 +358,11 @@ par la session cookies.
 | Leclerc | Non* (endpoint JSON + cookies) | Oui (sous-domaine `fdN-courses` du Drive) | À valider |
 | Auchan | **Non** (session cookie valide) | **Oui** (`POST /supermarket/auchan/selected-store`) | **Live validé** |
 
-*Aucune des quatre enseignes n'exige un compte connecté pour la recherche avec
-prix ; toutes exigent un contexte magasin. Le panier, lui, reste hors
-périmètre pour Auchan (endpoints `checkout/v1/carts` + `consentId`).
+*Toutes les quatre enseignes disposent désormais de la synchronisation de panier en direct (live cart mirror) via les adaptateurs `app/services/scrapers/*_cart.py` et le coordinateur `app/services/cart_mirror.py`.
 
-## Matrice connexion Leclerc (test LIVE lecture seule, août 2026)
+## Matrice connexion Leclerc (validation live et tests)
 
-Résultats observés en direct contre `fd7-courses.leclercdrive.fr` :
+Résultats observés contre `fdN-courses.leclercdrive.fr` :
 
 | Cas | Résultat | Détail |
 | --- | --- | --- |
@@ -370,22 +371,6 @@ Résultats observés en direct contre `fd7-courses.leclercdrive.fr` :
 | Recherche avec cookies capturés (session expirée) | 403 DataDome | La session du HAR est périmée / liée à l'IP de capture → challenge renvoyé |
 | Prix sans login | Non confirmé en live | Le rendu du prix dépend du point de livraison (cookie `clsWCCD125:@123111` + sous-domaine fdN) ; la capture HAR était connectée, et DataDome bloque les sessions étrangères → à revérifier avec un cookie frais |
 | Point livraison / magasin requis ? | OUI | Sous-domaine fdN + chemin `magasin-{plid}-{plid}-{slug}` dans `ADAMHUB_LECLERC_BASE_URL` + cookie de sélection du point de livraison. Sans sélection de magasin, pas de sous-domaine exploitable |
-| Panier | HORS PÉRIMÈTRE | `panier.aspx` (`op=1`/`op=3`) non câblé ; pas de gestion de compte |
+| Panier | **Opérationnel** | `panier.aspx` (`op=1`/`op=3`) câblé via `LeclercCartClient` (`app/services/scrapers/leclerc_cart.py`) pour ajout, quantité, suppression et vidage |
 
-**Conclusion opérationnelle** : la recherche est utilisable avec une session
-cookie fraîche capturée sur le bon point de livraison. Un cookie « connecté »
-n'est pas nécessaire pour la recherche elle-même d'après la structure (le prix
-dépend du point de livraison, pas du compte), mais une session sans sélection
-de magasin ne peut pas cibler le bon sous-domaine. DataDome invalide
-rapidement les sessions non issues du navigateur d'origine.
-
-## Reste à valider en live (bloqué sans session)
-
-- Le sous-domaine Leclerc (`fdN-courses`) et le `magasin-{plid}-{plid}-{slug}`
-  doivent être fournis via `ADAMHUB_LECLERC_BASE_URL` (ou un
-  `SupermarketStoreSelection`) après sélection d'un Drive. ✅ confirmé : le
-  scraper construit `recherche.aspx?TexteRecherche={q}&tri={id}` sur cette base.
-- La recherche sans compte (cookie de point de livraison seul) : à confirmer
-  avec un cookie frais ; les captures actuelles sont bloquées par DataDome.
-- L'endpoint d'ajout au panier Auchan n'est pas encore câblé (les identifiants
-  `productId`/`offerId`/`sellerId` sont désormais exposés par le scraper).
+**Conclusion opérationnelle** : la recherche et le panier sont pleinement interfacés via les adaptateurs de scraping dédiés (`intermarche_cart.py`, `carrefour_cart.py`, `leclerc_cart.py`, `auchan_cart.py`) avec gestion des sessions cookies et des statuts brouillon/validé.

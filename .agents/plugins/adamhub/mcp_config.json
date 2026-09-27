@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "adamhub": {
+      "command": "/Users/adamelhirch/Documents/Projets perso/AdamHUB/.venv/bin/python",
+      "args": [
+        "-m",
+        "app.mcp.server"
+      ],
+      "env": {
+        "ADAMHUB_ENV": "development",
+        "ADAMHUB_DB_URL": "postgresql+psycopg://adamhub:adamhub@localhost:5432/adamhub",
+        "ADAMHUB_OWNER_EMAIL": "adamelhirch05@gmail.com",
+        "PYTHONPATH": "/Users/adamelhirch/Documents/Projets perso/AdamHUB"
+      }
+    }
+  }
+}

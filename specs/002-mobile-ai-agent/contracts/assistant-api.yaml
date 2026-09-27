@@ -1,0 +1,223 @@
+openapi: 3.1.0
+info:
+  title: AdamHUB Assistant & Memory API
+  version: 1.0.0
+  description: Endpoints for mobile AI conversational assistant, dynamic context, and user memory management.
+
+paths:
+  /api/v1/assistant/chat:
+    post:
+      summary: Send message to assistant and stream response (SSE)
+      description: Streams tokens via Server-Sent Events (SSE). Emits token deltas, tool execution events, and finished state. Triggers background memory extraction upon completion.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantChatRequest'
+      responses:
+        '200':
+          description: Event stream of assistant response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream with events 'delta', 'tool_call', 'tool_result', 'done'.
+        '401':
+          description: Unauthorized
+        '422':
+          description: Validation error
+
+  /api/v1/assistant/profile:
+    get:
+      summary: Get authenticated user's profile and preferences
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+    put:
+      summary: Update authenticated user's profile and preferences
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfileUpdate'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+
+  /api/v1/assistant/memories:
+    get:
+      summary: List authenticated user's active memories
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserMemoryResponse'
+    post:
+      summary: Manually create a user memory fact
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserMemoryCreate'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserMemoryResponse'
+
+  /api/v1/assistant/memories/{id}:
+    delete:
+      summary: Archive / delete a user memory fact
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Memory successfully archived / removed
+        '404':
+          description: Memory not found
+
+  /api/v1/assistant/session/reset:
+    post:
+      summary: Reset ephemeral session history
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Session history cleared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    AssistantChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: "Qu'est-ce que je peux cuisiner pour le déjeuner avec ce qu'il me reste ?"
+        session_id:
+          type: string
+          nullable: true
+          example: "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"
+
+    UserProfileResponse:
+      type: object
+      required:
+        - id
+        - user_id
+        - dietary_preferences
+        - fitness_goals
+        - lifestyle_notes
+        - ai_tone
+        - onboarding_completed
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        dietary_preferences:
+          type: array
+          items:
+            type: string
+        fitness_goals:
+          type: string
+        lifestyle_notes:
+          type: string
+        ai_tone:
+          type: string
+        onboarding_completed:
+          type: boolean
+
+    UserProfileUpdate:
+      type: object
+      properties:
+        dietary_preferences:
+          type: array
+          items:
+            type: string
+        fitness_goals:
+          type: string
+        lifestyle_notes:
+          type: string
+        ai_tone:
+          type: string
+        onboarding_completed:
+          type: boolean
+
+    UserMemoryResponse:
+      type: object
+      required:
+        - id
+        - category
+        - fact
+        - is_active
+        - created_at
+      properties:
+        id:
+          type: integer
+        category:
+          type: string
+        fact:
+          type: string
+        confidence:
+          type: number
+        source:
+          type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    UserMemoryCreate:
+      type: object
+      required:
+        - category
+        - fact
+      properties:
+        category:
+          type: string
+        fact:
+          type: string
