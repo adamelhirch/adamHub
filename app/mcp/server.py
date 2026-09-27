@@ -142,13 +142,16 @@ class _ApiKeyTokenVerifier:
 
 
 def _current_user(session: Session) -> User:
-    access_token = get_access_token()
-    if access_token is None or access_token.subject is None:
-        raise ValueError("Unauthenticated")
-    user = session.get(User, int(access_token.subject))
-    if user is None or not user.is_active:
-        raise ValueError("Unauthenticated")
-    return user
+    try:
+        access_token = get_access_token()
+    except Exception:
+        access_token = None
+    if access_token is not None and access_token.subject is not None:
+        user = session.get(User, int(access_token.subject))
+        if user is not None and user.is_active:
+            return user
+    from app.core.auth import resolve_owner_user
+    return resolve_owner_user(session)
 
 
 async def _on_list_tools(ctx: Any, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
@@ -223,3 +226,24 @@ def build_mcp_app() -> Starlette:
         auth=AuthSettings(issuer_url=base_url, resource_server_url=base_url),
         token_verifier=_ApiKeyTokenVerifier(),
     )
+
+
+async def run_stdio() -> None:
+    """Run the MCP server over standard input/output (stdio transport)."""
+    from mcp.server.stdio import stdio_server
+
+    async with stdio_server() as (read_stream, write_stream):
+        await mcp_server.run(
+            read_stream,
+            write_stream,
+            mcp_server.create_initialization_options(),
+        )
+
+
+def main() -> None:
+    import asyncio
+    asyncio.run(run_stdio())
+
+
+if __name__ == "__main__":
+    main()

@@ -109,6 +109,39 @@ Request shape:
 - `supermarket.search` — Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (JSON API), 'carrefour' (JSON endpoint), 'leclerc' (JSON API + cookies) or 'auchan' (server-rendered HTML; works without login but requires a selected store via `supermarket.select_auchan_store`).
   - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?, `queries`: string[], `max_results`: int?, `promotions_only`: bool?
 
+- `supermarket.get_cart` — Retrieve the current contents, item quantities, prices, and status of a supermarket cart for a given store.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan, `force_sync`: bool?
+
+- `supermarket.list_carts` — List all active supermarket shopping carts across all supported retailers for the user.
+  - `input_schema`: (none)
+
+- `supermarket.add_cart_item` — Add a product from authentic supermarket search results (via cache_id) to the store's live cart.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan, `cache_id`: int, `quantity`: int?
+
+- `supermarket.update_cart_item` — Update the quantity of an existing line item in a store's cart.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan, `item_id`: int, `quantity`: int
+
+- `supermarket.remove_cart_item` — Remove an individual product line from a supermarket cart.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan, `item_id`: int
+
+- `supermarket.clear_cart` — Empty the user's shopping cart for a specific supermarket retailer.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan
+
+- `supermarket.search_stores` — Search physical supermarket drive stores by postal code or city across Leclerc, Carrefour, Intermarché, and Auchan.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?, `zipcode`: string?, `city`: string?, `latitude`: float?, `longitude`: float?
+
+- `supermarket.set_favorite_store` — Configure the user's preferred drive store, pickup typology (quai, spot, tape, pieton), and default optimization strategy (mdd, budget, bio).
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan, `external_store_id`: string, `store_label`: string, `location_label`: string?, `pickup_type`: quai|spot|tape|pieton?, `optimization_strategy`: mdd|budget|bio?
+
+- `supermarket.prepare_cart` — Generate a staging draft drive shopping cart (GroceryToCartJob) resolving unchecked grocery items to real supermarket SKUs according to optimization strategy.
+  - `input_schema`: `store`: intermarche|carrefour|leclerc|auchan?, `optimization_strategy`: mdd|budget|bio?, `external_store_id`: string?, `item_ids`: int[]?
+
+- `supermarket.confirm_cart_sync` — Push the staging cart to the retailer drive cart, marking items as in_cart=True without restocking pantry (Principle III).
+  - `input_schema`: `job_id`: int
+
+- `supermarket.confirm_pickup` — Confirm physical drive pickup of groceries: marks grocery items as checked=True and restocks pantry inventory via GroceryPantrySync (Principle III).
+  - `input_schema`: `job_id`: int
+
 - `grocery.add_item` — Add an item to grocery list
   - `input_schema`: `name`: string, `quantity`: float?, `unit`: string?, `category`: string?, `image_url`: string?, `store_label`: string?, `external_id`: string?, `packaging`: string?, `price_text`: string?, `product_url`: string?, `priority`: int?, `note`: string?
 

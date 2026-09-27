@@ -15,11 +15,13 @@ Every time-based AdamHUB entity (tasks, habits, events, subscriptions, meal plan
 - `calendar.sync`
 - `calendar.due_reminders`
 - `calendar.ack_reminder`
+- `calendar.check_availability`
 <!-- END GENERATED: action-list -->
 
 ## Decision rules
 
 - Generic time block only -> `calendar.add_item`. Real task -> `task.create`, event -> `event.create`, habit -> `habit.create`, meal -> `meal_plan.add`, subscription -> `subscription.create`, fitness session -> `fitness.create_session`.
+- Check if a slot is free before scheduling -> `calendar.check_availability`. Returns `available: true` or `conflict: true` with colliding events and alternative slots.
 - Day agenda -> `calendar.agenda` (defaults to today).
 - Broad time-range listing -> `calendar.list_items`.
 - Reconcile generated items -> `calendar.sync`.
@@ -27,6 +29,7 @@ Every time-based AdamHUB entity (tasks, habits, events, subscriptions, meal plan
 - Dismiss a reminder -> `calendar.ack_reminder`.
 - `end_at` must be after `start_at`.
 - AdamHUB enforces non-overlap across tasks, meals, events, subscriptions, manual items, and fitness sessions. On an overlap error, propose a new free slot instead of insisting on the same one.
+- To intentionally schedule over an existing item despite collisions, set `force: true` on `calendar.add_item`.
 
 ## Enums
 

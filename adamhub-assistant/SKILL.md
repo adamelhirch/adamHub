@@ -20,7 +20,7 @@ The source of truth is always the live manifest returned by:
 - `GET /api/v1/skill/manifest`
 
 <!-- BEGIN GENERATED: action-count (source: app/skill/actions.py ACTION_CATALOG) -->
-As of `2026-08-18`, the skill surface exposes `104` actions.
+As of `2026-09-13`, the skill surface exposes `116` actions.
 <!-- END GENERATED: action-count -->
 
 ## 1) Runtime contract
@@ -95,11 +95,11 @@ Never perform destructive writes on implicit intent.
 - tasks -> `task.create|task.list|task.update|task.complete`
 - finances -> `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
 - patrimony -> `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
-- groceries -> `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.search|grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
+- groceries -> `supermarket.list_stores|supermarket.search_stores|supermarket.set_favorite_store|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.search|supermarket.get_cart|supermarket.list_carts|supermarket.add_cart_item|supermarket.update_cart_item|supermarket.remove_cart_item|supermarket.clear_cart|supermarket.prepare_cart|supermarket.confirm_cart_sync|supermarket.confirm_pickup|grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
 - pantry -> `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
-- recipes -> `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.delete`
+- recipes -> `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.unconfirm_cooked|recipe.delete`
 - meal planning -> `meal_plan.add|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked|meal_plan.log_cooked`
-- calendar -> `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder`
+- calendar -> `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder|calendar.check_availability`
 - fitness -> `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
 - habits / routine -> `habit.create|habit.list|habit.set_active|habit.log|habit.list_logs`
 - goals -> `goal.create|goal.list|goal.get|goal.update|goal.add_milestone|goal.list_milestones|goal.update_milestone`
@@ -115,18 +115,26 @@ Never perform destructive writes on implicit intent.
 - Do not fabricate store metadata.
 - If the user wants a store-backed grocery or pantry item, run `supermarket.search` first.
 - If no usable result exists, create a generic item instead of forcing a fake store match.
+- For retailer drive carts (`supermarket.get_cart`, `supermarket.add_cart_item`), check that the store connection is active. If disconnected or cookies expired, guide the user to connect via the browser extension.
+- For drive store selection, use `supermarket.search_stores` to discover physical pickup locations and `supermarket.set_favorite_store` to configure preferred drive stores and typology (`quai`, `spot`, `tape`, `pieton`).
+- To prepare a drive cart from grocery list items, invoke `supermarket.prepare_cart` which creates a staged `GroceryToCartJob`.
+- `supermarket.confirm_cart_sync` pushes the staging draft to the remote supermarket cart and marks items as `in_cart = True` (`checked = False`), without restocking pantry.
+- Only `supermarket.confirm_pickup` marks items as `checked = True` and triggers pantry restock via `GroceryPantrySync` (Constitution Principle III).
 
 ### Recipe and pantry rules
 
 - `recipe.add` and `recipe.update` can store custom ingredients and store-backed ingredients.
-- Planning a meal does not consume pantry.
-- `meal_plan.confirm_cooked` and `recipe.confirm_cooked` do consume pantry.
-- `meal_plan.unconfirm_cooked` restores previously consumed pantry stock.
+- Never file recipes as tasks (`task.create`). Recipes must be saved via `recipe.add` with structured ingredients.
+- Deleting a recipe (`recipe.delete`) is irreversible and requires explicit confirmation.
+- Planning a meal (`meal_plan.add`) checks pantry stock and automatically restocks missing deficit ingredients into groceries. It does not decrement pantry.
+- `meal_plan.confirm_cooked` and `recipe.confirm_cooked` do consume pantry stock (clamping at 0, no negative inventory).
+- `meal_plan.unconfirm_cooked` and `recipe.unconfirm_cooked` restore previously consumed pantry stock.
 
 ### Calendar rules
 
 - AdamHUB enforces non-overlap across tasks, meals, events, subscriptions, manual items, and fitness sessions.
-- When a create/update fails with an overlap error, propose a new free slot rather than insisting on the same one.
+- When scheduling conflicts occur, propose at least 2 viable non-overlapping alternative slots (after collision, before collision, or next morning).
+- When the user explicitly requests forced scheduling ("force l'ajout", "malgré le conflit"), pass `force: true` to bypass collision prevention.
 
 ### Fitness rules
 
@@ -276,7 +284,7 @@ After a read:
 - `task.create|task.list|task.update|task.complete|task.delete`
 - `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
 - `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
-- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.list_offering_contexts|supermarket.select_auchan_store|supermarket.search`
+- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.list_offering_contexts|supermarket.select_auchan_store|supermarket.search|supermarket.get_cart|supermarket.list_carts|supermarket.add_cart_item|supermarket.update_cart_item|supermarket.remove_cart_item|supermarket.clear_cart`
 - `grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
 - `video.fetch`
 - `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.unconfirm_cooked|recipe.delete`
@@ -291,3 +299,15 @@ After a read:
 - `note.create|note.list|note.get|note.update|note.delete|note.journal`
 - `dashboard.overview`
 <!-- END GENERATED: action-index -->
+
+## 15) Mobile AI Assistant Endpoints (`/api/v1/assistant`)
+
+In addition to the raw skill execute endpoint, AdamHUB exposes high-level conversational endpoints for mobile copilot integration:
+
+- `POST /api/v1/assistant/chat`: Real-time streaming conversational assistant via Server-Sent Events (SSE). Automatically compiles live system context (profile, upcoming schedule, next meal, urgent tasks, low pantry stock) and executes whitelisted actions via OpenAI tool calling format. Emits `delta`, `tool_call`, `tool_result`, and `done` events.
+- `GET /api/v1/assistant/profile`: Fetch persistent user onboarding profile (dietary preferences, fitness goals, lifestyle notes, AI communication tone).
+- `PUT /api/v1/assistant/profile`: Update persistent user profile.
+- `GET /api/v1/assistant/memories`: List active long-term memories extracted autonomously from conversations.
+- `POST /api/v1/assistant/memories`: Manually add a remembered fact.
+- `DELETE /api/v1/assistant/memories/{id}`: Soft-delete/revoke an extracted memory (`is_active = false`).
+- `POST /api/v1/assistant/session/reset`: Reset ephemeral mobile conversation session while preserving long-term profile and memories.

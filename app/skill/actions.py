@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlmodel import select
@@ -35,6 +36,8 @@ from app.models import (
     SavingsGoal,
     Subscription,
     SubscriptionInterval,
+    SupermarketCart,
+    SupermarketCartItem,
     SupermarketConnection,
     SupermarketSearchCache,
     SupermarketStore,
@@ -114,6 +117,7 @@ from app.services.meal_planning import (
 from app.services.calendar_hub import (
     apply_task_update,
     build_calendar_item_read,
+    detect_calendar_conflicts_and_alternatives,
     list_due_reminders,
     sync_generated_calendar_items,
     validate_habit_schedule_free,
@@ -128,6 +132,7 @@ from app.services.fitness import (
     coerce_fitness_exercises,
 )
 from app.services.grocery_pantry import sync_checked_grocery_item_to_pantry
+from app.services.openfoodfacts import lookup_openfoodfacts_barcode
 from app.services.connections import (
     activate_connection as activate_supermarket_connection,
     delete_connection as delete_supermarket_connection,
@@ -151,6 +156,26 @@ from app.services.scrapers.auchan import (
     select_auchan_store,
 )
 from app.services.video_intake import extract_video_source
+from fastapi import HTTPException
+from app.services import cart, cart_mirror
+from app.schemas.supermarket import (
+    CreateCartJobPayload,
+    SupermarketCartItemRead,
+    SupermarketCartRead,
+    UserStorePreferenceUpdate,
+)
+from app.services.supermarket.cart_job_service import CartJobService
+from app.services.supermarket.store_locator import SupermarketStoreLocator
+
+
+def _run_sync(coro):
+    """Run an async coroutine synchronously, even if already inside a running event loop (e.g. MCP)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, coro).result()
 
 
 def _as_bool(value, default: bool = False) -> bool:
@@ -220,14 +245,21 @@ def _parse_datetime(value, field_name: str) -> datetime | None:
 def _parse_date(value, field_name: str) -> date | None:
     if value is None:
         return None
+    if isinstance(value, datetime):
+        return value.date()
     if isinstance(value, date):
         return value
     if isinstance(value, str):
+        v = value.strip()
+        if "T" in v:
+            v = v.split("T")[0]
+        elif " " in v:
+            v = v.split(" ")[0]
         try:
-            return date.fromisoformat(value)
+            return date.fromisoformat(v)
         except ValueError as exc:
             raise ValueError(f"{field_name} must be in YYYY-MM-DD format") from exc
-    raise ValueError(f"{field_name} must be date")
+    raise ValueError(f"{field_name} must be in YYYY-MM-DD format")
 
 
 _SLOT_DEFAULT_TIME: dict[str, time] = {
@@ -762,7 +794,7 @@ def _handle_supermarket_search(payload, session, *, user, now, user_id):
     max_results = _clamp_int(payload.get("max_results"), default=10, minimum=1, maximum=30)
     promotions_only = _as_bool(payload.get("promotions_only"), default=False)
     try:
-        results = asyncio.run(
+        results = _run_sync(
             fetch_search_results(
                 store=store_enum,
                 queries=[str(query).strip() for query in queries if str(query).strip()],
@@ -793,7 +825,7 @@ def _handle_supermarket_list_offering_contexts(payload, session, *, user, now, u
 
     cookies = load_active_cookies(session, SupermarketStore.AUCHAN) or load_auchan_cookies()
     try:
-        contexts = asyncio.run(
+        contexts = _run_sync(
             list_auchan_offering_contexts(
                 zipcode=zipcode,
                 city=city,
@@ -829,7 +861,7 @@ def _handle_supermarket_select_auchan_store(payload, session, *, user, now, user
         longitude=_opt_float(payload.get("longitude")),
     )
     try:
-        journey = asyncio.run(select_auchan_store(context, cookies=cookies))
+        journey = _run_sync(select_auchan_store(context, cookies=cookies))
     except AuchanAuthError as exc:
         raise ValueError(f"supermarket.select_auchan_store failed: {exc}") from exc
     except RuntimeError as exc:
@@ -860,6 +892,245 @@ def _handle_supermarket_select_auchan_store(payload, session, *, user, now, user
             "updated_at": selection.updated_at.isoformat(),
         }
     }
+
+
+def _serialize_cart(session, cart_obj) -> dict:
+    items = session.exec(
+        select(SupermarketCartItem)
+        .where(SupermarketCartItem.cart_id == cart_obj.id)
+        .order_by(SupermarketCartItem.id)
+    ).all()
+    item_reads = [SupermarketCartItemRead.model_validate(item, from_attributes=True) for item in items]
+    total_amount = sum((it.price_amount or 0.0) * it.quantity for it in item_reads)
+    read_obj = SupermarketCartRead(
+        id=cart_obj.id,
+        store=cart_obj.store,
+        status=cart_obj.status,
+        validated_at=cart_obj.validated_at,
+        external_cart_ref=cart_obj.external_cart_ref,
+        created_at=cart_obj.created_at,
+        updated_at=cart_obj.updated_at,
+        items=item_reads,
+    )
+    dumped = read_obj.model_dump(mode="json")
+    dumped["total_amount"] = round(total_amount, 2)
+    dumped["items_count"] = sum(it.quantity for it in item_reads)
+    return dumped
+
+
+def _handle_supermarket_get_cart(payload, session, *, user, now, user_id):
+    store_key = (payload.get("store") or "intermarche").lower()
+    if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
+        raise ValueError("store must be one of: 'intermarche', 'carrefour', 'leclerc', 'auchan'")
+    store_enum = SupermarketStore(store_key)
+    force_sync = _as_bool(payload.get("force_sync"), default=True)
+    if force_sync:
+        try:
+            cart_obj = _run_sync(cart_mirror.read_cart(session, user_id, store=store_enum))
+        except HTTPException as exc:
+            raise ValueError(f"supermarket.get_cart failed: {exc.detail}") from exc
+        except Exception as exc:
+            raise ValueError(f"supermarket.get_cart failed: {exc}") from exc
+    else:
+        cart_obj = cart.upsert_cart(session, store_enum, user_id=user_id)
+    return _serialize_cart(session, cart_obj)
+
+
+def _handle_supermarket_list_carts(payload, session, *, user, now, user_id):
+    carts = cart.list_carts(session, user_id=user_id)
+    return {"carts": [_serialize_cart(session, c) for c in carts]}
+
+
+def _handle_supermarket_add_cart_item(payload, session, *, user, now, user_id):
+    store_key = (payload.get("store") or "intermarche").lower()
+    if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
+        raise ValueError("store must be one of: 'intermarche', 'carrefour', 'leclerc', 'auchan'")
+    store_enum = SupermarketStore(store_key)
+    cache_id = payload.get("cache_id")
+    if not cache_id:
+        raise ValueError("cache_id is required")
+    try:
+        cache_id = int(cache_id)
+    except (TypeError, ValueError):
+        raise ValueError("cache_id must be an integer")
+    quantity = _clamp_int(payload.get("quantity"), default=1, minimum=1, maximum=99)
+    try:
+        cart_obj = _run_sync(
+            cart_mirror.add_item(session, user_id, cache_id, quantity=quantity, store=store_enum)
+        )
+    except HTTPException as exc:
+        raise ValueError(f"supermarket.add_cart_item failed: {exc.detail}") from exc
+    except Exception as exc:
+        raise ValueError(f"supermarket.add_cart_item failed: {exc}") from exc
+    return _serialize_cart(session, cart_obj)
+
+
+def _handle_supermarket_update_cart_item(payload, session, *, user, now, user_id):
+    store_key = (payload.get("store") or "intermarche").lower()
+    if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
+        raise ValueError("store must be one of: 'intermarche', 'carrefour', 'leclerc', 'auchan'")
+    store_enum = SupermarketStore(store_key)
+    item_id = payload.get("item_id")
+    if not item_id:
+        raise ValueError("item_id is required")
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        raise ValueError("item_id must be an integer")
+    quantity = int(payload.get("quantity", 1))
+    try:
+        if quantity <= 0:
+            cart_obj = _run_sync(
+                cart_mirror.remove_item(session, user_id, item_id, store=store_enum)
+            )
+        else:
+            cart_obj = _run_sync(
+                cart_mirror.update_item_quantity(session, user_id, item_id, quantity=quantity, store=store_enum)
+            )
+    except HTTPException as exc:
+        raise ValueError(f"supermarket.update_cart_item failed: {exc.detail}") from exc
+    except Exception as exc:
+        raise ValueError(f"supermarket.update_cart_item failed: {exc}") from exc
+    return _serialize_cart(session, cart_obj)
+
+
+def _handle_supermarket_remove_cart_item(payload, session, *, user, now, user_id):
+    store_key = (payload.get("store") or "intermarche").lower()
+    if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
+        raise ValueError("store must be one of: 'intermarche', 'carrefour', 'leclerc', 'auchan'")
+    store_enum = SupermarketStore(store_key)
+    item_id = payload.get("item_id")
+    if not item_id:
+        raise ValueError("item_id is required")
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        raise ValueError("item_id must be an integer")
+    try:
+        cart_obj = _run_sync(
+            cart_mirror.remove_item(session, user_id, item_id, store=store_enum)
+        )
+    except HTTPException as exc:
+        raise ValueError(f"supermarket.remove_cart_item failed: {exc.detail}") from exc
+    except Exception as exc:
+        raise ValueError(f"supermarket.remove_cart_item failed: {exc}") from exc
+    return _serialize_cart(session, cart_obj)
+
+
+def _handle_supermarket_clear_cart(payload, session, *, user, now, user_id):
+    store_key = (payload.get("store") or "intermarche").lower()
+    if store_key not in ("intermarche", "carrefour", "leclerc", "auchan"):
+        raise ValueError("store must be one of: 'intermarche', 'carrefour', 'leclerc', 'auchan'")
+    store_enum = SupermarketStore(store_key)
+    try:
+        cart_obj = _run_sync(cart_mirror.clear_cart(session, user_id, store=store_enum))
+    except HTTPException as exc:
+        raise ValueError(f"supermarket.clear_cart failed: {exc.detail}") from exc
+    except Exception as exc:
+        raise ValueError(f"supermarket.clear_cart failed: {exc}") from exc
+    return _serialize_cart(session, cart_obj)
+
+
+def _handle_supermarket_search_stores(payload, session, *, user, now, user_id):
+    store_str = payload.get("store")
+    store = SupermarketStore(store_str.lower()) if store_str else None
+    zipcode = payload.get("zipcode")
+    city = payload.get("city")
+    lat = _opt_float(payload.get("latitude"))
+    lng = _opt_float(payload.get("longitude"))
+
+    try:
+        stores = _run_sync(
+            SupermarketStoreLocator.search_stores(
+                session=session,
+                store=store,
+                zipcode=zipcode,
+                city=city,
+                latitude=lat,
+                longitude=lng,
+            )
+        )
+    except Exception as exc:
+        raise ValueError(f"supermarket.search_stores failed: {exc}") from exc
+
+    return {"stores": [s.model_dump(mode="json") for s in stores]}
+
+
+def _handle_supermarket_set_favorite_store(payload, session, *, user, now, user_id):
+    if user_id is None:
+        raise ValueError("User context required to set favorite supermarket store")
+    store_key = payload.get("store")
+    if not store_key:
+        raise ValueError("store is required")
+    store = SupermarketStore(store_key.lower())
+    external_store_id = payload.get("external_store_id")
+    if not external_store_id:
+        raise ValueError("external_store_id is required")
+
+    pref_payload = UserStorePreferenceUpdate(
+        external_store_id=external_store_id,
+        store_label=payload.get("store_label") or f"{store.value.capitalize()} Drive",
+        location_label=payload.get("location_label"),
+        pickup_type=payload.get("pickup_type") or "quai",
+        optimization_strategy=payload.get("optimization_strategy") or "mdd",
+    )
+    pref = SupermarketStoreLocator.set_user_preference(session, user_id, store, pref_payload)
+    return {
+        "preference": {
+            "store": pref.store.value,
+            "external_store_id": pref.external_store_id,
+            "store_label": pref.store_label,
+            "location_label": pref.location_label,
+            "pickup_type": pref.pickup_type,
+            "optimization_strategy": pref.optimization_strategy,
+            "updated_at": pref.updated_at.isoformat(),
+        }
+    }
+
+
+def _handle_supermarket_prepare_cart(payload, session, *, user, now, user_id):
+    if user_id is None:
+        raise ValueError("User context required to prepare supermarket cart")
+    store_key = payload.get("store") or "leclerc"
+    store = SupermarketStore(store_key.lower())
+    strategy = payload.get("optimization_strategy") or "mdd"
+    item_ids = payload.get("item_ids") or []
+
+    job_payload = CreateCartJobPayload(
+        store=store,
+        external_store_id=payload.get("external_store_id"),
+        optimization_strategy=strategy,
+        item_ids=item_ids,
+    )
+    job = CartJobService.create_draft_job(session, user_id, job_payload)
+    dto = CartJobService.job_to_read_dto(session, job)
+    return {"job": dto.model_dump(mode="json")}
+
+
+def _handle_supermarket_confirm_cart_sync(payload, session, *, user, now, user_id):
+    if user_id is None:
+        raise ValueError("User context required to sync supermarket cart")
+    job_id = payload.get("job_id")
+    if not job_id:
+        raise ValueError("job_id is required")
+    try:
+        res = CartJobService.sync_remote_cart(session, user_id, int(job_id))
+    except HTTPException as exc:
+        raise ValueError(f"supermarket.confirm_cart_sync failed: {exc.detail}") from exc
+    return {"sync": res.model_dump(mode="json")}
+
+
+def _handle_supermarket_confirm_pickup(payload, session, *, user, now, user_id):
+    if user_id is None:
+        raise ValueError("User context required to confirm pickup")
+    job_id = payload.get("job_id")
+    if not job_id:
+        raise ValueError("job_id is required")
+    try:
+        res = CartJobService.confirm_pickup(session, user_id, int(job_id))
+    except HTTPException as exc:
+        raise ValueError(f"supermarket.confirm_pickup failed: {exc.detail}") from exc
+    return {"pickup": res.model_dump(mode="json")}
 
 
 def _opt_float(value):
@@ -1096,6 +1367,14 @@ def _handle_recipe_delete(payload, session, *, user, now, user_id):
 
 
 def _handle_meal_plan_add(payload, session, *, user, now, user_id):
+    if "slot" in payload and isinstance(payload["slot"], str):
+        s = payload["slot"].lower()
+        if "breakfast" in s:
+            payload["slot"] = "breakfast"
+        elif "lunch" in s:
+            payload["slot"] = "lunch"
+        elif "dinner" in s:
+            payload["slot"] = "dinner"
     data = MealPlanCreate.model_validate(payload)
     _get_owned_recipe(session, data.recipe_id, user_id)
 
@@ -1115,9 +1394,17 @@ def _handle_meal_plan_add(payload, session, *, user, now, user_id):
     session.commit()
     session.refresh(plan)
 
+    added_count = 0
+    missing_items = []
     if plan.auto_add_missing_ingredients:
-        sync_meal_plan_to_grocery(session, plan, user_id=user_id)
-    return {"meal_plan": build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json")}
+        added_count, missing_items = sync_meal_plan_to_grocery(session, plan, user_id=user_id)
+    return {
+        "meal_plan": build_meal_plan_read(session, plan, user_id=user_id).model_dump(mode="json"),
+        "groceries_added_count": added_count,
+        "missing_ingredients": [
+            m.model_dump(mode="json") if hasattr(m, "model_dump") else m for m in missing_items
+        ],
+    }
 
 
 def _handle_meal_plan_list(payload, session, *, user, now, user_id):
@@ -1267,10 +1554,13 @@ def _get_owned_calendar_item(session, user_id: int, item_id: int) -> CalendarIte
 
 
 def _handle_calendar_add_item(payload, session, *, user, now, user_id):
-    data = CalendarItemCreate.model_validate(payload)
+    clean_payload = {k: v for k, v in payload.items() if k != "force"}
+    data = CalendarItemCreate.model_validate(clean_payload)
     if data.end_at <= data.start_at:
         raise ValueError("end_at must be after start_at")
-    validate_calendar_slot_free(session, data.start_at, data.end_at, user_id=user_id)
+    force = _as_bool(payload.get("force"), default=False)
+    if not force:
+        validate_calendar_slot_free(session, data.start_at, data.end_at, user_id=user_id)
     item = CalendarItem(
         **data.model_dump(),
         source=CalendarSource.MANUAL,
@@ -1280,7 +1570,46 @@ def _handle_calendar_add_item(payload, session, *, user, now, user_id):
     session.add(item)
     session.commit()
     session.refresh(item)
-    return {"item": build_calendar_item_read(item).model_dump(mode="json", by_alias=True)}
+    result = {"item": build_calendar_item_read(item).model_dump(mode="json", by_alias=True)}
+    if force:
+        result["forced"] = True
+    return result
+
+
+def _handle_calendar_check_availability(payload, session, *, user, now, user_id):
+    start_at_raw = payload.get("start_at")
+    end_at_raw = payload.get("end_at")
+    duration_minutes = _clamp_int(payload.get("duration_minutes"), default=60, minimum=5, maximum=1440)
+
+    if start_at_raw and end_at_raw:
+        start_at = _parse_datetime(start_at_raw, "start_at")
+        end_at = _parse_datetime(end_at_raw, "end_at")
+    elif start_at_raw:
+        start_at = _parse_datetime(start_at_raw, "start_at")
+        end_at = start_at + timedelta(minutes=duration_minutes)
+    else:
+        target_date_raw = payload.get("target_date")
+        if target_date_raw:
+            target_date = _parse_date(target_date_raw, "target_date")
+        else:
+            target_date = now.date()
+        start_at = datetime.combine(target_date, time(9, 0)).replace(tzinfo=timezone.utc)
+        end_at = start_at + timedelta(minutes=duration_minutes)
+
+    result = detect_calendar_conflicts_and_alternatives(
+        session,
+        start_at,
+        end_at,
+        user_id=user_id,
+        max_suggestions=4,
+    )
+    return {
+        "available": not result["conflict"],
+        "requested_slot": {"start_at": start_at.isoformat(), "end_at": end_at.isoformat()},
+        "conflict": result["conflict"],
+        "colliding_items": result["colliding_items"],
+        "suggested_slots": result["suggested_slots"],
+    }
 
 
 def _handle_calendar_list_items(payload, session, *, user, now, user_id):
@@ -1998,6 +2327,14 @@ def _handle_pantry_overview(payload, session, *, user, now, user_id):
     return {"overview": overview.model_dump(mode="json")}
 
 
+def _handle_pantry_lookup_barcode(payload, session, *, user, now, user_id):
+    barcode = str(payload.get("barcode") or "").strip()
+    if not barcode:
+        raise ValueError("barcode is required")
+    draft = _run_sync(lookup_openfoodfacts_barcode(barcode, session))
+    return {"product": draft.model_dump(mode="json")}
+
+
 def _handle_note_create(payload, session, *, user, now, user_id):
     data = NoteCreate.model_validate(payload)
     note = create(session, Note(**data.model_dump(), user_id=user_id))
@@ -2111,6 +2448,19 @@ ACTION_CATALOG = [
     {"action": "supermarket.list_offering_contexts", "description": "List the Auchan stores selectable for an address. Each entry carries `seller_id`, `store_reference`, `channel`, `name`, `address` and `distance` — feed them to `supermarket.select_auchan_store`.", "input_schema": {"zipcode": "string", "city": "string", "latitude": "float", "longitude": "float", "country": "string?"}, "handler": _handle_supermarket_list_offering_contexts},
     {"action": "supermarket.select_auchan_store", "description": "Select the Auchan store used for search (POST /journey/update + persist). Auchan prices are only server-rendered once a store is selected; searching without one returns a 400 'sélectionnez un magasin'.", "input_schema": {"seller_id": "string", "store_reference": "string", "store_label": "string", "channel": "string?", "location_label": "string?", "zipcode": "string?", "city": "string?", "country": "string?", "latitude": "float?", "longitude": "float?"}, "handler": _handle_supermarket_select_auchan_store},
     {"action": "supermarket.search", "description": "Search a supermarket and cache the normalized results. `store` accepts 'intermarche' (JSON API), 'carrefour' (JSON endpoint), 'leclerc' (JSON API + cookies) or 'auchan' (server-rendered HTML; works without login but requires a selected store via `supermarket.select_auchan_store`).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "queries": "string[]", "max_results": "int?", "promotions_only": "bool?"}, "handler": _handle_supermarket_search},
+    # ── Supermarket Carts (Multi-store live mirror) ─────────────────────────
+    {"action": "supermarket.get_cart", "description": "Retrieve the current contents, item quantities, prices, and status of a supermarket cart for a given store.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "force_sync": "bool?"}, "handler": _handle_supermarket_get_cart},
+    {"action": "supermarket.list_carts", "description": "List all active supermarket shopping carts across all supported retailers for the user.", "input_schema": {}, "handler": _handle_supermarket_list_carts},
+    {"action": "supermarket.add_cart_item", "description": "Add a product from authentic supermarket search results (via cache_id) to the store's live cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "cache_id": "int", "quantity": "int?"}, "handler": _handle_supermarket_add_cart_item},
+    {"action": "supermarket.update_cart_item", "description": "Update the quantity of an existing line item in a store's cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "item_id": "int", "quantity": "int"}, "handler": _handle_supermarket_update_cart_item},
+    {"action": "supermarket.remove_cart_item", "description": "Remove an individual product line from a supermarket cart.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "item_id": "int"}, "handler": _handle_supermarket_remove_cart_item},
+    {"action": "supermarket.clear_cart", "description": "Empty the user's shopping cart for a specific supermarket retailer.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan"}, "handler": _handle_supermarket_clear_cart},
+    # ── Supermarket Drive (Store Selection, Local Staging & Sync) ───────────
+    {"action": "supermarket.search_stores", "description": "Search physical supermarket drive stores by postal code or city across Leclerc, Carrefour, Intermarché, and Auchan.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "zipcode": "string?", "city": "string?", "latitude": "float?", "longitude": "float?"}, "handler": _handle_supermarket_search_stores},
+    {"action": "supermarket.set_favorite_store", "description": "Configure the user's preferred drive store, pickup typology (quai, spot, tape, pieton), and default optimization strategy (mdd, budget, bio).", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan", "external_store_id": "string", "store_label": "string", "location_label": "string?", "pickup_type": "quai|spot|tape|pieton?", "optimization_strategy": "mdd|budget|bio?"}, "handler": _handle_supermarket_set_favorite_store},
+    {"action": "supermarket.prepare_cart", "description": "Generate a staging draft drive shopping cart (GroceryToCartJob) resolving unchecked grocery items to real supermarket SKUs according to optimization strategy.", "input_schema": {"store": "intermarche|carrefour|leclerc|auchan?", "optimization_strategy": "mdd|budget|bio?", "external_store_id": "string?", "item_ids": "int[]?"}, "handler": _handle_supermarket_prepare_cart},
+    {"action": "supermarket.confirm_cart_sync", "description": "Push the staging cart to the retailer drive cart, marking items as in_cart=True without restocking pantry (Principle III).", "input_schema": {"job_id": "int"}, "handler": _handle_supermarket_confirm_cart_sync},
+    {"action": "supermarket.confirm_pickup", "description": "Confirm physical drive pickup of groceries: marks grocery items as checked=True and restocks pantry inventory via GroceryPantrySync (Principle III).", "input_schema": {"job_id": "int"}, "handler": _handle_supermarket_confirm_pickup},
     {"action": "grocery.add_item", "description": "Add an item to grocery list", "input_schema": {"name": "string", "quantity": "float?", "unit": "string?", "category": "string?", "image_url": "string?", "store_label": "string?", "external_id": "string?", "packaging": "string?", "price_text": "string?", "product_url": "string?", "priority": "int?", "note": "string?"}, "handler": _handle_grocery_add_item},
     {"action": "grocery.list_items", "description": "List grocery items", "input_schema": {"checked": "bool?", "limit": "int?"}, "handler": _handle_grocery_list_items},
     {"action": "grocery.update_item", "description": "Update a grocery item", "input_schema": {"item_id": "int", "quantity": "float?", "unit": "string?", "category": "string?", "checked": "bool?", "priority": "int?", "note": "string?"}, "handler": _handle_grocery_update_item},
@@ -2124,15 +2474,16 @@ ACTION_CATALOG = [
     {"action": "recipe.confirm_cooked", "description": "Confirm a recipe was cooked and consume pantry ingredients (idempotent; undo with recipe.unconfirm_cooked)", "input_schema": {"recipe_id": "int", "servings_override": "int?", "note": "string?"}, "handler": _handle_recipe_confirm_cooked},
     {"action": "recipe.unconfirm_cooked", "description": "Undo a recipe-level cooked confirmation and restore pantry stock", "input_schema": {"recipe_id": "int"}, "handler": _handle_recipe_unconfirm_cooked},
     {"action": "recipe.delete", "description": "Delete a recipe and its dependent recipe ingredients / meal plans", "input_schema": {"recipe_id": "int"}, "handler": _handle_recipe_delete},
-    {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_add},
+    {"action": "meal_plan.add", "description": "Plan a recipe at a specific datetime", "input_schema": {"planned_at": "datetime?", "planned_for": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "recipe_id": "int", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_add},
     {"action": "meal_plan.log_cooked", "description": "Log a recipe as cooked without pre-planning", "input_schema": {"recipe_id": "int", "cooked_at": "datetime?", "servings_override": "int?", "note": "string?"}, "handler": _handle_meal_plan_log_cooked},
-    {"action": "meal_plan.list", "description": "List meal plans", "input_schema": {"date_from": "YYYY-MM-DD?", "date_to": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner? (legacy)", "limit": "int?"}, "handler": _handle_meal_plan_list},
-    {"action": "meal_plan.update", "description": "Update one meal plan", "input_schema": {"meal_plan_id": "int", "planned_at": "datetime?", "planned_for": "YYYY-MM-DD? (legacy)", "slot": "breakfast|lunch|dinner? (legacy)", "recipe_id": "int?", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_update},
+    {"action": "meal_plan.list", "description": "List meal plans", "input_schema": {"date_from": "YYYY-MM-DD?", "date_to": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "limit": "int?"}, "handler": _handle_meal_plan_list},
+    {"action": "meal_plan.update", "description": "Update one meal plan", "input_schema": {"meal_plan_id": "int", "planned_at": "datetime?", "planned_for": "YYYY-MM-DD?", "slot": "breakfast|lunch|dinner?", "recipe_id": "int?", "servings_override": "int?", "note": "string?", "auto_add_missing_ingredients": "bool?"}, "handler": _handle_meal_plan_update},
     {"action": "meal_plan.delete", "description": "Delete one meal plan", "input_schema": {"meal_plan_id": "int"}, "handler": _handle_meal_plan_delete},
     {"action": "meal_plan.sync_groceries", "description": "Sync missing ingredients to grocery list for one meal plan", "input_schema": {"meal_plan_id": "int"}, "handler": _handle_meal_plan_sync_groceries},
     {"action": "meal_plan.confirm_cooked", "description": "Confirm meal was cooked and consume pantry ingredients", "input_schema": {"meal_plan_id": "int", "note": "string?"}, "handler": _handle_meal_plan_confirm_cooked},
     {"action": "meal_plan.unconfirm_cooked", "description": "Undo cooked confirmation and restore pantry", "input_schema": {"meal_plan_id": "int"}, "handler": _handle_meal_plan_unconfirm_cooked},
-    {"action": "calendar.add_item", "description": "Create a manual calendar block only when the user wants a generic time slot and not a real task, habit, event, meal, subscription, or fitness session.", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}, "handler": _handle_calendar_add_item},
+    {"action": "calendar.add_item", "description": "Create a manual calendar block only when the user wants a generic time slot and not a real task, habit, event, meal, subscription, or fitness session.", "input_schema": {"title": "string", "description": "string?", "start_at": "datetime", "end_at": "datetime", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "force": "bool?", "metadata": "object?"}, "handler": _handle_calendar_add_item},
+    {"action": "calendar.check_availability", "description": "Check if a calendar slot is free or find open non-conflicting slots", "input_schema": {"start_at": "datetime?", "end_at": "datetime?", "target_date": "date?", "duration_minutes": "int?"}, "handler": _handle_calendar_check_availability},
     {"action": "calendar.list_items", "description": "List calendar items", "input_schema": {"from_at": "datetime?", "to_at": "datetime?", "category": "general|task|event|subscription|meal?", "source": "manual|task|habit|event|subscription|meal_plan|fitness_session?", "include_completed": "bool?", "generated_only": "bool?", "limit": "int?"}, "handler": _handle_calendar_list_items},
     {"action": "calendar.update_item", "description": "Update calendar item", "input_schema": {"item_id": "int", "title": "string?", "description": "string?", "start_at": "datetime?", "end_at": "datetime?", "all_day": "bool?", "category": "general|task|event|subscription|meal?", "completed": "bool?", "notification_enabled": "bool?", "reminder_offsets_min": "int[]?", "metadata": "object?"}, "handler": _handle_calendar_update_item},
     {"action": "calendar.delete_item", "description": "Delete calendar item", "input_schema": {"item_id": "int"}, "handler": _handle_calendar_delete_item},
@@ -2180,6 +2531,7 @@ ACTION_CATALOG = [
     {"action": "pantry.consume_item", "description": "Decrease pantry item quantity", "input_schema": {"item_id": "int", "amount": "float"}, "handler": _handle_pantry_consume_item},
     {"action": "pantry.delete_item", "description": "Delete pantry item", "input_schema": {"item_id": "int"}, "handler": _handle_pantry_delete_item},
     {"action": "pantry.overview", "description": "Get pantry overview", "input_schema": {"days": "int?"}, "handler": _handle_pantry_overview},
+    {"action": "pantry.lookup_barcode", "description": "Lookup product details by barcode via Open Food Facts", "input_schema": {"barcode": "string"}, "handler": _handle_pantry_lookup_barcode},
     {"action": "note.create", "description": "Create note", "input_schema": {"title": "string", "content": "string", "kind": "note|journal|idea?", "tags": "string[]?", "pinned": "bool?", "mood": "1..10?"}, "handler": _handle_note_create},
     {"action": "note.list", "description": "List notes", "input_schema": {"kind": "note|journal|idea?", "tag": "string?", "q": "string?", "pinned": "bool?", "limit": "int?"}, "handler": _handle_note_list},
     {"action": "note.get", "description": "Get one note", "input_schema": {"note_id": "int"}, "handler": _handle_note_get},
