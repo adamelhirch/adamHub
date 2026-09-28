@@ -20,7 +20,7 @@ The source of truth is always the live manifest returned by:
 - `GET /api/v1/skill/manifest`
 
 <!-- BEGIN GENERATED: action-count (source: app/skill/actions.py ACTION_CATALOG) -->
-As of `2026-09-13`, the skill surface exposes `116` actions.
+As of `2026-08-18`, the skill surface exposes `46` actions.
 <!-- END GENERATED: action-count -->
 
 ## 1) Runtime contract
@@ -281,23 +281,11 @@ After a read:
 ## 14) Quick action index
 
 <!-- BEGIN GENERATED: action-index (source: app/skill/actions.py ACTION_CATALOG) -->
-- `task.create|task.list|task.update|task.complete|task.delete`
-- `finance.add_transaction|finance.list_transactions|finance.create_budget|finance.list_budgets|finance.month_summary`
-- `fitness.overview|fitness.list_sessions|fitness.create_session|fitness.update_session|fitness.complete_session|fitness.delete_session|fitness.list_measurements|fitness.add_measurement|fitness.update_measurement|fitness.delete_measurement`
-- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.list_offering_contexts|supermarket.select_auchan_store|supermarket.search|supermarket.get_cart|supermarket.list_carts|supermarket.add_cart_item|supermarket.update_cart_item|supermarket.remove_cart_item|supermarket.clear_cart`
+- `supermarket.list_stores|supermarket.list_connections|supermarket.import_connection|supermarket.activate_connection|supermarket.delete_connection|supermarket.list_offering_contexts|supermarket.select_auchan_store|supermarket.search|supermarket.get_cart|supermarket.list_carts|supermarket.add_cart_item|supermarket.update_cart_item|supermarket.remove_cart_item|supermarket.clear_cart|supermarket.search_stores|supermarket.set_favorite_store|supermarket.prepare_cart|supermarket.confirm_cart_sync|supermarket.confirm_pickup`
 - `grocery.add_item|grocery.list_items|grocery.update_item|grocery.check_item|grocery.delete_item`
-- `video.fetch`
 - `recipe.add|recipe.list|recipe.get|recipe.update|recipe.confirm_cooked|recipe.unconfirm_cooked|recipe.delete`
 - `meal_plan.add|meal_plan.log_cooked|meal_plan.list|meal_plan.update|meal_plan.delete|meal_plan.sync_groceries|meal_plan.confirm_cooked|meal_plan.unconfirm_cooked`
-- `calendar.add_item|calendar.list_items|calendar.update_item|calendar.delete_item|calendar.agenda|calendar.sync|calendar.due_reminders|calendar.ack_reminder`
-- `habit.create|habit.list|habit.update|habit.set_active|habit.log|habit.list_logs`
-- `goal.create|goal.list|goal.get|goal.update|goal.add_milestone|goal.list_milestones|goal.update_milestone`
-- `event.create|event.list|event.upcoming|event.get|event.update|event.delete`
-- `subscription.create|subscription.list|subscription.get|subscription.update|subscription.upcoming|subscription.projection`
-- `patrimony.overview|patrimony.list_accounts|patrimony.add_account|patrimony.update_account|patrimony.delete_account|patrimony.list_goals|patrimony.add_goal|patrimony.update_goal|patrimony.delete_goal`
-- `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview`
-- `note.create|note.list|note.get|note.update|note.delete|note.journal`
-- `dashboard.overview`
+- `pantry.add_item|pantry.list_items|pantry.update_item|pantry.consume_item|pantry.delete_item|pantry.overview|pantry.lookup_barcode`
 <!-- END GENERATED: action-index -->
 
 ## 15) Mobile AI Assistant Endpoints (`/api/v1/assistant`)

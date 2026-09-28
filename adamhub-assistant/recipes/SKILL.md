@@ -5,7 +5,6 @@ Use for recipe storage, transcript-to-recipe drafting, and pantry-aware cooking 
 ## Actions
 
 <!-- BEGIN GENERATED: action-list (source: app/skill/actions.py ACTION_CATALOG) -->
-- `video.fetch`
 - `recipe.add`
 - `recipe.list`
 - `recipe.get`

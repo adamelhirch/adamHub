@@ -57,40 +57,19 @@ ACTION_COUNT_DATE = "2026-08-18"
 # closest domain folder instead of getting an empty directory of its own.
 # Prefixes with no owning domain folder are reported as "unassigned" below.
 DOMAIN_ACTION_PREFIXES = {
-    "calendar": ["calendar"],
-    "events": ["event"],
-    "finance": ["finance"],
-    "fitness": ["fitness"],
-    "goals": ["goal"],
     "groceries": ["supermarket", "grocery"],
-    "habits": ["habit"],
-    "notes": ["note"],
     "pantry": ["pantry"],
-    "patrimony": ["patrimony"],
-    "recipes": ["recipe", "video", "meal_plan"],
-    "subscriptions": ["subscription"],
-    "tasks": ["task", "dashboard"],
+    "recipes": ["recipe", "meal_plan"],
 }
 
 # Section groupings (title, owning prefixes) for the full action catalog
 # reference at adamhub-assistant/references/action-catalog.md.
 CATALOG_SECTIONS = [
-    ("Dashboard", ["dashboard"]),
-    ("Tasks", ["task"]),
-    ("Finance", ["finance"]),
-    ("Fitness", ["fitness"]),
-    ("Groceries and supermarket", ["supermarket", "grocery"]),
-    ("Video intake", ["video"]),
+    ("Supermarket and drive", ["supermarket"]),
+    ("Groceries", ["grocery"]),
     ("Recipes", ["recipe"]),
     ("Meal plans", ["meal_plan"]),
-    ("Calendar", ["calendar"]),
-    ("Habits", ["habit"]),
-    ("Goals", ["goal"]),
-    ("Events", ["event"]),
-    ("Subscriptions", ["subscription"]),
-    ("Patrimony", ["patrimony"]),
     ("Pantry", ["pantry"]),
-    ("Notes", ["note"]),
 ]
 
 

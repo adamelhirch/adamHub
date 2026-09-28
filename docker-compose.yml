@@ -22,9 +22,6 @@ services:
   adamhub-api:
     build:
       context: .
-      args:
-        VITE_API_URL: ${VITE_API_URL:-/api/v1}
-        VITE_API_KEY: ${VITE_API_KEY:-}
     container_name: adamhub-api
     depends_on:
       postgres:
@@ -36,8 +33,6 @@ services:
       # minimal .env (no ADAMHUB_ENV, empty JWT/cookie keys, change-me API key).
       - ADAMHUB_ENV=development
       - ADAMHUB_DB_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    volumes:
-      - ./data:/app/data:ro
     ports:
       - "${ADAMHUB_PORT:-8000}:8000"
     restart: unless-stopped

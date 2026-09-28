@@ -43,9 +43,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint",
-    "test:e2e": "../scripts/run_mobile_e2e.sh",
-    "test:e2e:headed": "../scripts/run_mobile_e2e.sh --headed"
+    "lint": "expo lint"
   },
   "private": true
 }
