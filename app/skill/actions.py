@@ -49,6 +49,7 @@ from app.services.meal_planning import (
     build_recipe_read,
     resolve_recipe_ingredient_fields,
     sync_meal_plan_to_grocery,
+    sync_recipe_merise_associations,
     validate_meal_plan_slot_free,
     visible_meal_plans,
 )
@@ -798,6 +799,7 @@ def _handle_recipe_add(payload, session, *, user, now, user_id):
     for ing in data.ingredients:
         ingredient = RecipeIngredient(recipe_id=recipe.id, **resolve_recipe_ingredient_fields(session, ing))
         session.add(ingredient)
+    sync_recipe_merise_associations(session, recipe)
     session.commit()
 
     recipe = session.get(Recipe, recipe.id)
@@ -832,6 +834,8 @@ def _handle_recipe_update(payload, session, *, user, now, user_id):
         session.add(recipe)
         session.commit()
 
+    sync_recipe_merise_associations(session, recipe)
+    session.commit()
     session.refresh(recipe)
     return {"recipe": build_recipe_read(session, recipe).model_dump(mode="json")}
 

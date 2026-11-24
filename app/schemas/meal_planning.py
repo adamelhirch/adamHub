@@ -13,6 +13,7 @@ class RecipeIngredientIn(BaseModel):
     unit: str = "item"
     note: str | None = None
     category: str | None = None
+    ingredient_id: int | None = None
     cache_id: int | None = Field(
         default=None,
         description=(
@@ -26,6 +27,7 @@ class RecipeIngredientIn(BaseModel):
 class RecipeIngredientRead(BaseModel):
     id: int
     recipe_id: int
+    ingredient_id: int | None = None
     name: str
     quantity: float
     unit: str

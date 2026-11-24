@@ -14,6 +14,20 @@ from app.schemas.assistant import (
     UserProfileRead,
     UserProfileUpdate,
 )
+from app.schemas.canonical import (
+    DietaryPreferenceCreate,
+    DietaryPreferenceRead,
+    IngredientCreate,
+    IngredientRead,
+    IngredientUpdate,
+    TagCreate,
+    TagRead,
+    UnitOfMeasureCreate,
+    UnitOfMeasureRead,
+    UserDietaryPreferencesSet,
+    UtensilCreate,
+    UtensilRead,
+)
 from app.schemas.groceries import GroceryItemCreate, GroceryItemRead, GroceryItemUpdate
 from app.schemas.meal_planning import (
     AlternativeSlot,
@@ -152,4 +166,16 @@ __all__ = [
     "SyncJobResponse",
     "ConfirmPickupResponse",
     "UpdateMatchedItemPayload",
+    "UnitOfMeasureCreate",
+    "UnitOfMeasureRead",
+    "IngredientCreate",
+    "IngredientUpdate",
+    "IngredientRead",
+    "UtensilCreate",
+    "UtensilRead",
+    "TagCreate",
+    "TagRead",
+    "DietaryPreferenceCreate",
+    "DietaryPreferenceRead",
+    "UserDietaryPreferencesSet",
 ]

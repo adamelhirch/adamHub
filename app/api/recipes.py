@@ -27,7 +27,11 @@ from app.services.cook import (
     confirm_recipe_cooked as confirm_recipe_cooked_service,
     unconfirm_recipe_cooked as unconfirm_recipe_cooked_service,
 )
-from app.services.meal_planning import build_recipe_read, resolve_recipe_ingredient_fields
+from app.services.meal_planning import (
+    build_recipe_read,
+    resolve_recipe_ingredient_fields,
+    sync_recipe_merise_associations,
+)
 from app.services.units import normalize_name
 
 router = APIRouter(prefix="/recipes", tags=["recipes"])
@@ -64,6 +68,7 @@ def create_recipe(payload: RecipeCreate, session: SessionDep, user: CurrentOrOwn
         row = RecipeIngredient(recipe_id=recipe.id, **_ingredient_fields(session, ingredient))
         session.add(row)
 
+    sync_recipe_merise_associations(session, recipe)
     recipe.updated_at = datetime.now(timezone.utc)
     session.add(recipe)
     session.commit()
@@ -102,6 +107,8 @@ def update_recipe(
         session.add(recipe)
         session.commit()
 
+    sync_recipe_merise_associations(session, recipe)
+    session.commit()
     session.refresh(recipe)
     return build_recipe_read(session, recipe)
 

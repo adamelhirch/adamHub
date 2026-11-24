@@ -81,13 +81,66 @@ class UserMemory(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class DietaryPreference(SQLModel, table=True):
+    """Régime ou restriction alimentaire (ex: Végétarien, Sans gluten)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class UserDietaryPreference(SQLModel, table=True):
+    """Association N-N entre Utilisateur et Régime Alimentaire (Adopter_Regime)."""
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "dietary_preference_id", name="uq_user_dietary_preference"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True, ondelete="CASCADE")
+    dietary_preference_id: int = Field(
+        foreign_key="dietarypreference.id", index=True, ondelete="CASCADE"
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 # ---------------------------------------------------------------------------
-# 2. Courses (Groceries)
+# 2. Référentiel Ingrédients & Unités (Canonique)
+# ---------------------------------------------------------------------------
+
+class UnitOfMeasure(SQLModel, table=True):
+    """Unité de mesure universelle (g, kg, ml, l, piece, cuillère, etc.)."""
+
+    code: str = Field(primary_key=True, max_length=20)
+    label: str = Field(max_length=50)
+    magnitude_type: str = Field(default="mass", max_length=30)
+    conversion_factor_to_base: float = Field(default=1.0)
+
+
+class Ingredient(SQLModel, table=True):
+    """Ingrédient canonique centralisé (référentiel unique)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True, max_length=150)
+    category: str | None = Field(default=None, index=True, max_length=50)
+    default_unit_code: str | None = Field(
+        default=None, foreign_key="unitofmeasure.code", ondelete="SET NULL"
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# 3. Courses (Groceries)
 # ---------------------------------------------------------------------------
 
 class GroceryItem(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    ingredient_id: int | None = Field(
+        default=None, foreign_key="ingredient.id", ondelete="SET NULL", index=True
+    )
     name: str
     quantity: float = 1
     unit: str = "item"
@@ -139,9 +192,63 @@ class Recipe(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class RecipeStep(SQLModel, table=True):
+    """Étape ordonnée d'une recette (Détailler)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipe_id: int = Field(foreign_key="recipe.id", index=True, ondelete="CASCADE")
+    order: int = Field(default=1)
+    instruction: str
+    duration_minutes: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Utensil(SQLModel, table=True):
+    """Ustensile ou équipement de cuisine."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True, max_length=100)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class RecipeUtensil(SQLModel, table=True):
+    """Association N-N entre Recette et Ustensile (Necessiter)."""
+
+    __table_args__ = (
+        UniqueConstraint("recipe_id", "utensil_id", name="uq_recipe_utensil"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipe_id: int = Field(foreign_key="recipe.id", index=True, ondelete="CASCADE")
+    utensil_id: int = Field(foreign_key="utensil.id", index=True, ondelete="CASCADE")
+
+
+class Tag(SQLModel, table=True):
+    """Étiquette thématique pour classifier les recettes."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    label: str = Field(index=True, unique=True, max_length=50)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class RecipeTag(SQLModel, table=True):
+    """Association N-N entre Recette et Tag (Classifier)."""
+
+    __table_args__ = (
+        UniqueConstraint("recipe_id", "tag_id", name="uq_recipe_tag"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    recipe_id: int = Field(foreign_key="recipe.id", index=True, ondelete="CASCADE")
+    tag_id: int = Field(foreign_key="tag.id", index=True, ondelete="CASCADE")
+
+
 class RecipeIngredient(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     recipe_id: int = Field(foreign_key="recipe.id", index=True)
+    ingredient_id: int | None = Field(
+        default=None, foreign_key="ingredient.id", ondelete="SET NULL", index=True
+    )
     name: str
     quantity: float = 1
     unit: str = "item"
@@ -188,6 +295,9 @@ class MealPlanCookConfirmation(SQLModel, table=True):
 class PantryItem(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    ingredient_id: int | None = Field(
+        default=None, foreign_key="ingredient.id", ondelete="SET NULL", index=True
+    )
     name: str
     quantity: float = 0
     unit: str = "item"
@@ -225,6 +335,9 @@ class OpenFoodFactsCache(SQLModel, table=True):
 
 class SupermarketProduct(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    ingredient_id: int | None = Field(
+        default=None, foreign_key="ingredient.id", ondelete="SET NULL", index=True
+    )
     name: str
     packaging: str | None = None
     price: str | None = None

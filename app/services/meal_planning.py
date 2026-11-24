@@ -7,12 +7,18 @@ from sqlmodel import Session, select
 
 from app.models import (
     GroceryItem,
+    Ingredient,
     MealPlan,
     MealPlanCookConfirmation,
     MealSlot,
     PantryItem,
     Recipe,
     RecipeIngredient,
+    RecipeStep,
+    RecipeTag,
+    RecipeUtensil,
+    Tag,
+    Utensil,
 )
 from app.schemas import MealPlanRead, MissingIngredientRead, RecipeIngredientIn, RecipeRead
 from app.services.cook import (
@@ -329,7 +335,17 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     canon_name, canon_unit, canon_note = canonical_ingredient(
         ingredient_in.name, ingredient_in.unit, ingredient_in.note
     )
+
+    ingredient_id = getattr(ingredient_in, "ingredient_id", None)
+    if ingredient_id is None:
+        matched_ing = session.exec(
+            select(Ingredient).where(Ingredient.name.ilike(canon_name))
+        ).first()
+        if matched_ing:
+            ingredient_id = matched_ing.id
+
     fields: dict = {
+        "ingredient_id": ingredient_id,
         "name": canon_name,
         "quantity": ingredient_in.quantity,
         "unit": canon_unit,
@@ -365,6 +381,74 @@ def resolve_recipe_ingredient_fields(session: Session, ingredient_in) -> dict:
     return fields
 
 
+def sync_recipe_merise_associations(session: Session, recipe: Recipe) -> None:
+    """Synchronize relational Merise tables (RecipeStep, RecipeUtensil, RecipeTag)
+
+    from Recipe attributes (steps, utensils, tags).
+    """
+    # 1. Échelons ordonnés (RecipeStep)
+    existing_steps = session.exec(
+        select(RecipeStep).where(RecipeStep.recipe_id == recipe.id)
+    ).all()
+    for s in existing_steps:
+        session.delete(s)
+
+    steps_list = recipe.steps or []
+    if not steps_list and recipe.instructions:
+        steps_list = [line.strip() for line in recipe.instructions.split("\n") if line.strip()]
+
+    for order_idx, instruction in enumerate(steps_list, start=1):
+        step_row = RecipeStep(
+            recipe_id=recipe.id,
+            order=order_idx,
+            instruction=instruction,
+            duration_minutes=0,
+        )
+        session.add(step_row)
+
+    # 2. Ustensiles (RecipeUtensil)
+    existing_utensils = session.exec(
+        select(RecipeUtensil).where(RecipeUtensil.recipe_id == recipe.id)
+    ).all()
+    for u in existing_utensils:
+        session.delete(u)
+
+    for utensil_name in (recipe.utensils or []):
+        clean_name = utensil_name.strip()
+        if not clean_name:
+            continue
+        utensil = session.exec(
+            select(Utensil).where(Utensil.name.ilike(clean_name))
+        ).first()
+        if not utensil:
+            utensil = Utensil(name=clean_name)
+            session.add(utensil)
+            session.flush()
+        link = RecipeUtensil(recipe_id=recipe.id, utensil_id=utensil.id)
+        session.add(link)
+
+    # 3. Tags (RecipeTag)
+    existing_tags = session.exec(
+        select(RecipeTag).where(RecipeTag.recipe_id == recipe.id)
+    ).all()
+    for t in existing_tags:
+        session.delete(t)
+
+    for tag_label in (recipe.tags or []):
+        clean_label = tag_label.strip()
+        if not clean_label:
+            continue
+        tag = session.exec(
+            select(Tag).where(Tag.label.ilike(clean_label))
+        ).first()
+        if not tag:
+            tag = Tag(label=clean_label)
+            session.add(tag)
+            session.flush()
+        link = RecipeTag(recipe_id=recipe.id, tag_id=tag.id)
+        session.add(link)
+
+
 def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
     ingredients = session.exec(
         select(RecipeIngredient).where(RecipeIngredient.recipe_id == recipe.id)
@@ -390,6 +474,7 @@ def build_recipe_read(session: Session, recipe: Recipe) -> RecipeRead:
             {
                 "id": ing.id,
                 "recipe_id": ing.recipe_id,
+                "ingredient_id": ing.ingredient_id,
                 "name": ing.name,
                 "quantity": ing.quantity,
                 "unit": ing.unit,

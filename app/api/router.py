@@ -8,6 +8,7 @@ from app.api.meal_plans import router as meal_plans_router
 from app.api.pantry import router as pantry_router
 from app.api.supermarket import router as supermarket_router
 from app.api.skill import router as skill_router
+from app.api.canonical import router as canonical_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -18,3 +19,4 @@ api_router.include_router(meal_plans_router)
 api_router.include_router(pantry_router)
 api_router.include_router(supermarket_router)
 api_router.include_router(skill_router)
+api_router.include_router(canonical_router)
